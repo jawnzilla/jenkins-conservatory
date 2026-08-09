@@ -3,6 +3,11 @@ import './style.css';
 
 const SAVE_KEY = 'jenkins-conservatory-save-v1';
 const ZONE_ORDER = ['store', 'forest', 'zoo'];
+const FLOWER_GROW_MS = 5 * 60 * 1000;
+const FLOWER_LIFE_MS = 2 * 60 * 60 * 1000;
+const PLAYER_RADIUS = 0.46;
+const GRAVITY = 15;
+const JUMP_VELOCITY = 5.4;
 
 const ZONES = {
   store: {
@@ -65,6 +70,9 @@ const SPECIES = {
   butterfly: { label: 'Painted butterfly', type: 'bug', sigil: '✦', color: 0xf0a4c1, note: 'Magnify + net' },
   bee: { label: 'Meadow bee', type: 'bug', sigil: '✧', color: 0xf2c84b, note: 'Magnify + net' },
   dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌁', color: 0x83cfe7, note: 'Magnify + net' }
+  ,caterpillar: { label: 'Monarch caterpillar', type: 'bug', sigil: '◍', color: 0xd59c3a, note: 'Magnify on flowers' }
+  ,worm: { label: 'Earthworm', type: 'bug', sigil: '≈', color: 0xb7775b, note: 'Magnify on plants · fishing lure' }
+  ,spider: { label: 'Garden spider', type: 'bug', sigil: '✣', color: 0x81768c, note: 'Magnify near webs' }
 };
 
 const BAITS = [
@@ -83,7 +91,8 @@ const SHOP_ITEMS = [
   { key: 'spinner', group: 'lure', label: 'Spinner lure', note: 'A reusable-looking flash for moving water.', cost: 16, amount: 1 },
   { key: 'feather', group: 'lure', label: 'Feather lure', note: 'A light presentation for shallows.', cost: 14, amount: 1 },
   { key: 'nets', group: 'tool', label: 'Field net', note: 'For rabbits, squirrels, and flying bugs.', cost: 24, amount: 1 },
-  { key: 'magnifiers', group: 'tool', label: 'Magnifying glass', note: 'Reveals hidden bug movement.', cost: 22, amount: 1 }
+  { key: 'magnifiers', group: 'tool', label: 'Magnifying glass', note: 'Reveals hidden bug movement.', cost: 22, amount: 1 },
+  { key: 'flowerSeeds', group: 'seed', label: 'Flower seed packet', note: 'Plant in the pollinator field. Blooms in 5 minutes.', cost: 12, amount: 3 }
 ];
 
 const DEFAULT_SAVE = {
@@ -95,10 +104,14 @@ const DEFAULT_SAVE = {
     spinner: 2,
     feather: 2,
     nets: 2,
-    magnifiers: 1
+    magnifiers: 1,
+    flowerSeeds: 2,
   },
   caught: {},
   cleanedEnclosures: {},
+  gardenFlowers: null,
+  records: {},
+  honey: 0,
   lastZone: 'forest'
 };
 
@@ -133,6 +146,7 @@ const dom = {
   travelOptions: document.querySelector('#travel-options'),
   shopModal: document.querySelector('#shop-modal'),
   shopItems: document.querySelector('#shop-items'),
+  shopRecord: document.querySelector('#shop-record'),
   qteModal: document.querySelector('#qte-modal'),
   qteCursor: document.querySelector('.qte-cursor'),
   qteAction: document.querySelector('#qte-action'),
@@ -219,11 +233,19 @@ let zooAnimals = [];
 let zooEnclosures = [];
 let aquariumBubbles = [];
 let pollinatorFlowers = [];
+let wildFlowerNodes = [];
+let beehives = [];
+let spiderWebs = [];
+let colliders = [];
+let storeRecordBoard = null;
 let fishingVisuals = null;
 let toolAction = { name: '', startedAt: 0, duration: 0 };
 let cleaningState = null;
 let spawnPoint = new THREE.Vector3(0, 1.72, 15);
 const player = new THREE.Vector3(0, 1.72, 15);
+let jumpOffset = 0;
+let jumpVelocity = 0;
+let grounded = true;
 
 const fishing = {
   phase: 'idle',
@@ -238,6 +260,8 @@ const fishing = {
   reelProgress: 0,
   reelHeld: false,
   fishSpecies: null,
+  fishSize: 0,
+  fishWeight: 0,
   invalidCast: false
 };
 
@@ -250,7 +274,10 @@ function loadSave() {
       ...parsed,
       supplies: { ...DEFAULT_SAVE.supplies, ...(parsed.supplies || {}) },
       caught: { ...(parsed.caught || {}) },
-      cleanedEnclosures: { ...(parsed.cleanedEnclosures || {}) }
+      cleanedEnclosures: { ...(parsed.cleanedEnclosures || {}) },
+      gardenFlowers: Array.isArray(parsed.gardenFlowers) ? parsed.gardenFlowers : null,
+      records: { ...(parsed.records || {}) },
+      honey: Number(parsed.honey || 0)
     };
   } catch (error) {
     console.warn('Save data unavailable; using a fresh field kit.', error);
@@ -302,6 +329,47 @@ function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+function addCollider(x, z, radius, options = {}) {
+  colliders.push({ x, z, radius, ...options });
+}
+
+function resolveWorldCollisions() {
+  for (const collider of colliders) {
+    if (collider.zone && collider.zone !== currentZone) continue;
+    if (collider.type === 'rect') {
+      const nearestX = clamp(player.x, collider.x - collider.halfWidth, collider.x + collider.halfWidth);
+      const nearestZ = clamp(player.z, collider.z - collider.halfDepth, collider.z + collider.halfDepth);
+      const dx = player.x - nearestX;
+      const dz = player.z - nearestZ;
+      const distanceSq = dx * dx + dz * dz;
+      if (distanceSq < PLAYER_RADIUS * PLAYER_RADIUS) {
+        if (distanceSq > 0.0001) {
+          const distance = Math.sqrt(distanceSq);
+          const push = (PLAYER_RADIUS - distance) / distance;
+          player.x += dx * push;
+          player.z += dz * push;
+        } else {
+          const fromX = Math.abs(player.x - collider.x) / Math.max(0.01, collider.halfWidth);
+          const fromZ = Math.abs(player.z - collider.z) / Math.max(0.01, collider.halfDepth);
+          if (fromX > fromZ) player.x = collider.x + Math.sign(player.x - collider.x || 1) * (collider.halfWidth + PLAYER_RADIUS);
+          else player.z = collider.z + Math.sign(player.z - collider.z || 1) * (collider.halfDepth + PLAYER_RADIUS);
+        }
+        continue;
+      }
+    }
+    const dx = player.x - collider.x;
+    const dz = player.z - collider.z;
+    const minDistance = PLAYER_RADIUS + collider.radius;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq < minDistance * minDistance && distanceSq > 0.0001) {
+      const distance = Math.sqrt(distanceSq);
+      const push = (minDistance - distance) / distance;
+      player.x += dx * push;
+      player.z += dz * push;
+    }
+  }
 }
 
 function box(parent, size, color, position, options = {}) {
@@ -460,10 +528,14 @@ function createParkingHub(label, accent) {
   box(world, [17, 0.4, 0.35], 0x26352d, [0, 0.2, 16.85]);
   box(world, [0.35, 0.4, 14], 0x26352d, [-8.35, 0.2, 10]);
   box(world, [0.35, 0.4, 14], 0x26352d, [8.35, 0.2, 10]);
+  addCollider(0, 16.85, 0.2, { type: 'rect', halfWidth: 8.5, halfDepth: 0.2, zone: currentZone });
+  addCollider(-8.35, 10, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: 7, zone: currentZone });
+  addCollider(8.35, 10, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: 7, zone: currentZone });
 
   const car = createCar();
   car.position.set(0, 0.25, 10);
   world.add(car);
+  addCollider(0, 10, 2.1, { zone: currentZone });
   interactables.push({ type: 'car', label: 'Open travel map', position: car.position.clone(), radius: 3.5 });
 
   const sign = makeLabel(label, `#${new THREE.Color(accent).getHexString()}`, '#1c3025', 1.12);
@@ -507,7 +579,136 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
   cone(group, 0.9, 1.9, new THREE.Color(foliage).offsetHSL(0, 0, 0.06), [0, 3.8, 0.1], { segments: 8 });
   cone(group, 0.62, 1.6, new THREE.Color(foliage).offsetHSL(0, 0, 0.1), [0, 4.75, 0], { segments: 8 });
   world.add(group);
+  addCollider(x, z, 0.72 * scale, { zone: currentZone });
   return group;
+}
+
+function createBeehiveOnTree(tree, x, z, id, wild = false) {
+  const hive = new THREE.Group();
+  hive.position.set(x + 0.45, 3.1, z - 0.22);
+  const body = cylinder(hive, 0.42, 0.52, 0.82, 0xd59b4d, [0, 0, 0], { segments: 10, rotation: [0, 0, 0.12] });
+  for (const y of [-0.23, 0, 0.23]) {
+    torus(hive, 0.44, 0.035, 0x513c2c, [0, y, 0], [0, 0, 0], 8, 20);
+  }
+  cylinder(hive, 0.17, 0.17, 0.05, 0x2c2921, [0, -0.12, -0.47], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
+  const marker = makeLabel(wild ? 'WILD HIVE' : 'HIVE', wild ? '#f2b268' : '#f6d56b', '#3b2b20', 0.38);
+  marker.position.set(0, 0.78, 0);
+  hive.add(marker);
+  world.add(hive);
+  const entry = { id, group: hive, body, marker, position: new THREE.Vector3(x + 0.45, 3.1, z - 0.22), radius: 2.8, wild, lootedAt: 0, baseScale: 1 };
+  beehives.push(entry);
+  interactables.push({ type: 'hive', label: wild ? 'Loot wild beehive' : 'Loot showcase beehive', position: entry.position.clone(), radius: 3.2, hive: entry });
+  addCollider(entry.position.x, entry.position.z, 0.55, { zone: currentZone });
+  return entry;
+}
+
+function createSpiderWeb(x, z, y = 2.6, zone = currentZone) {
+  const group = new THREE.Group();
+  group.position.set(x, y, z);
+  const webMaterial = new THREE.LineBasicMaterial({ color: 0xe8eee2, transparent: true, opacity: 0.68 });
+  for (let ringIndex = 0; ringIndex < 3; ringIndex += 1) {
+    const radius = 0.28 + ringIndex * 0.22;
+    const points = [];
+    for (let index = 0; index <= 16; index += 1) {
+      const angle = index / 16 * Math.PI * 2;
+      points.push(new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0));
+    }
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), webMaterial));
+  }
+  for (let index = 0; index < 8; index += 1) {
+    const angle = index / 8 * Math.PI * 2;
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.cos(angle) * 0.72, Math.sin(angle) * 0.72, 0)
+    ]), webMaterial));
+  }
+  sphere(group, 0.08, 0x332a3c, [0, 0, -0.08], { material: { emissive: 0x211528, emissiveIntensity: 0.3 } });
+  world.add(group);
+  spiderWebs.push({ group, position: new THREE.Vector3(x, y, z), zone });
+  addCollider(x, z, 0.16, { zone });
+  createBugNode('spider', [x + 0.18, 0.05, z + 0.16], 0x81768c);
+  return group;
+}
+
+function createWildFlowerNode(x, z, color, index) {
+  const plant = new THREE.Group();
+  plant.position.set(x, 0, z);
+  cylinder(plant, 0.04, 0.06, 0.72, 0x4f8f55, [0, 0.36, 0], { segments: 5 });
+  for (let petalIndex = 0; petalIndex < 5; petalIndex += 1) {
+    const angle = petalIndex * Math.PI * 2 / 5;
+    sphere(plant, 0.11, color, [Math.cos(angle) * 0.12, 0.76 + Math.sin(angle) * 0.12, 0], { scale: [1.2, 0.62, 0.62] });
+  }
+  sphere(plant, 0.09, 0xe6b44c, [0, 0.76, -0.02]);
+  const marker = makeLabel('SEEDS', '#f3d667', '#30442f', 0.28);
+  marker.position.set(0, 1.18, 0);
+  plant.add(marker);
+  world.add(plant);
+  const entry = { type: 'wild-flower', label: 'Harvest wild flower seeds', position: new THREE.Vector3(x, 0.78, z), radius: 2.5, group: plant, marker, harvested: false, index };
+  interactables.push(entry);
+  wildFlowerNodes.push(entry);
+  addCollider(x, z, 0.22, { zone: currentZone });
+  return entry;
+}
+
+function harvestWildFlower(node) {
+  if (!node || node.harvested) return;
+  node.harvested = true;
+  node.group.visible = false;
+  node.marker.visible = false;
+  save.supplies.flowerSeeds = (save.supplies.flowerSeeds || 0) + 1;
+  saveGame();
+  updateHUD();
+  toast('Wild flower seeds collected. Plant them in the pollinator field.', 'success');
+  setStatus('The wild flower will return after the next field reset.');
+}
+
+function plantFlowerSeed() {
+  if (currentZone !== 'zoo') return;
+  if ((save.supplies.flowerSeeds || 0) <= 0) {
+    toast('No flower seeds in the field kit. Harvest wild flowers or visit the store.', 'warning');
+    return;
+  }
+  const occupied = (save.gardenFlowers || []).map((flower) => new THREE.Vector3(flower.x, 0, flower.z));
+  const plots = [[6.5, -11.0], [7.8, -9.6], [9.2, -12.1], [10.8, -10.2], [11.8, -8.9], [7.1, -7.5], [10.4, -7.6]];
+  const plot = plots.find(([x, z]) => !occupied.some((entry) => entry.distanceTo(new THREE.Vector3(x, 0, z)) < 0.7));
+  if (!plot) {
+    toast('The pollinator field is full. Wait for a flower to despawn.', 'warning');
+    return;
+  }
+  const now = Date.now();
+  const record = { id: `planted-${now}-${Math.floor(Math.random() * 1000)}`, x: plot[0], z: plot[1], scale: 0.68 + Math.random() * 0.22, color: [0xf1c84b, 0xe889b0, 0xb58ce0, 0xf3d667][Math.floor(Math.random() * 4)], seededAt: now, bloomsAt: now + FLOWER_GROW_MS, despawnsAt: now + FLOWER_GROW_MS + FLOWER_LIFE_MS };
+  save.supplies.flowerSeeds -= 1;
+  save.gardenFlowers = [...(save.gardenFlowers || []), record];
+  createPollinatorFlower(record.x, record.z, record.scale, record.color, pollinatorFlowers.length * 0.8, record);
+  saveGame();
+  updateHUD();
+  toast('Seed planted. It will bloom in 5 minutes and remain for 2 hours.', 'success');
+  setStatus('A new seed is taking root. Check back after it blooms.');
+}
+
+function updateBeehives() {
+  const flowerCount = pollinatorFlowers.filter((flower) => flower.record ? flower.record.bloomsAt <= Date.now() : true).length;
+  const beeCount = 3 + (save.caught.bee || 0);
+  for (const hive of beehives) {
+    const size = clamp(0.72 + beeCount * 0.045 + flowerCount * 0.075, 0.72, 1.9);
+    hive.group.scale.setScalar(size);
+    hive.marker.visible = distanceTo(hive.position) < 9 && elapsed > hive.lootedAt + 1.5;
+    hive.marker.position.y = 0.78 + Math.sin(elapsed * 3 + hive.position.x) * 0.04;
+  }
+}
+
+function lootHive(hive) {
+  if (!hive || elapsed < hive.lootedAt + 12) {
+    toast('The hive is still settling. Give the bees a moment.', 'warning');
+    return;
+  }
+  const amount = 2 + Math.max(0, Math.floor((save.caught.bee || 0) / 2));
+  hive.lootedAt = elapsed;
+  save.honey = (save.honey || 0) + amount;
+  save.coins += amount * 2;
+  saveGame();
+  updateHUD();
+  toast(`Honey collected: +${amount} honey and +${amount * 2}¢.`, 'success');
+  setStatus('The hive hums back to life. Flowers and bees help it grow.');
 }
 
 function addTreeInteraction(x, z, label, message, reward = 4) {
@@ -583,6 +784,10 @@ function createFence(x, z, width, depth, color = 0x806e53) {
     cylinder(group, 0.11, 0.14, 1.9, color, [post[0], 0.9, post[1]], { segments: 6 });
   }
   world.add(group);
+  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
+  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
+  addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
+  addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
   return group;
 }
 
@@ -684,17 +889,43 @@ function createAquaticPlant(x, z, height, color) {
 }
 
 function createPollinatorGarden() {
-  const flowerPlan = [
-    [6.5, -12.2, 0.82, 0xf1c84b], [7.6, -11.4, 0.68, 0xe889b0], [8.8, -12.5, 0.9, 0xb58ce0],
-    [9.9, -11.5, 0.72, 0xf3d667], [10.9, -12.3, 0.78, 0xe889b0], [12.0, -11.1, 0.62, 0xb58ce0],
-    [7.2, -8.5, 0.64, 0xf3d667], [8.5, -7.4, 0.8, 0xe889b0], [9.8, -8.8, 0.7, 0xf1c84b],
-    [11.0, -7.2, 0.84, 0xc69ae8], [6.2, -7.2, 0.66, 0xe889b0], [11.9, -8.6, 0.68, 0xf3d667]
+  const initialPlan = [
+    [7.1, -11.8, 0.82, 0xf1c84b], [9.2, -10.6, 0.72, 0xe889b0],
+    [11.2, -11.7, 0.9, 0xb58ce0], [8.2, -8.2, 0.78, 0xf3d667]
   ];
-  flowerPlan.forEach(([x, z, scale, color], index) => createPollinatorFlower(x, z, scale, color, index * 0.8));
+  if (!Array.isArray(save.gardenFlowers)) {
+    const now = Date.now();
+    save.gardenFlowers = initialPlan.map(([x, z, scale, color], index) => ({
+      id: `starter-${index}`,
+      x, z, scale, color,
+      seededAt: now - FLOWER_LIFE_MS + 60 * 1000,
+      bloomsAt: now - 60 * 1000,
+      despawnsAt: now + FLOWER_LIFE_MS
+    }));
+    saveGame();
+  }
+  const now = Date.now();
+  save.gardenFlowers = save.gardenFlowers.filter((flower) => flower.despawnsAt > now);
+  save.gardenFlowers.forEach((flower, index) => createPollinatorFlower(flower.x, flower.z, flower.scale, flower.color, index * 0.8, flower));
+  const seedBed = { type: 'seed-bed', label: 'Plant a flower seed', position: new THREE.Vector3(9, 0.9, -5.2), radius: 3.2 };
+  interactables.push(seedBed);
+  box(world, [2.2, 0.12, 1.3], 0x7b6a4b, [9, 0.08, -5.2]);
+  const seedLabel = makeLabel('PLANT SEEDS', '#f3d667', '#30442f', 0.34);
+  seedLabel.position.set(9, 1.35, -5.2);
+  world.add(seedLabel);
+  addCollider(9, -5.2, 0.72, { zone: 'zoo' });
+  const gardenTrees = [[6.4, -8.2], [12.8, -8.5]];
+  gardenTrees.forEach(([x, z], index) => {
+    const tree = createTree(x, z, 0.82, index ? 0x3e724f : 0x477957);
+    createBeehiveOnTree(tree, x, z, `garden-hive-${index}`);
+    createSpiderWeb(x + (index ? -0.35 : 0.3), z - 0.22, 2.75, 'zoo');
+  });
+  spawnCritter('butterfly', [8.1, 2.2, -9.1]);
+  spawnCritter('bee', [12.0, 2.7, -8.8]);
   addPollinatorDragonflies();
 }
 
-function createPollinatorFlower(x, z, scale, color, phase) {
+function createPollinatorFlower(x, z, scale, color, phase, record = null) {
   const flower = new THREE.Group();
   flower.position.set(x, 0, z);
   const stem = cylinder(flower, 0.035, 0.05, 0.62 * scale, 0x4f8f55, [0, 0.31 * scale, 0], { segments: 5 });
@@ -710,7 +941,7 @@ function createPollinatorFlower(x, z, scale, color, phase) {
   sphere(head, 0.105, 0xe8b84e, [0, 0, -0.02], { material: { emissive: 0x9c5f25, emissiveIntensity: 0.34 } });
   flower.add(head);
   world.add(flower);
-  pollinatorFlowers.push({ head, phase });
+  pollinatorFlowers.push({ group: flower, head, stem, phase, record });
 }
 
 function addPollinatorDragonflies() {
@@ -725,10 +956,22 @@ function addPollinatorDragonflies() {
 }
 
 function updatePollinatorGarden() {
+  const now = Date.now();
   for (const flower of pollinatorFlowers) {
+    if (flower.record && flower.record.despawnsAt <= now) {
+      world.remove(flower.group);
+      save.gardenFlowers = (save.gardenFlowers || []).filter((entry) => entry.id !== flower.record.id);
+      flower.record = null;
+      continue;
+    }
+    const growing = flower.record && flower.record.bloomsAt > now;
+    const growth = growing ? clamp((now - flower.record.seededAt) / (flower.record.bloomsAt - flower.record.seededAt), 0.18, 0.74) : 1;
+    flower.group.scale.setScalar(growth);
+    flower.head.visible = !growing;
     flower.head.rotation.z = Math.sin(elapsed * 1.35 + flower.phase) * 0.045;
     flower.head.rotation.y = Math.sin(elapsed * 0.8 + flower.phase) * 0.08;
   }
+  pollinatorFlowers = pollinatorFlowers.filter((flower) => flower.group.parent === world);
 }
 
 function updateAquarium() {
@@ -766,6 +1009,73 @@ function createPondDock() {
   world.add(label);
 }
 
+function createStorekeeper() {
+  const npc = new THREE.Group();
+  npc.position.set(0, 1.05, -6.45);
+  sphere(npc, 0.34, 0xc88561, [0, 1.35, 0]);
+  sphere(npc, 0.25, 0x2b322d, [-0.1, 1.41, -0.22], { scale: [0.25, 0.18, 0.08] });
+  cylinder(npc, 0.48, 0.58, 0.9, 0x4f6c65, [0, 0.66, 0], { segments: 8 });
+  box(npc, [0.72, 0.12, 0.62], 0xd4b67b, [0, 1.18, 0]);
+  cylinder(npc, 0.08, 0.08, 0.72, 0xc88561, [-0.55, 0.67, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
+  cylinder(npc, 0.08, 0.08, 0.72, 0xc88561, [0.55, 0.67, 0], { rotation: [0, 0, -Math.PI / 2], segments: 7 });
+  const name = makeLabel('MARA · FIELD CLERK', '#f2b268', '#2f3f31', 0.33);
+  name.position.set(0, 1.95, 0);
+  npc.add(name);
+  world.add(npc);
+  addCollider(0, -6.45, 0.55, { zone: 'store' });
+}
+
+function createShopDisplay(item, x, z, row = 0) {
+  const display = new THREE.Group();
+  display.position.set(x, 0, z);
+  box(display, [1.65, 0.12, 0.9], 0xc29a62, [0, 0.58, 0]);
+  box(display, [1.45, 0.08, 0.72], 0x334f3d, [0, 0.68, 0]);
+  if (item.group === 'tool') {
+    cylinder(display, 0.06, 0.08, 0.9, item.key === 'nets' ? 0x80634b : 0x76533f, [0, 1.15, 0], { rotation: [0.1, 0, 0.18], segments: 8 });
+    torus(display, item.key === 'nets' ? 0.3 : 0.22, 0.035, 0xd1b77e, [0, 1.62, 0], [0, 0, 0], 8, 18);
+  } else if (item.group === 'bait') {
+    for (let index = 0; index < 3; index += 1) sphere(display, 0.12, item.key === 'worms' ? 0xb7775b : 0x6c9b56, [-0.28 + index * 0.28, 0.95, 0], { scale: [1, 0.65, 1.2] });
+  } else if (item.group === 'lure') {
+    cylinder(display, 0.04, 0.04, 0.75, 0xc8d3c7, [0, 1.03, 0], { rotation: [Math.PI / 2, 0, 0], segments: 6 });
+    sphere(display, 0.15, item.key === 'spinner' ? 0xe3b74f : 0xd8e4e0, [0.2, 1.03, 0]);
+  } else {
+    const packet = box(display, [0.48, 0.62, 0.12], 0xe3b74f, [0, 1.02, 0]);
+    packet.rotation.y = row * 0.2;
+    sphere(display, 0.08, 0x5d8a52, [0, 1.12, -0.1]);
+  }
+  const label = makeLabel(item.label, '#f2b268', '#2d4232', 0.26);
+  label.position.set(0, 1.98, 0);
+  display.add(label);
+  world.add(display);
+  const interactable = { type: 'shop-item', label: `Buy ${item.label}`, position: new THREE.Vector3(x, 1.05, z), radius: 3.0, itemKey: item.key, group: item.group, display };
+  interactables.push(interactable);
+  addCollider(x, z, 0.72, { zone: 'store' });
+}
+
+function createStoreRecordBoard() {
+  const board = new THREE.Group();
+  board.position.set(-5.45, 2.1, -8.95);
+  box(board, [3.0, 2.0, 0.16], 0x314b39, [0, 0, 0]);
+  const label = makeLabel('RECORD FISH', '#f2c84b', '#2f3a2c', 0.4);
+  label.position.set(0, 0.56, -0.12);
+  board.add(label);
+  world.add(board);
+  storeRecordBoard = board;
+  refreshStoreRecordBoard();
+}
+
+function refreshStoreRecordBoard() {
+  if (!storeRecordBoard) return;
+  if (storeRecordBoard.userData.details) storeRecordBoard.remove(storeRecordBoard.userData.details);
+  const records = Object.values(save.records || {});
+  const best = records.sort((a, b) => b.weight - a.weight)[0];
+  if (!best) return;
+  const details = makeLabel(`${SPECIES[best.species].label} · ${best.weight}LB`, '#f0eccf', '#3f5c48', 0.25);
+  details.position.set(0, -0.22, -0.12);
+  storeRecordBoard.add(details);
+  storeRecordBoard.userData.details = details;
+}
+
 
 function buildStore() {
   setZonePalette('store');
@@ -782,6 +1092,9 @@ function buildStore() {
   const storefront = makeLabel('SUPPLIES', '#f2b268', '#3a2b25', 1.14);
   storefront.position.set(0, 3.0, -8.96);
   world.add(storefront);
+  addCollider(-7.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
+  addCollider(7.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
+  addCollider(0, -8.5, 0.25, { type: 'rect', halfWidth: 7.5, halfDepth: 0.25, zone: 'store' });
 
   const counter = new THREE.Group();
   counter.position.set(0, 0, -5.5);
@@ -790,11 +1103,15 @@ function buildStore() {
   box(counter, [0.8, 0.65, 0.38], 0x2d503d, [0, 1.36, -0.08]);
   world.add(counter);
   interactables.push({ type: 'shop', label: 'Open supply counter', position: counter.position.clone(), radius: 3.6 });
+  addCollider(0, -5.5, 0.9, { type: 'rect', halfWidth: 3.6, halfDepth: 0.7, zone: 'store' });
+  createStorekeeper();
+  createStoreRecordBoard();
 
   for (const x of [-5.6, -3.1, 3.1, 5.6]) {
     box(world, [1.4, 2.4, 0.65], 0x58765a, [x, 1.2, -6.9]);
     box(world, [1.1, 0.08, 0.7], 0xf2b268, [x, 2.42, -6.9]);
   }
+  SHOP_ITEMS.forEach((item, index) => createShopDisplay(item, -5.2 + (index % 3) * 3.2, -3.6 - Math.floor(index / 3) * 2.0, index));
   createTree(-14, -4, 1.1, 0x44694e);
   createTree(14, -3, 1.05, 0x44694e);
   addSmallCrates(-4, 0, -2);
@@ -833,6 +1150,16 @@ function buildForest() {
     [-6, 6, 0.78], [6, 7, 0.82], [-19, -4, 0.88], [19, -4, 0.86]
   ];
   treeSpots.forEach(([x, z, scale], index) => createTree(x, z, scale, index % 2 ? 0x315a41 : 0x3f6b47));
+  createBeehiveOnTree(null, -16, -15, 'wild-hive-west', true);
+  createBeehiveOnTree(null, 17, -16, 'wild-hive-east', true);
+  createSpiderWeb(-13.1, -3.2, 2.8, 'forest');
+  createSpiderWeb(14.4, -2.1, 3.0, 'forest');
+  createSpiderWeb(-10.3, 5.0, 2.7, 'forest');
+  createWildFlowerNode(-7.6, -4.7, 0xe889b0, 0);
+  createWildFlowerNode(5.7, -8.4, 0xf1c84b, 1);
+  createWildFlowerNode(10.9, -6.8, 0xb58ce0, 2);
+  createBugNode('caterpillar', [7.1, 0.05, -8.5], 0xd59c3a);
+  createBugNode('worm', [-13.1, 0.05, -3.2], 0xb7775b);
   addRock(-7, 0.4, -6, 1.4, 0x667b6e);
   addRock(7, 0.32, -2, 1.1, 0x718474);
   addRock(-11, 0.28, -22, 0.85, 0x667b6e);
@@ -865,6 +1192,9 @@ function buildForest() {
   createBugNode('bee', [11.2, 0.05, -10.2], 0xf0c849);
   createBugNode('dragonfly', [8.8, 0.05, -22.1], 0x81c9e4);
   createBugNode('butterfly', [-7.2, 0.05, -25.2], 0xe7a6c4);
+  spawnCritter('butterfly', [-8.6, 1.85, -5.5]);
+  spawnCritter('bee', [-15.2, 2.6, -14.2]);
+  spawnCritter('dragonfly', [7.2, 2.2, -21.5]);
 
   const trailLabel = makeLabel('LAKE TRAIL', '#d8ef85', '#1c3025', 0.72);
   trailLabel.position.set(0, 2.9, -3.2);
@@ -874,6 +1204,7 @@ function buildForest() {
 function addRock(x, y, z, scale, color) {
   const rock = addMesh(world, new THREE.DodecahedronGeometry(scale, 0), mat(color), [x, y, z], [0.1, 0.25, 0.08], [1.3, 0.8, 1]);
   rock.castShadow = true;
+  addCollider(x, z, scale * 1.05, { zone: currentZone });
   return rock;
 }
 
@@ -1223,6 +1554,23 @@ function createAnimalModel(species, scale = 1) {
     addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [-0.28, 0.08, 0.1], [0, 0, -0.42], [1.15, 0.48, 1]);
     addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [0.28, 0.08, 0.1], [0, 0, 0.42], [1.15, 0.48, 1]);
     sphere(group, 0.06, 0x26333e, [0.42, 0, 0]);
+  } else if (species === 'caterpillar') {
+    for (let index = 0; index < 5; index += 1) {
+      sphere(group, 0.12, index % 2 ? 0x263b2f : details.color, [(index - 2) * 0.13, 0.08, 0], { scale: [1.05, 0.72, 0.82] });
+    }
+    sphere(group, 0.035, 0x1e211a, [0.28, 0.14, -0.08]);
+  } else if (species === 'worm') {
+    const wormMat = mat(details.color, { roughness: 0.95 });
+    for (let index = 0; index < 7; index += 1) {
+      addMesh(group, new THREE.TorusGeometry(0.11, 0.028, 5, 12), wormMat, [(index - 3) * 0.09, Math.sin(index) * 0.035, 0], [Math.PI / 2, 0, 0]);
+    }
+  } else if (species === 'spider') {
+    sphere(group, 0.13, details.color, [0, 0.1, 0]);
+    sphere(group, 0.09, 0x392e43, [0, 0.1, -0.14]);
+    for (let index = 0; index < 4; index += 1) {
+      const side = index % 2 ? 1 : -1;
+      cylinder(group, 0.016, 0.016, 0.3, details.color, [side * 0.12, 0.1, (index - 1.5) * 0.08], { rotation: [0, side * 0.55, side * 0.72], segments: 5 });
+    }
   }
 
   return group;
@@ -1241,6 +1589,11 @@ function resetWorld() {
   zooEnclosures = [];
   aquariumBubbles = [];
   pollinatorFlowers = [];
+  wildFlowerNodes = [];
+  beehives = [];
+  spiderWebs = [];
+  colliders = [];
+  storeRecordBoard = null;
   cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
   removeFishingVisuals();
@@ -1280,6 +1633,8 @@ function resetFishing() {
   fishing.reelProgress = 0;
   fishing.reelHeld = false;
   fishing.fishSpecies = null;
+  fishing.fishSize = 0;
+  fishing.fishWeight = 0;
   fishing.invalidCast = false;
 }
 
@@ -1396,14 +1751,32 @@ function failHook() {
 
 function landFish() {
   const species = fishing.fishSpecies;
+  const record = {
+    species,
+    size: Number(fishing.fishSize.toFixed(1)),
+    weight: Number(fishing.fishWeight.toFixed(2)),
+    caughtAt: new Date().toISOString(),
+    bait: fishing.castBait,
+    lure: fishing.castLure
+  };
+  const previous = save.records[species];
+  const isRecord = !previous || record.weight > previous.weight || (record.weight === previous.weight && record.size > previous.size);
   save.caught[species] = (save.caught[species] || 0) + 1;
   save.coins += species === 'trout' ? 18 : 22;
+  if (isRecord) save.records[species] = record;
   resetFishing();
   removeFishingVisuals();
   saveGame();
+  refreshStoreRecordBoard();
   updateHUD();
-  toast(`${SPECIES[species].label} added to the collection. +${species === 'trout' ? 18 : 22}¢`, 'success');
-  setStatus('A clean landing. You can cast again or head back to the car.');
+  toast(`${SPECIES[species].label}: ${record.size} in / ${record.weight} lb${isRecord ? ' — NEW PERSONAL RECORD' : ''}`, isRecord ? 'success' : 'success');
+  setStatus(isRecord ? 'New record logged. The field store record board has been updated.' : 'A clean landing. You can cast again or head back to the car.');
+}
+
+function formatFishRecord(record) {
+  if (!record) return 'No personal record yet.';
+  const caught = new Date(record.caughtAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  return `${SPECIES[record.species]?.label || formatName(record.species)} · ${record.size} in · ${record.weight} lb · ${caught} · ${formatName(record.bait || 'unknown bait')} + ${formatName(record.lure || 'unknown lure')}`;
 }
 
 function updateFishing(delta) {
@@ -1413,6 +1786,8 @@ function updateFishing(delta) {
   if (fishing.phase === 'waiting' && fishing.castTarget && elapsed >= fishing.biteAt) {
     fishing.phase = 'bite';
     fishing.fishSpecies = fishing.castTarget.fishSpecies;
+    fishing.fishSize = 7.5 + Math.random() * (fishing.fishSpecies === 'trout' ? 13.5 : 8.5);
+    fishing.fishWeight = fishing.fishSpecies === 'trout' ? 0.7 + Math.random() * 4.3 : 0.25 + Math.random() * 1.8;
     fishing.biteDeadline = elapsed + 1.3;
     if (!fishing.baitConsumed && fishing.castBait) {
       save.supplies[fishing.castBait] = Math.max(0, save.supplies[fishing.castBait] - 1);
@@ -1512,7 +1887,7 @@ function catchBug(bug) {
 }
 
 function startBugObservation() {
-  if (currentZone !== 'forest' || activeTool !== 'magnifier') return;
+  if (!['forest', 'zoo'].includes(currentZone) || activeTool !== 'magnifier') return;
   const bug = getAimBug(false) || getNearbyBug();
   if (!bug) {
     toast('No moving trace nearby. Follow the little light above the leaves.', 'warning');
@@ -1542,9 +1917,23 @@ function resolveBugObservation() {
     bug.revealed = true;
     bug.bugModel.visible = true;
     bug.marker.visible = true;
-    setTool('net');
-    toast(`${SPECIES[bug.species].label} revealed. Net it before it disappears.`, 'success');
-    setStatus('The bug is visible. Equip the net and make a clean swing.');
+    if (['worm', 'caterpillar', 'spider'].includes(bug.species)) {
+      bug.cooldown = 10;
+      bug.revealed = false;
+      bug.bugModel.visible = false;
+      bug.marker.visible = false;
+      save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+      if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
+      save.coins += bug.species === 'worm' ? 4 : 8;
+      saveGame();
+      updateHUD();
+      toast(`${SPECIES[bug.species].label} collected${bug.species === 'worm' ? ' — fishing lure added' : ''}.`, 'success');
+      setStatus(bug.species === 'worm' ? 'The worm is ready to use as fishing bait.' : 'The tiny field note is safely recorded.');
+    } else {
+      setTool('net');
+      toast(`${SPECIES[bug.species].label} revealed. Net it before it disappears.`, 'success');
+      setStatus('The bug is visible. Equip the net and make a clean swing.');
+    }
   } else {
     bug.cooldown = 3;
     toast('The lens slipped off the movement. Try the trace again.', 'warning');
@@ -1626,11 +2015,11 @@ function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
     const animal = critter.group;
-    const isFlying = SPECIES[critter.species].type === 'flying';
+    const isFlying = SPECIES[critter.species].type === 'flying' || ['butterfly', 'bee', 'dragonfly'].includes(critter.species);
     critter.stateTime += delta;
     const distance = distanceTo(animal.position);
     if (critter.state === 'idle') {
-      const threat = activeTool !== 'net' && distance < 5.2 && currentNoise > 0.34;
+      const threat = distance < 5.2 && currentNoise > 0.34 && !(activeTool === 'net' && distance < 2.6 && currentNoise < 0.56);
       if (threat) {
         scareCritter(critter);
       } else {
@@ -1763,14 +2152,24 @@ function updateMovement(delta) {
   tempVector.addScaledVector(rightDirection, strafeInput);
   if (tempVector.lengthSq() > 1) tempVector.normalize();
   player.addScaledVector(tempVector, speed * delta);
+  resolveWorldCollisions();
 
   const bounds = ZONES[currentZone].bounds;
   player.x = clamp(player.x, bounds.minX, bounds.maxX);
   player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
   constrainForestWaterBoundary();
+  if (!grounded || jumpOffset > 0) {
+    jumpVelocity -= GRAVITY * delta;
+    jumpOffset += jumpVelocity * delta;
+    if (jumpOffset <= 0) {
+      jumpOffset = 0;
+      jumpVelocity = 0;
+      grounded = true;
+    }
+  }
   currentNoise = moving ? (sneaking ? 0.16 : 0.78) : 0.02;
   if (moving && fishing.phase === 'waiting') startReelIn();
-  camera.position.set(player.x, player.y + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
+  camera.position.set(player.x, player.y + jumpOffset + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
 }
 
 function updateCameraRotation() {
@@ -1790,7 +2189,7 @@ function updatePrompt() {
   const target = getInteractionTarget();
   let label = '';
   if (target) label = target.label;
-  const nearbyBug = currentZone === 'forest' && activeTool === 'magnifier' ? getNearbyBug() : null;
+  const nearbyBug = ['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier' ? getNearbyBug() : null;
   if (!target && nearbyBug && distanceTo(nearbyBug.position) < 8.6 && !nearbyBug.revealed) {
     label = 'Inspect bug trace';
   }
@@ -1823,8 +2222,8 @@ function getInteractionTarget() {
 function updateCrosshair() {
   let targeted = false;
   if (currentZone === 'forest' && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
-  if (currentZone === 'forest' && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
-  if (currentZone === 'forest' && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
   dom.crosshair.classList.toggle('is-targeted', targeted);
 }
 
@@ -1838,6 +2237,8 @@ function updateHUD() {
     <div class="equipment-item"><strong>LURE <small>${lureLabel}</small></strong><em>REUSABLE</em></div>
     <div class="equipment-item"><strong>NETS</strong><em>${save.supplies.nets || 0}</em></div>
     <div class="equipment-item"><strong>GLASSES</strong><em>${save.supplies.magnifiers || 0}</em></div>
+    <div class="equipment-item"><strong>SEEDS</strong><em>${save.supplies.flowerSeeds || 0}</em></div>
+    <div class="equipment-item"><strong>HONEY</strong><em>${save.honey || 0}</em></div>
     <div class="equipment-item"><strong>FIELD NOTES</strong><em>${Object.values(save.caught).reduce((sum, count) => sum + count, 0)}</em></div>
     <div class="equipment-item equipment-help"><span>B / L</span><span>cycle kit</span></div>
   `;
@@ -1910,7 +2311,7 @@ function updateActionDock() {
     dom.primaryAction.textContent = `RELEASE CAST ${Math.round(fishing.charge * 100)}%`;
   } else if (currentZone === 'forest' && activeTool === 'rod') {
     dom.primaryAction.textContent = 'HOLD TO CAST';
-  } else if (currentZone === 'forest' && activeTool === 'magnifier') {
+  } else if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') {
     dom.primaryAction.textContent = 'INSPECT TRACE';
   } else if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') {
     dom.primaryAction.textContent = 'USE NET';
@@ -2013,6 +2414,12 @@ function openShop() {
       <button class="buy-button" data-buy-item="${item.key}" data-buy-group="${item.group}" type="button" ${canBuy ? '' : 'disabled'}>${item.cost}¢</button>
     </div>`;
   }).join('');
+  if (dom.shopRecord) {
+    const records = Object.values(save.records || {});
+    dom.shopRecord.innerHTML = records.length
+      ? `<strong>PERSONAL RECORDS</strong>${records.map((record) => `<span>${formatFishRecord(record)}</span>`).join('')}`
+      : '<strong>PERSONAL RECORDS</strong><span>Catch a fish to start the record board.</span>';
+  }
   openModal(dom.shopModal);
 }
 
@@ -2043,6 +2450,18 @@ function buyItem(itemKey, group) {
   toast(`${item.label} added to the field kit.`, 'success');
 }
 
+function buyShopDisplay(display) {
+  if (!display) return;
+  const item = SHOP_ITEMS.find((candidate) => candidate.key === display.itemKey && candidate.group === display.group);
+  if (!item) return;
+  if (save.coins < item.cost) {
+    toast(`You need ${item.cost}¢ for ${item.label}.`, 'warning');
+    return;
+  }
+  buyItem(item.key, item.group);
+  setStatus(`${item.label} purchased from the display. Walk to another display or return to the counter.`);
+}
+
 function handleInteract() {
   const target = getInteractionTarget();
   if (target?.type === 'car') {
@@ -2053,6 +2472,10 @@ function handleInteract() {
     openShop();
     return;
   }
+  if (target?.type === 'shop-item') {
+    buyShopDisplay(target);
+    return;
+  }
   if (target?.type === 'collection') {
     openCollection();
     return;
@@ -2061,11 +2484,23 @@ function handleInteract() {
     inspectTree(target);
     return;
   }
+  if (target?.type === 'hive') {
+    lootHive(target.hive);
+    return;
+  }
+  if (target?.type === 'wild-flower') {
+    harvestWildFlower(target);
+    return;
+  }
+  if (target?.type === 'seed-bed') {
+    plantFlowerSeed();
+    return;
+  }
   if (target?.type === 'enclosure') {
     startCleaning(target);
     return;
   }
-  if (currentZone === 'forest' && activeTool === 'magnifier') startBugObservation();
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') startBugObservation();
 }
 
 function handlePrimaryDown() {
@@ -2082,7 +2517,7 @@ function handlePrimaryDown() {
     else if (fishing.phase === 'reeling') fishing.reelHeld = true;
   } else if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') {
     useNet();
-  } else if (currentZone === 'forest' && activeTool === 'magnifier') {
+  } else if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') {
     startBugObservation();
   }
 }
@@ -2113,7 +2548,7 @@ function handleActionDown() {
   }
   if (currentZone === 'forest' && activeTool === 'rod') startCast();
   if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') useNet();
-  if (currentZone === 'forest' && activeTool === 'magnifier') startBugObservation();
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') startBugObservation();
 }
 
 function handleActionUp() {
@@ -2153,6 +2588,7 @@ function animate() {
   updateZooAnimals(delta);
   updateAquarium();
   updatePollinatorGarden();
+  updateBeehives();
   updateQTE(delta);
   updatePrompt();
   updateCrosshair();
@@ -2171,8 +2607,13 @@ window.addEventListener('resize', () => {
 
 window.addEventListener('keydown', (event) => {
   const normalizedKey = rememberKey(event, true);
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd'].includes(event.code) || ['w', 'a', 's', 'd'].includes(normalizedKey)) {
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd', 'Space', ' '].includes(event.code) || ['w', 'a', 's', 'd', ' '].includes(normalizedKey)) {
     event.preventDefault();
+  }
+  if (event.code === 'Space' && !event.repeat && !modalOpen && !qteState && grounded) {
+    jumpVelocity = JUMP_VELOCITY;
+    grounded = false;
+    setStatus('Jumping. Keep moving to clear rocks, roots, and shop displays.');
   }
   if (event.code === 'Escape' || normalizedKey === 'escape') {
     keys.clear();
