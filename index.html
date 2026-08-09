@@ -20,6 +20,7 @@
             </div>
           </div>
           <div class="topbar-meta">
+            <button id="tips-toggle-button" class="help-toggle" type="button" aria-expanded="false" aria-controls="tips-menu">? FIELD GUIDE</button>
             <span id="zone-label">PARKING LOT</span>
             <span class="meta-divider" aria-hidden="true"></span>
             <span id="coin-label">120¢</span>
@@ -39,6 +40,20 @@
             <span id="prompt-text">Interact</span>
           </div>
         </section>
+
+        <aside id="fishing-tips" class="panel fishing-tips is-hidden" aria-live="polite">
+          <div class="card-heading">
+            <span class="eyebrow">FISHING FIELD GUIDE</span>
+            <span class="tips-badge">TIPS ON</span>
+          </div>
+          <div class="tip-steps">
+            <div class="tip-step" data-tip-step="loadout"><span>01</span><p><strong>Match the kit</strong><small>Use <b>B</b> for bait and <b>L</b> for lure.</small></p></div>
+            <div class="tip-step" data-tip-step="aim"><span>02</span><p><strong>Find a disturbance</strong><small>Center the crosshair on a circular splash.</small></p></div>
+            <div class="tip-step" data-tip-step="cast"><span>03</span><p><strong>Cast and wait</strong><small>Hold left click, release, then watch the bobber.</small></p></div>
+            <div class="tip-step" data-tip-step="hook"><span>04</span><p><strong>Set the hook</strong><small>Click SET HOOK as soon as the bite appears.</small></p></div>
+            <div class="tip-step" data-tip-step="reel"><span>05</span><p><strong>Bring it home</strong><small>Hold REEL / left click until the fish lands.</small></p></div>
+          </div>
+        </aside>
 
         <section class="right-rail">
           <div class="panel equipment-card">
@@ -67,13 +82,25 @@
         </section>
 
         <section id="equipment-dock" class="equipment-dock" aria-label="Equipment selection">
-          <button class="tool-button active" data-tool="rod" type="button"><span class="tool-icon">⌁</span><span>ROD</span></button>
-          <button class="tool-button" data-tool="net" type="button"><span class="tool-icon">◇</span><span>NET</span></button>
-          <button class="tool-button" data-tool="magnifier" type="button"><span class="tool-icon">⌕</span><span>GLASS</span></button>
+          <button class="tool-button active" data-tool="rod" type="button" title="Fishing rod: match bait and lure, aim at a splash, then cast"><span class="tool-icon">⌁</span><span>ROD</span></button>
+          <button class="tool-button" data-tool="net" type="button" title="Field net: catch revealed bugs and quiet ground animals"><span class="tool-icon">◇</span><span>NET</span></button>
+          <button class="tool-button" data-tool="magnifier" type="button" title="Magnifying glass: inspect a bug trace, then switch to the net"><span class="tool-icon">⌕</span><span>GLASS</span></button>
         </section>
 
         <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
       </div>
+
+      <section id="tips-menu" class="tips-menu panel is-hidden" aria-label="Field guide settings">
+        <div class="card-heading">
+          <span class="eyebrow">FIELD GUIDE SETTINGS</span>
+          <button id="tips-menu-close" class="icon-button" type="button" aria-label="Close field guide settings">×</button>
+        </div>
+        <label class="tips-setting">
+          <input id="tips-enabled" type="checkbox" checked />
+          <span><strong>Show fishing tips</strong><small>Keep the step-by-step guide visible near the lake.</small></span>
+        </label>
+        <p class="tips-menu-note">You can reopen this menu from the <b>? FIELD GUIDE</b> button.</p>
+      </section>
 
       <section id="travel-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="travel-title">
         <div class="modal-card panel">

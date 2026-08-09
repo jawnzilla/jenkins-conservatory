@@ -67,6 +67,7 @@ const SHOP_ITEMS = [
 ];
 
 const DEFAULT_SAVE = {
+  tipsEnabled: true,
   coins: 120,
   supplies: {
     worms: 6,
@@ -101,6 +102,12 @@ const dom = {
   reelAction: document.querySelector('#reel-action'),
   equipmentDock: document.querySelector('#equipment-dock'),
   toastStack: document.querySelector('#toast-stack'),
+  fishingTips: document.querySelector('#fishing-tips'),
+  tipSteps: [...document.querySelectorAll('.tip-step')],
+  tipsToggleButton: document.querySelector('#tips-toggle-button'),
+  tipsMenu: document.querySelector('#tips-menu'),
+  tipsMenuClose: document.querySelector('#tips-menu-close'),
+  tipsEnabled: document.querySelector('#tips-enabled'),
   travelModal: document.querySelector('#travel-modal'),
   travelOptions: document.querySelector('#travel-options'),
   shopModal: document.querySelector('#shop-modal'),
@@ -127,8 +134,13 @@ renderer.toneMappingExposure = 1.12;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 160);
 camera.rotation.order = 'YXZ';
+const heldToolGroup = new THREE.Group();
+heldToolGroup.name = 'held-tool';
+heldToolGroup.frustumCulled = false;
+camera.add(heldToolGroup);
 const world = new THREE.Group();
 scene.add(world);
+scene.add(camera);
 
 const hemiLight = new THREE.HemisphereLight(0xe9efcf, 0x20352a, 2.2);
 scene.add(hemiLight);
@@ -292,6 +304,69 @@ function makeLabel(text, color = '#d8ef85', background = '#1a3023', scale = 1.4)
   return sprite;
 }
 
+function createHeldToolModel(tool) {
+  while (heldToolGroup.children.length) heldToolGroup.remove(heldToolGroup.children[0]);
+
+  const root = new THREE.Group();
+  root.position.set(0.7, -0.66, -1.3);
+  root.scale.setScalar(tool === 'rod' ? 0.5 : tool === 'net' ? 0.46 : 0.52);
+  root.rotation.set(-0.16, -0.2, -0.42);
+  sphere(root, 0.15, 0xc7825e, [0, -0.38, 0.08], { scale: [0.88, 1, 1.18] });
+
+  if (tool === 'rod') {
+    cylinder(root, 0.075, 0.095, 0.34, 0x29352f, [0, -0.18, 0.02], { segments: 8, rotation: [0, 0, 0.08] });
+    cylinder(root, 0.045, 0.055, 1.48, 0x8e5d3c, [0, 0.68, 0.02], { segments: 8, rotation: [0.05, 0, 0] });
+    cylinder(root, 0.075, 0.075, 0.12, 0x242d29, [0.1, 0.08, -0.02], { segments: 10, rotation: [Math.PI / 2, 0, 0] });
+    torus(root, 0.11, 0.024, 0xc2a66d, [0.1, 0.08, -0.1], [0, 0, 0], 10, 18);
+    cylinder(root, 0.018, 0.018, 0.46, 0xf1dfb0, [0, 1.42, 0.02], { segments: 6, rotation: [0.05, 0, 0] });
+  }
+
+  if (tool === 'net') {
+    cylinder(root, 0.035, 0.06, 1.18, 0x80634b, [0, 0.28, 0.02], { segments: 8, rotation: [0.03, 0, 0.02] });
+    torus(root, 0.36, 0.045, 0xd1b77e, [0, 1.04, 0], [0, 0, 0], 8, 24);
+    addMesh(root, new THREE.CircleGeometry(0.32, 18), mat(0xbad9cb, { transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }), [0, 1.04, 0.02]);
+  }
+
+  if (tool === 'magnifier') {
+    cylinder(root, 0.045, 0.07, 0.82, 0x76533f, [0, -0.02, 0.02], { segments: 8, rotation: [0, 0, -0.42] });
+    torus(root, 0.3, 0.055, 0xc9ad68, [0.29, 0.62, 0], [0, 0, 0], 8, 24);
+    addMesh(root, new THREE.CircleGeometry(0.25, 20), mat(0xbde9e3, { transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide, emissive: 0x3a7770, emissiveIntensity: 0.24 }), [0.29, 0.62, -0.02]);
+    sphere(root, 0.035, 0xf4edc9, [0.19, 0.76, -0.08], { material: { emissive: 0xffffff, emissiveIntensity: 0.8 } });
+  }
+
+  root.traverse((object) => {
+    if (object.isMesh || object.isSprite) {
+      object.castShadow = false;
+      object.receiveShadow = false;
+      object.frustumCulled = false;
+    }
+  });
+  heldToolGroup.add(root);
+  heldToolGroup.userData.root = root;
+  heldToolGroup.userData.basePosition = root.position.clone();
+  heldToolGroup.userData.baseRotation = root.rotation.clone();
+  heldToolGroup.userData.tool = tool;
+}
+
+function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
+  return addMesh(parent, new THREE.TorusGeometry(majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
+}
+
+function updateHeldTool() {
+  const root = heldToolGroup.userData.root;
+  const basePosition = heldToolGroup.userData.basePosition;
+  const baseRotation = heldToolGroup.userData.baseRotation;
+  if (!root || !basePosition || !baseRotation) return;
+  const moving = isKeyDown('KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd');
+  const stride = moving ? Math.sin(elapsed * 8.2) : Math.sin(elapsed * 1.8) * 0.2;
+  root.position.copy(basePosition);
+  root.position.y += stride * (moving ? 0.018 : 0.004);
+  root.rotation.copy(baseRotation);
+  root.rotation.z += stride * (moving ? 0.035 : 0.008);
+  if (fishing.phase === 'charging') root.rotation.x -= fishing.charge * 0.2;
+  if (fishing.phase === 'reeling') root.rotation.x += Math.sin(elapsed * 10) * 0.035;
+}
+
 function setZonePalette(zoneKey) {
   const zone = ZONES[zoneKey];
   scene.background = new THREE.Color(zone.background);
@@ -440,7 +515,10 @@ function buildForest() {
 
   const treeSpots = [
     [-16, -15, 1.3], [-13, -3, 1.5], [-10, 5, 1.1], [14, -2, 1.45], [17, -16, 1.2],
-    [-17, -25, 1.1], [15, -28, 1.35], [9, 4, 1.15], [-4, 2, 0.9], [18, 5, 0.8]
+    [-17, -25, 1.1], [15, -28, 1.35], [9, 4, 1.15], [-4, 2, 0.9], [18, 5, 0.8],
+    [-20, -8, 1.1], [-19, 2, 0.95], [-21, -19, 1.25], [-18, -29, 1.05],
+    [20, -8, 1.05], [19, 2, 0.92], [21, -21, 1.18], [18, -29, 1.08],
+    [-12, -29, 0.9], [11, -27, 0.95], [-15, -7, 0.84], [15, -7, 0.88]
   ];
   treeSpots.forEach(([x, z, scale], index) => createTree(x, z, scale, index % 2 ? 0x315a41 : 0x3f6b47));
   addRock(-7, 0.4, -6, 1.4, 0x667b6e);
@@ -512,7 +590,7 @@ function createBugNode(species, position, color) {
   const markerCore = sphere(marker, 0.08, color, [0, 1.48, 0], { material: { emissive: color, emissiveIntensity: 1.4 } });
   group.add(marker);
   world.add(group);
-  bugNodes.push({ species, group, plant, bugModel, marker, markerCore, position: new THREE.Vector3(...position), revealed: false, cooldown: 0, color });
+  bugNodes.push({ species, group, plant, bugModel, marker, markerCore, position: new THREE.Vector3(...position), aimPosition: new THREE.Vector3(position[0] + 0.3, 1.1, position[2]), revealed: false, cooldown: 0, color });
 }
 
 function buildZoo() {
@@ -844,7 +922,7 @@ function updateFishing(delta) {
 
 function useNet() {
   if (currentZone !== 'forest' || !['net'].includes(activeTool)) return;
-  const bug = getAimBug(true);
+  const bug = getAimBug(true) || getNearestRevealedBug();
   if (bug && bug.revealed) {
     catchBug(bug);
     return;
@@ -949,7 +1027,7 @@ function getAimTarget(items, maxDistance, maxAngle = 0.34) {
   camera.getWorldDirection(lookDirection);
   let best = null;
   for (const item of items) {
-    const targetPosition = item.group ? item.group.position : item.position;
+    const targetPosition = item.aimPosition || (item.group ? item.group.position : item.position);
     const distance = distanceTo(targetPosition);
     if (distance > maxDistance) continue;
     tempVector.subVectors(targetPosition, camera.position).normalize();
@@ -965,11 +1043,17 @@ function getAimCritter() {
 }
 
 function getAimBug(revealedOnly = false) {
-  return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && (!revealedOnly || bug.revealed)), 7.5, 0.42);
+  return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && (!revealedOnly || bug.revealed)), 7.5, 0.62);
 }
 
 function getNearbyBug() {
   return bugNodes.filter((bug) => bug.cooldown <= 0 && !bug.revealed).sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
+}
+
+function getNearestRevealedBug() {
+  return bugNodes
+    .filter((bug) => bug.cooldown <= 0 && bug.revealed && distanceTo(bug.position) <= 5.8)
+    .sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
 }
 
 function updateCritters(delta) {
@@ -1001,7 +1085,7 @@ function updateCritters(delta) {
         critter.stateTime = 0;
       }
     }
-    animal.rotation.y = critter.direction;
+    animal.rotation.y = critter.direction + Math.PI;
     const aimed = getAimCritter() === critter;
     if (aimed && distance < 4.5 && currentNoise < 0.42) {
       animal.userData.highlight = true;
@@ -1026,6 +1110,7 @@ function updateBugNodes(delta) {
       bug.bugModel.position.y = 1.1 + Math.sin(elapsed * 4 + bug.position.x) * 0.14;
       bug.bugModel.rotation.y += delta * 2.6;
     }
+    bug.aimPosition.set(bug.group.position.x + bug.bugModel.position.x, bug.group.position.y + bug.bugModel.position.y, bug.group.position.z + bug.bugModel.position.z);
   }
 }
 
@@ -1053,29 +1138,25 @@ function updateZooFish(delta) {
 
 function updateMovement(delta) {
   if (modalOpen || qteState) return;
-  moveDirection.set(0, 0, 0);
-  if (isKeyDown('KeyW', 'w')) moveDirection.z -= 1;
-  if (isKeyDown('KeyS', 's')) moveDirection.z += 1;
-  if (isKeyDown('KeyA', 'a')) moveDirection.x -= 1;
-  if (isKeyDown('KeyD', 'd')) moveDirection.x += 1;
+  const forwardInput = (isKeyDown('KeyW', 'w') ? 1 : 0) - (isKeyDown('KeyS', 's') ? 1 : 0);
+  const strafeInput = (isKeyDown('KeyD', 'd') ? 1 : 0) - (isKeyDown('KeyA', 'a') ? 1 : 0);
+  moveDirection.set(strafeInput, 0, forwardInput);
   const moving = moveDirection.lengthSq() > 0;
-  if (moving) moveDirection.normalize();
   const sneaking = isKeyDown('ShiftLeft', 'ShiftRight', 'shift');
   const speed = sneaking ? 2.1 : 4.2;
-  forwardDirection.set(Math.sin(yaw), 0, -Math.cos(yaw));
-  rightDirection.set(Math.cos(yaw), 0, Math.sin(yaw));
-  tempVector.set(0, 0, 0);
-  tempVector.addScaledVector(forwardDirection, -moveDirection.z);
-  tempVector.addScaledVector(rightDirection, moveDirection.x);
-  if (tempVector.lengthSq() > 0) tempVector.normalize();
+
+  forwardDirection.set(Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+  rightDirection.set(Math.cos(yaw), 0, Math.sin(yaw)).normalize();
+  tempVector.copy(forwardDirection).multiplyScalar(forwardInput);
+  tempVector.addScaledVector(rightDirection, strafeInput);
+  if (tempVector.lengthSq() > 1) tempVector.normalize();
   player.addScaledVector(tempVector, speed * delta);
+
   const bounds = ZONES[currentZone].bounds;
   player.x = clamp(player.x, bounds.minX, bounds.maxX);
   player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
   currentNoise = moving ? (sneaking ? 0.16 : 0.78) : 0.02;
-  if (moving && fishing.phase === 'waiting') {
-    startReelIn();
-  }
+  if (moving && fishing.phase === 'waiting') startReelIn();
   camera.position.set(player.x, player.y + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
 }
 
@@ -1129,7 +1210,7 @@ function getInteractionTarget() {
 function updateCrosshair() {
   let targeted = false;
   if (currentZone === 'forest' && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
-  if (currentZone === 'forest' && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true));
+  if (currentZone === 'forest' && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
   if (currentZone === 'forest' && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
   dom.crosshair.classList.toggle('is-targeted', targeted);
 }
@@ -1151,7 +1232,36 @@ function updateHUD() {
   dom.noiseValue.style.color = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
   dom.noiseMeter.style.width = `${Math.max(4, currentNoise * 100)}%`;
   dom.noiseMeter.style.background = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
+  if (dom.tipsEnabled) dom.tipsEnabled.checked = save.tipsEnabled !== false;
   updateActionDock();
+  updateFishingTips();
+}
+
+function updateFishingTips() {
+  const visible = save.tipsEnabled !== false && currentZone === 'forest' && activeTool === 'rod';
+  dom.fishingTips.classList.toggle('is-hidden', !visible);
+  if (!visible) {
+    dom.actionHint.textContent = '';
+    return;
+  }
+
+  const currentStep = {
+    idle: 'loadout',
+    charging: 'cast',
+    waiting: 'cast',
+    bite: 'hook',
+    returning: 'cast',
+    reeling: 'reel'
+  }[fishing.phase] || 'loadout';
+  dom.tipSteps.forEach((step) => step.classList.toggle('is-current', step.dataset.tipStep === currentStep));
+  dom.actionHint.textContent = {
+    idle: 'Use B / L to match the kit, then aim at a circular water disturbance.',
+    charging: 'Hold to load the cast. Release while the crosshair is over the disturbance.',
+    waiting: 'The bobber is in the disturbance. Wait for the bite, then set the hook quickly.',
+    bite: 'BITE! Click SET HOOK before the bite window closes.',
+    returning: 'The line is coming back. Change the bait or lure before trying again.',
+    reeling: 'Hold REEL LINE / left click until the fish reaches shore.'
+  }[fishing.phase] || '';
 }
 
 function updateActionDock() {
@@ -1221,9 +1331,15 @@ function setTool(tool) {
     return;
   }
   activeTool = tool;
+  createHeldToolModel(tool);
   document.querySelectorAll('.tool-button').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
   updateHUD();
   setStatus(tool === 'rod' ? 'Aim for a circular disturbance in the lake.' : tool === 'net' ? 'Sneak close. A fast swing is only useful at short range.' : 'Watch for a pulse above the leaves, then inspect it.');
+}
+
+function setTipsMenuOpen(open) {
+  dom.tipsMenu.classList.toggle('is-hidden', !open);
+  dom.tipsToggleButton.setAttribute('aria-expanded', String(open));
 }
 
 function cycleBait() {
@@ -1395,6 +1511,7 @@ function animate() {
   elapsed += delta;
   updateMovement(delta);
   updateCameraRotation();
+  updateHeldTool();
   updateFishing(delta);
   updateFishingVisuals();
   updateCritters(delta);
@@ -1405,6 +1522,7 @@ function animate() {
   updatePrompt();
   updateCrosshair();
   updateActionDock();
+  updateFishingTips();
   updateCameraRotation();
   renderer.render(scene, camera);
 }
@@ -1505,6 +1623,16 @@ window.addEventListener('pointerup', () => handleActionUp());
 
 dom.qteAction.addEventListener('click', resolveBugObservation);
 
+dom.tipsToggleButton.addEventListener('click', () => {
+  setTipsMenuOpen(dom.tipsMenu.classList.contains('is-hidden'));
+});
+dom.tipsMenuClose.addEventListener('click', () => setTipsMenuOpen(false));
+dom.tipsEnabled.addEventListener('change', () => {
+  save.tipsEnabled = dom.tipsEnabled.checked;
+  saveGame();
+  updateFishingTips();
+});
+
 dom.equipmentDock.addEventListener('click', (event) => {
   const button = event.target.closest('[data-tool]');
   if (button) setTool(button.dataset.tool);
@@ -1529,6 +1657,7 @@ document.querySelectorAll('[data-close-modal]').forEach((button) => {
   });
 });
 
+createHeldToolModel(activeTool);
 enterZone(currentZone);
 updateHUD();
 setStatus('Find the car to choose a destination. The field is quiet for now.');
