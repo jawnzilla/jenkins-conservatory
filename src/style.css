@@ -808,25 +808,40 @@ h2 {
 
 .inspection-plant-shape {
   position: absolute;
-  left: 48%;
-  top: 14%;
-  width: 10px;
-  height: 84%;
+  left: 47%;
+  top: 9%;
+  width: 13px;
+  height: 92%;
+  border-radius: 10px;
   background: #568b58;
-  transform: rotate(12deg);
-  box-shadow: 0 0 0 1px rgba(216, 239, 133, 0.12), -85px 75px 0 -1px #477d52, 74px 110px 0 -1px #6a9a5a;
+  transform: rotate(8deg);
+  box-shadow: 0 0 0 1px rgba(216, 239, 133, 0.12);
 }
+
+.inspection-branch-shape {
+  position: absolute;
+  height: 10px;
+  border-radius: 10px;
+  background: #568b58;
+  transform-origin: left center;
+  box-shadow: 0 0 0 1px rgba(216, 239, 133, 0.1);
+}
+
+.inspection-branch-shape.branch-left { left: 47%; top: 43%; width: 38%; transform: rotate(202deg); }
+.inspection-branch-shape.branch-right { left: 49%; top: 57%; width: 39%; transform: rotate(-18deg); }
+.inspection-branch-shape.branch-top { left: 48%; top: 28%; width: 30%; transform: rotate(-52deg); }
 
 .inspection-leaf-shape {
   position: absolute;
-  width: 150px;
-  height: 45px;
+  width: 170px;
+  height: 56px;
   border-radius: 100% 0 100% 0;
   background: rgba(91, 151, 86, 0.68);
 }
 
-.inspection-leaf-shape.leaf-one { left: 8%; top: 54%; transform: rotate(-25deg); }
-.inspection-leaf-shape.leaf-two { right: 6%; top: 32%; transform: rotate(28deg) scale(0.82); }
+.inspection-leaf-shape.leaf-one { left: 7%; top: 55%; transform: rotate(-25deg); }
+.inspection-leaf-shape.leaf-two { right: 4%; top: 31%; transform: rotate(28deg) scale(0.92); }
+.inspection-leaf-shape.leaf-three { left: 25%; top: 15%; transform: rotate(-42deg) scale(0.78); }
 
 .inspection-bug {
   position: absolute;
@@ -853,27 +868,65 @@ h2 {
 .inspection-bug.is-frozen { cursor: grab; transform: translate(-50%, -50%) scale(1.12); }
 .inspection-bug.is-spider { width: 23px; height: 23px; color: #c4b4d4; font-size: 13px; opacity: 0.72; }
 
-.inspection-tray {
+.inspection-state-row {
   display: flex;
   align-items: center;
-  gap: 14px;
   margin-top: 14px;
+  min-height: 22px;
 }
 
-.petri-dish {
-  display: grid;
-  place-items: center;
-  width: 112px;
-  height: 58px;
-  flex: 0 0 auto;
-  border: 2px solid rgba(191, 235, 224, 0.82);
-  border-radius: 50%;
-  background: rgba(119, 198, 185, 0.18);
+.capture-jar {
+  position: absolute;
+  z-index: 3;
+  right: 18px;
+  bottom: 16px;
+  width: 105px;
+  height: 122px;
+  padding: 0;
+  border: 1px solid rgba(191, 235, 224, 0.82);
+  border-radius: 17px 17px 24px 24px;
+  background: linear-gradient(90deg, rgba(119, 198, 185, 0.12), rgba(191, 235, 224, 0.32), rgba(119, 198, 185, 0.12));
   box-shadow: inset 0 0 20px rgba(137, 224, 199, 0.18), 0 0 18px rgba(137, 224, 199, 0.18);
   color: var(--aqua);
+  cursor: pointer;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.1em;
+}
+
+.capture-jar::before {
+  content: 'CAPTURE JAR';
+  position: absolute;
+  right: 0;
+  bottom: 12px;
+  left: 0;
+}
+
+.capture-jar::after {
+  content: 'OPEN';
+  position: absolute;
+  top: -14px;
+  right: 17px;
+  left: 17px;
+  padding: 3px 0;
+  border: 1px solid rgba(242, 178, 104, 0.8);
+  border-radius: 5px 5px 2px 2px;
+  background: #2d4232;
+  color: var(--orange);
+  transform-origin: right bottom;
+  transition: transform 160ms ease;
+}
+
+.capture-jar.is-closed::after { content: 'LID CLOSED'; color: var(--muted); }
+.capture-jar.is-open::after { transform: rotate(-22deg) translateY(-5px); }
+.capture-jar.is-open { border-color: var(--lime); box-shadow: inset 0 0 25px rgba(216, 239, 133, 0.16), 0 0 22px rgba(216, 239, 133, 0.3); }
+.capture-jar.has-bug::before { content: 'BUG INSIDE'; color: var(--lime); }
+
+.inspection-bug.is-in-jar {
+  z-index: 4;
+  pointer-events: none;
+  border-color: var(--aqua);
+  box-shadow: 0 0 14px rgba(137, 224, 199, 0.55);
 }
 
 #inspection-state { color: var(--muted); font-size: 11px; line-height: 1.4; }

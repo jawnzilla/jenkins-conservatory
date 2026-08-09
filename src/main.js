@@ -50,6 +50,13 @@ const FOREST_WATER = {
   castRadius: 9.25
 };
 
+const PRACTICE_POND = {
+  centerX: -15.2,
+  centerZ: -20.8,
+  waterRadius: 4.35,
+  castRadius: 3.8
+};
+
 const FOREST_DOCK = {
   halfWidth: 1.85,
   shoreZ: -7.15,
@@ -158,7 +165,7 @@ const dom = {
   qteCursor: document.querySelector('.qte-cursor'),
   qteAction: document.querySelector('#qte-action'),
   inspectionZoom: document.querySelector('#inspection-zoom'),
-  petriDish: document.querySelector('#petri-dish'),
+  captureJar: null,
   inspectionState: document.querySelector('#inspection-state'),
   qteCopy: document.querySelector('#qte-copy'),
   collectionModal: document.querySelector('#collection-modal'),
@@ -230,6 +237,7 @@ let yaw = 0;
 let pitch = -0.08;
 let elapsed = 0;
 let currentNoise = 0;
+let spookRisk = 0.02;
 let toastId = 0;
 let lastPromptKey = '';
 let primaryHeld = false;
@@ -462,6 +470,7 @@ function createHeldToolModel(tool) {
     }
     root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(netPoints), netMaterial));
     for (const radius of [0.11, 0.22, 0.31]) torus(root, radius, 0.012, 0xd7f1e7, [0, 1.04, 0.05], [0, 0, 0], 6, 18);
+    root.userData.netCloth = createLooseNet(root);
   }
 
   if (tool === 'magnifier') {
@@ -483,6 +492,60 @@ function createHeldToolModel(tool) {
   heldToolGroup.userData.basePosition = root.position.clone();
   heldToolGroup.userData.baseRotation = root.rotation.clone();
   heldToolGroup.userData.tool = tool;
+}
+
+function createLooseNet(root) {
+  const rows = 5;
+  const columns = 7;
+  const points = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns - 1; column += 1) {
+      points.push(new THREE.Vector3(), new THREE.Vector3());
+    }
+  }
+  for (let row = 0; row < rows - 1; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      points.push(new THREE.Vector3(), new THREE.Vector3());
+    }
+  }
+  const mesh = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color: 0xd7f1e7, transparent: true, opacity: 0.8 })
+  );
+  root.add(mesh);
+  return { mesh, rows, columns };
+}
+
+function updateLooseNet(netCloth, time, swing) {
+  if (!netCloth) return;
+  const { mesh, rows, columns } = netCloth;
+  const positions = mesh.geometry.attributes.position.array;
+  const gridPoint = (row, column) => {
+    const width = 0.62 - row * 0.07;
+    return new THREE.Vector3(
+      -width + (width * 2 * column) / (columns - 1),
+      1.02 - row * 0.15 + Math.sin(time * 3.1 + column * 0.7 + row) * (0.012 + row * 0.009) + swing * (row / rows) * 0.08,
+      0.06 + row * 0.08 + Math.cos(time * 2.4 + column * 0.9) * (0.012 + row * 0.012)
+    );
+  };
+  let offset = 0;
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns - 1; column += 1) {
+      const left = gridPoint(row, column);
+      const right = gridPoint(row, column + 1);
+      positions[offset++] = left.x; positions[offset++] = left.y; positions[offset++] = left.z;
+      positions[offset++] = right.x; positions[offset++] = right.y; positions[offset++] = right.z;
+    }
+  }
+  for (let row = 0; row < rows - 1; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const top = gridPoint(row, column);
+      const bottom = gridPoint(row + 1, column);
+      positions[offset++] = top.x; positions[offset++] = top.y; positions[offset++] = top.z;
+      positions[offset++] = bottom.x; positions[offset++] = bottom.y; positions[offset++] = bottom.z;
+    }
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
 }
 
 function createSkybox() {
@@ -535,10 +598,14 @@ function updateHeldTool() {
     root.rotation.z += actionPulse * 0.55;
   }
   if (actionName === 'magnifier-inspect') {
-    root.position.z += actionPulse * 0.06;
-    root.rotation.x -= actionPulse * 0.18;
+    root.position.x -= actionPulse * 0.42;
+    root.position.y += actionPulse * 0.26;
+    root.position.z -= actionPulse * 0.28;
+    root.rotation.x -= actionPulse * 0.28;
+    root.rotation.z += actionPulse * 0.22;
   }
   if (actionName && actionProgress >= 1) toolAction = { name: '', startedAt: 0, duration: 0 };
+  if (root.userData.netCloth) updateLooseNet(root.userData.netCloth, elapsed, actionPulse + stride * 0.35);
 }
 
 
@@ -1388,9 +1455,31 @@ function createNatureScatter(zoneKey) {
     }
   }[zoneKey];
   if (!layouts) return;
-  layouts.foliage.forEach(([x, z], index) => createGroundFoliage(x, z, 0.7 + (index % 3) * 0.18, index % 2 ? 0x4d8055 : 0x5b8d5b));
-  layouts.rocks.forEach(([x, z, scale], index) => addRock(x, 0.18, z, scale, index % 2 ? 0x718474 : 0x667b6e));
-  layouts.sticks.forEach(([x, z], index) => createNatureStick(x, z, index));
+  layouts.foliage.forEach(([x, z], index) => {
+    if (isGrassNaturePosition(zoneKey, x, z)) createGroundFoliage(x, z, 0.7 + (index % 3) * 0.18, index % 2 ? 0x4d8055 : 0x5b8d5b);
+  });
+  layouts.rocks.forEach(([x, z, scale], index) => {
+    if (isGrassNaturePosition(zoneKey, x, z)) addRock(x, 0.18, z, scale, index % 2 ? 0x718474 : 0x667b6e);
+  });
+  layouts.sticks.forEach(([x, z], index) => {
+    if (isGrassNaturePosition(zoneKey, x, z)) createNatureStick(x, z, index);
+  });
+}
+
+function isGrassNaturePosition(zoneKey, x, z) {
+  if (zoneKey === 'forest') {
+    const inWater = Math.hypot(x - FOREST_WATER.centerX, z - FOREST_WATER.centerZ) < FOREST_WATER.waterRadius + 1.1;
+    const onDock = Math.abs(x) < FOREST_DOCK.halfWidth + 0.45 && z > FOREST_DOCK.endZ - 0.6 && z < FOREST_DOCK.shoreZ + 0.8;
+    const onParkingHub = Math.abs(x) < 9.2 && z > 3.1;
+    const onMainPath = Math.abs(x) < 3.2 && z > -14 && z < 4;
+    return !inWater && !onDock && !onParkingHub && !onMainPath;
+  }
+  if (zoneKey === 'zoo') {
+    const inMeadow = Math.abs(x + 9) <= 3.65 && Math.abs(z + 10) <= 3.65;
+    const inPollinator = Math.abs(x - 9) <= 3.65 && Math.abs(z + 10) <= 3.65;
+    return inMeadow || inPollinator;
+  }
+  return false;
 }
 
 function lootNatureStick(loot) {
@@ -1421,6 +1510,20 @@ function steerCritterFromEdge(critter, delta) {
   critter.direction += clamp(turn, -delta * 3.8, delta * 3.8);
 }
 
+function keepGroundAnimalOnLand(animal, critter) {
+  if (currentZone !== 'forest') return;
+  const offsetX = animal.position.x - FOREST_WATER.centerX;
+  const offsetZ = animal.position.z - FOREST_WATER.centerZ;
+  const distance = Math.hypot(offsetX, offsetZ);
+  const safeRadius = FOREST_WATER.waterRadius + 0.62;
+  if (distance >= safeRadius) return;
+  const scale = safeRadius / Math.max(0.001, distance);
+  animal.position.x = FOREST_WATER.centerX + offsetX * scale;
+  animal.position.z = FOREST_WATER.centerZ + offsetZ * scale;
+  critter.direction = Math.atan2(offsetX, offsetZ);
+  critter.home.copy(animal.position);
+}
+
 function respawnCritter(critter) {
   const bounds = ZONES[currentZone].bounds;
   for (let attempt = 0; attempt < 18; attempt += 1) {
@@ -1445,9 +1548,15 @@ function createBugNode(species, position, color) {
   const group = new THREE.Group();
   group.position.set(...position);
   const plant = new THREE.Group();
-  cylinder(plant, 0.07, 0.1, 0.85, 0x5b7448, [0, 0.42, 0], { segments: 5, rotation: [0.1, 0, 0.08] });
-  for (let i = 0; i < 4; i += 1) {
-    sphere(plant, 0.17, 0x5b8b54, [Math.sin(i * 1.7) * 0.2, 0.45 + i * 0.12, Math.cos(i * 1.7) * 0.18], { scale: [1.4, 0.55, 0.7] });
+  cylinder(plant, 0.08, 0.12, 1.38, 0x5b7448, [0, 0.69, 0], { segments: 6, rotation: [0.08, 0, 0.05] });
+  cylinder(plant, 0.045, 0.06, 0.86, 0x6f8b4f, [-0.26, 0.86, 0], { segments: 5, rotation: [0, 0, -0.62] });
+  cylinder(plant, 0.045, 0.06, 0.9, 0x6f8b4f, [0.28, 0.98, 0], { segments: 5, rotation: [0, 0, 0.56] });
+  cylinder(plant, 0.04, 0.05, 0.72, 0x6f8b4f, [0.04, 1.27, 0], { segments: 5, rotation: [0, 0, -0.42] });
+  for (const [x, y, z, sx, sy, rz] of [
+    [-0.56, 1.0, 0.02, 1.65, 0.62, -0.35], [0.64, 1.14, 0.02, 1.65, 0.62, 0.35],
+    [-0.24, 1.48, 0.02, 1.45, 0.55, -0.5], [0.33, 0.67, 0.02, 1.45, 0.55, 0.42]
+  ]) {
+    sphere(plant, 0.2, 0x5b8b54, [x, y, z], { scale: [sx, sy, 0.76], rotation: [0, 0, rz] });
   }
   group.add(plant);
   const bugModel = createAnimalModel(species, 0.43);
@@ -1455,12 +1564,13 @@ function createBugNode(species, position, color) {
   bugModel.visible = false;
   group.add(bugModel);
   const marker = new THREE.Group();
-  const markerRing = addMesh(marker, new THREE.TorusGeometry(0.34, 0.035, 5, 18), mat(color, { emissive: color, emissiveIntensity: 0.9, transparent: true, opacity: 0.92 }), [0, 1.48, 0], [-Math.PI / 2, 0, 0]);
+  const markerRing = addMesh(marker, new THREE.TorusGeometry(0.26, 0.025, 5, 18), mat(color, { emissive: color, emissiveIntensity: 0.6, transparent: true, opacity: 0.46 }), [0.33, 1.1, 0], [-Math.PI / 2, 0, 0]);
   markerRing.rotation.z = 0.3;
-  const markerCore = sphere(marker, 0.08, color, [0, 1.48, 0], { material: { emissive: color, emissiveIntensity: 1.4 } });
+  const markerCore = sphere(marker, 0.045, color, [0.33, 1.1, 0], { material: { emissive: color, emissiveIntensity: 0.8 } });
   group.add(marker);
   world.add(group);
-  bugNodes.push({ species, group, plant, bugModel, marker, markerCore, position: new THREE.Vector3(...position), aimPosition: new THREE.Vector3(position[0] + 0.3, 1.1, position[2]), revealed: false, cooldown: 0, color });
+  const focusPoint = new THREE.Vector3(position[0] + 0.33, 1.1, position[2]);
+  bugNodes.push({ species, group, plant, bugModel, marker, markerCore, position: new THREE.Vector3(...position), focusPoint, aimPosition: focusPoint.clone(), revealed: false, cooldown: 0, color });
 }
 
 function buildZoo() {
@@ -1803,14 +1913,14 @@ function createAnimalModel(species, scale = 1) {
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, -0.18]);
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, 0.18]);
   } else if (species === 'dragonfly') {
-    cylinder(group, 0.055, 0.075, 0.9, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 6 });
+    cylinder(group, 0.025, 0.09, 1.08, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
+    sphere(group, 0.075, 0x26333e, [0.58, 0, 0], { scale: [1.25, 0.82, 0.82] });
     const wingMaterial = { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false };
-    box(group, [0.72, 0.025, 0.16], details.color, [-0.22, 0.12, -0.14], { material: wingMaterial });
-    box(group, [0.72, 0.025, 0.16], details.color, [-0.22, 0.12, 0.14], { material: wingMaterial });
-    box(group, [0.62, 0.025, 0.13], details.color, [0.2, 0.08, -0.12], { material: wingMaterial });
-    box(group, [0.62, 0.025, 0.13], details.color, [0.2, 0.08, 0.12], { material: wingMaterial });
-    for (const x of [-0.4, -0.1, 0.2, 0.5]) cylinder(group, 0.012, 0.012, 0.2, 0x4c6e7e, [x, 0.14, 0], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
-    sphere(group, 0.06, 0x26333e, [0.42, 0, 0]);
+    box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, -0.42], { material: wingMaterial, rotation: [0, 0.08, -0.05] });
+    box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, -0.36], { material: wingMaterial, rotation: [0, -0.08, 0.06] });
+    box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, 0.42], { material: wingMaterial, rotation: [0, -0.08, 0.05] });
+    box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, 0.36], { material: wingMaterial, rotation: [0, 0.08, -0.06] });
+    for (const x of [-0.32, -0.02, 0.28]) cylinder(group, 0.01, 0.01, 0.22, 0x4c6e7e, [x, 0.15, 0], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
   } else if (species === 'caterpillar') {
     for (let index = 0; index < 5; index += 1) {
       sphere(group, 0.12, index % 2 ? 0x263b2f : details.color, [(index - 2) * 0.13, 0.08, 0], { scale: [1.05, 0.72, 0.82] });
@@ -1865,6 +1975,7 @@ function enterZone(zoneKey, announce = false) {
   closeAllModals();
   resetWorld();
   currentZone = zoneKey;
+  spookRisk = 0.02;
   player.set(0, 1.72, 15);
   spawnPoint.copy(player);
   yaw = 0;
@@ -1914,18 +2025,46 @@ function removeFishingVisuals() {
 function createFishingVisuals(landingPoint, hotspot = null) {
   removeFishingVisuals();
   const group = new THREE.Group();
-  const bobber = sphere(group, 0.14, 0xff7c63, [landingPoint.x, 0.3, landingPoint.z], { material: { emissive: 0x7a261d, emissiveIntensity: 1.05 } });
-  const bobberTop = sphere(group, 0.06, 0xf8ead0, [landingPoint.x, 0.44, landingPoint.z]);
+  const flightStart = camera.position.clone();
+  const bobber = sphere(group, 0.14, 0xff7c63, [flightStart.x, flightStart.y - 0.28, flightStart.z], { material: { emissive: 0x7a261d, emissiveIntensity: 1.05 } });
+  const bobberTop = sphere(group, 0.06, 0xf8ead0, [flightStart.x, flightStart.y - 0.14, flightStart.z]);
   const lineGeometry = new THREE.BufferGeometry().setFromPoints([camera.position.clone(), bobber.position.clone()]);
   const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xf3dfb5, transparent: true, opacity: 0.8 }));
   group.add(line);
   world.add(group);
-  fishingVisuals = { group, bobber, bobberTop, line, hotspot, landingPoint: landingPoint.clone() };
+  fishingVisuals = { group, bobber, bobberTop, line, hotspot, landingPoint: landingPoint.clone(), flightStart: new THREE.Vector3(flightStart.x, flightStart.y - 0.28, flightStart.z), flightTarget: new THREE.Vector3(landingPoint.x, 0.3, landingPoint.z), flightProgress: 0, isFlying: true };
 }
 
-function updateFishingVisuals() {
+function updateCastPreview() {
+  if (fishing.phase !== 'charging') {
+    if (fishingVisuals?.preview) removeFishingVisuals();
+    return;
+  }
+  const landingPoint = getCastLandingPoint();
+  if (!fishingVisuals?.preview) {
+    const group = new THREE.Group();
+    const ring = addMesh(group, new THREE.RingGeometry(0.32, 0.48, 24), mat(0x9fead4, { transparent: true, opacity: 0.72, emissive: 0x286d6b, emissiveIntensity: 0.8, side: THREE.DoubleSide }), [landingPoint.x, 0.2, landingPoint.z], [-Math.PI / 2, 0, 0]);
+    const core = sphere(group, 0.08, 0xd7f7ec, [landingPoint.x, 0.25, landingPoint.z], { material: { emissive: 0x75e0bd, emissiveIntensity: 1.2 } });
+    world.add(group);
+    fishingVisuals = { group, ring, core, preview: true };
+  } else {
+    fishingVisuals.ring.position.set(landingPoint.x, 0.2, landingPoint.z);
+    fishingVisuals.core.position.set(landingPoint.x, 0.25, landingPoint.z);
+  }
+  fishingVisuals.ring.scale.setScalar(0.92 + Math.sin(elapsed * 4.5) * 0.08);
+}
+
+function updateFishingVisuals(delta = 0) {
   if (!fishingVisuals) return;
+  if (fishingVisuals.preview) return;
   const { bobber, bobberTop, line } = fishingVisuals;
+  if (fishingVisuals.isFlying) {
+    fishingVisuals.flightProgress = clamp(fishingVisuals.flightProgress + delta * 2.15, 0, 1);
+    const progress = fishingVisuals.flightProgress;
+    bobber.position.lerpVectors(fishingVisuals.flightStart, fishingVisuals.flightTarget, progress);
+    bobber.position.y += Math.sin(progress * Math.PI) * 2.4;
+    if (progress >= 1) fishingVisuals.isFlying = false;
+  }
   const linePositions = line.geometry.attributes.position.array;
   linePositions[0] = camera.position.x;
   linePositions[1] = camera.position.y - 0.28;
@@ -1935,7 +2074,7 @@ function updateFishingVisuals() {
   linePositions[5] = bobber.position.z;
   line.geometry.attributes.position.needsUpdate = true;
   const wave = Math.sin(elapsed * 3.2) * 0.035;
-  bobber.position.y = 0.28 + wave;
+  if (!fishingVisuals.isFlying) bobber.position.y = 0.28 + wave;
   bobberTop.position.set(bobber.position.x, bobber.position.y + 0.14, bobber.position.z);
   if (fishing.phase === 'bite') {
     const pulse = 1 + Math.sin(elapsed * 18) * 0.28;
@@ -2059,6 +2198,7 @@ function landFish() {
     setStatus('Practice pond reset. Try another cast without affecting your field notes.');
     return;
   }
+  spookRisk = clamp(spookRisk + 0.12, 0, 1);
   const record = {
     species,
     size: Number(fishing.fishSize.toFixed(1)),
@@ -2190,6 +2330,7 @@ function useNet() {
 
 function catchCritter(critter) {
   critter.caught = true;
+  spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught[critter.species] = (save.caught[critter.species] || 0) + 1;
   save.coins += 15;
   world.remove(critter.group);
@@ -2200,6 +2341,7 @@ function catchCritter(critter) {
 }
 
 function scareCritter(critter) {
+  spookRisk = clamp(spookRisk + 0.08, 0, 1);
   critter.state = 'flee';
   critter.fleeTime = 3.8;
   tempVector.subVectors(critter.group.position, player).setY(0).normalize();
@@ -2207,6 +2349,7 @@ function scareCritter(critter) {
 }
 
 function catchBug(bug) {
+  spookRisk = clamp(spookRisk + 0.14, 0, 1);
   bug.revealed = false;
   bug.cooldown = 8;
   bug.bugModel.visible = false;
@@ -2221,9 +2364,9 @@ function catchBug(bug) {
 
 function startBugObservation() {
   if (!['forest', 'zoo'].includes(currentZone) || activeTool !== 'magnifier') return;
-  const bug = getAimBug(false) || getNearbyBug();
+  const bug = getAimBug(false);
   if (!bug) {
-    toast('No moving trace nearby. Follow the little light above the leaves.', 'warning');
+    toast('Aim at the subtle pulse on the plant branch before inspecting.', 'warning');
     return;
   }
   if (bug.revealed) {
@@ -2231,10 +2374,11 @@ function startBugObservation() {
     return;
   }
   triggerToolAction('magnifier-inspect', 0.5);
-  dom.inspectionZoom.innerHTML = '<div class="inspection-plant-shape"></div><div class="inspection-leaf-shape leaf-one"></div><div class="inspection-leaf-shape leaf-two"></div><button id="inspection-bug" class="inspection-bug" type="button" aria-label="Moving bug">✣</button>';
+  dom.inspectionZoom.innerHTML = '<div class="inspection-plant-shape"></div><div class="inspection-branch-shape branch-left"></div><div class="inspection-branch-shape branch-right"></div><div class="inspection-branch-shape branch-top"></div><div class="inspection-leaf-shape leaf-one"></div><div class="inspection-leaf-shape leaf-two"></div><div class="inspection-leaf-shape leaf-three"></div><button id="capture-jar" class="capture-jar is-closed" type="button" aria-label="Open capture jar"></button><button id="inspection-bug" class="inspection-bug" type="button" aria-label="Moving bug">✣</button>';
   const bugElement = dom.inspectionZoom.querySelector('#inspection-bug');
+  dom.captureJar = dom.inspectionZoom.querySelector('#capture-jar');
   const spider = bug.species === 'spider';
-  qteState = { kind: 'inspection', bug, x: spider ? 72 : 28, y: spider ? 30 : 46, vx: spider ? -8 : 10, vy: spider ? 5 : -7, hovering: false, hoverTime: 0, frozen: false, dragging: false };
+  qteState = { kind: 'inspection', bug, x: spider ? 72 : 28, y: spider ? 30 : 46, vx: spider ? -8 : 10, vy: spider ? 5 : -7, hovering: false, hoverTime: 0, frozen: false, dragging: false, jarOpen: false, bugInJar: false, jarLidOn: false };
   bugElement.classList.toggle('is-spider', spider);
   bugElement.textContent = bug.species === 'worm' ? '≈' : bug.species === 'caterpillar' ? '◍' : '✣';
   bugElement.addEventListener('pointerenter', () => { if (qteState) qteState.hovering = true; });
@@ -2254,22 +2398,57 @@ function startBugObservation() {
     if (!qteState?.dragging) return;
     qteState.dragging = false;
     const bugRect = bugElement.getBoundingClientRect();
-    const dishRect = dom.petriDish.getBoundingClientRect();
-    const inside = bugRect.left + bugRect.width / 2 > dishRect.left && bugRect.left + bugRect.width / 2 < dishRect.right && bugRect.top + bugRect.height / 2 > dishRect.top && bugRect.top + bugRect.height / 2 < dishRect.bottom;
-    if (inside) completeBugCapture(bug);
-    else dom.inspectionState.textContent = 'Missed the dish. Drag the frozen bug into the circle.';
+    const jarRect = dom.captureJar.getBoundingClientRect();
+    const centerX = bugRect.left + bugRect.width / 2;
+    const centerY = bugRect.top + bugRect.height / 2;
+    const inside = centerX > jarRect.left && centerX < jarRect.right && centerY > jarRect.top && centerY < jarRect.bottom;
+    if (inside && qteState.jarOpen) {
+      qteState.bugInJar = true;
+      bugElement.classList.add('is-in-jar');
+      qteState.x = ((jarRect.left + jarRect.width * 0.5 - dom.inspectionZoom.getBoundingClientRect().left) / dom.inspectionZoom.getBoundingClientRect().width) * 100;
+      qteState.y = ((jarRect.top + jarRect.height * 0.45 - dom.inspectionZoom.getBoundingClientRect().top) / dom.inspectionZoom.getBoundingClientRect().height) * 100;
+      dom.captureJar.classList.add('has-bug');
+      dom.qteAction.classList.remove('is-hidden');
+      dom.inspectionState.textContent = 'Bug captured. Put the lid on the jar.';
+    } else {
+      qteState.frozen = false;
+      qteState.hovering = false;
+      qteState.hoverTime = 0;
+      bugElement.classList.remove('is-frozen');
+      dom.inspectionState.textContent = qteState.jarOpen ? 'It escaped. Track it again, then drag carefully into the open jar.' : 'Open the jar first. The bug is moving again.';
+    }
     bugElement.releasePointerCapture?.(event.pointerId);
   });
+  dom.captureJar.addEventListener('click', () => {
+    if (!qteState || qteState.bugInJar) return;
+    qteState.jarOpen = true;
+    dom.captureJar.classList.remove('is-closed');
+    dom.captureJar.classList.add('is-open');
+    dom.inspectionState.textContent = qteState.frozen ? 'Jar open. Drag the frozen bug into it.' : 'Jar open. Hold the lens over the moving bug.';
+  });
   modalOpen = true;
-  dom.qteCopy.textContent = `A ${SPECIES[bug.species].label.toLowerCase()} is hiding on this plant. Hover over it until it freezes, then drag it into the petri dish.`;
-  dom.inspectionState.textContent = 'Hover over the moving bug until it freezes.';
+  dom.qteCopy.textContent = `A ${SPECIES[bug.species].label.toLowerCase()} is following this branch. Open the jar, hold the lens over it until it freezes, then drag it into the jar.`;
+  dom.inspectionState.textContent = 'Open the capture jar before handling the bug.';
+  dom.qteAction.classList.add('is-hidden');
   dom.qteModal.classList.remove('is-hidden');
   document.exitPointerLock?.();
   setStatus('Movement paused for close observation.');
 }
 
 function resolveBugObservation() {
-  if (qteState?.kind === 'inspection' && qteState.frozen) completeBugCapture(qteState.bug);
+  if (qteState?.kind !== 'inspection') return;
+  if (!qteState.bugInJar) {
+    dom.inspectionState.textContent = 'Drag the frozen bug into the open capture jar first.';
+    return;
+  }
+  if (!qteState.jarLidOn) {
+    qteState.jarLidOn = true;
+    dom.captureJar.classList.remove('is-open');
+    dom.captureJar.classList.add('is-closed');
+    dom.qteAction.classList.add('is-hidden');
+    dom.inspectionState.textContent = 'Jar sealed. The specimen is secure.';
+    completeBugCapture(qteState.bug);
+  }
 }
 
 function completeBugCapture(bug) {
@@ -2287,7 +2466,7 @@ function completeBugCapture(bug) {
     save.coins += bug.species === 'worm' ? 4 : 8;
     saveGame();
     updateHUD();
-    toast(`${SPECIES[bug.species].label} placed in the petri dish${bug.species === 'worm' ? ' — fishing lure added' : ''}.`, 'success');
+    toast(`${SPECIES[bug.species].label} sealed in the capture jar${bug.species === 'worm' ? ' — fishing lure added' : ''}.`, 'success');
     setStatus(bug.species === 'worm' ? 'The worm is ready to use as fishing bait.' : 'The tiny field note is safely recorded.');
     return;
   }
@@ -2310,17 +2489,18 @@ function getCastLandingPoint() {
   raycaster.setFromCamera(centerScreen, camera);
   const origin = raycaster.ray.origin;
   const direction = raycaster.ray.direction;
-  const landing = new THREE.Vector3(FOREST_WATER.centerX, 0.18, FOREST_WATER.centerZ);
+  const water = currentZone === 'zoo' ? PRACTICE_POND : FOREST_WATER;
+  const landing = new THREE.Vector3(water.centerX, 0.18, water.centerZ);
   if (Math.abs(direction.y) > 0.01) {
     const distance = (0.18 - origin.y) / direction.y;
     if (distance > 0) landing.copy(origin).addScaledVector(direction, distance);
   }
   landing.y = 0.18;
-  const offset = new THREE.Vector3(landing.x - FOREST_WATER.centerX, 0, landing.z - FOREST_WATER.centerZ);
-  if (offset.lengthSq() > FOREST_WATER.castRadius * FOREST_WATER.castRadius) {
-    offset.normalize().multiplyScalar(FOREST_WATER.castRadius);
-    landing.x = FOREST_WATER.centerX + offset.x;
-    landing.z = FOREST_WATER.centerZ + offset.z;
+  const offset = new THREE.Vector3(landing.x - water.centerX, 0, landing.z - water.centerZ);
+  if (offset.lengthSq() > water.castRadius * water.castRadius) {
+    offset.normalize().multiplyScalar(water.castRadius);
+    landing.x = water.centerX + offset.x;
+    landing.z = water.centerZ + offset.z;
   }
   return landing;
 }
@@ -2390,14 +2570,19 @@ function updateCritters(delta) {
         const drift = Math.sin(critter.stateTime * 0.65 + critter.home.z) * 0.035;
         animal.position.x += Math.sin(critter.direction) * delta * 0.28;
         animal.position.z += Math.cos(critter.direction) * delta * 0.28;
-        if (animal.position.distanceTo(critter.home) > 4.1) critter.direction += Math.PI * 0.76;
-        animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 3 + critter.home.x) * 0.2 : 0.42 + drift;
+        if (animal.position.distanceTo(critter.home) > 4.1) {
+          tempVector.subVectors(critter.home, animal.position).setY(0).normalize();
+          critter.direction = Math.atan2(tempVector.x, tempVector.z);
+        }
+        if (!isFlying) keepGroundAnimalOnLand(animal, critter);
+        animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 2.1 + critter.home.x) * 0.11 + Math.cos(elapsed * 1.15 + critter.home.z) * 0.05 : 0.42 + drift;
       }
     } else if (critter.state === 'flee') {
       critter.fleeTime -= delta;
       animal.position.x += Math.sin(critter.direction) * delta * 3.4;
       animal.position.z += Math.cos(critter.direction) * delta * 3.4;
-      animal.position.y = isFlying ? critter.home.y + Math.abs(Math.sin(elapsed * 9)) * 0.18 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
+      animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 2.6 + critter.home.x) * 0.08 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
+      if (!isFlying) keepGroundAnimalOnLand(animal, critter);
       const bounds = ZONES[currentZone].bounds;
       if (animal.position.x < bounds.minX - 1 || animal.position.x > bounds.maxX + 1 || animal.position.z < bounds.minZ - 1 || animal.position.z > bounds.maxZ + 1) {
         world.remove(animal);
@@ -2427,16 +2612,17 @@ function updateBugNodes(delta) {
     const near = distanceTo(bug.position) < 8.6;
     bug.marker.visible = bug.cooldown <= 0 && (!bug.revealed || near);
     if (bug.marker.visible) {
-      const pulse = 1 + Math.sin(elapsed * 4.5 + bug.position.x) * 0.18;
+      const pulse = 1 + Math.sin(elapsed * 2.2 + bug.position.x) * 0.1;
       bug.marker.scale.setScalar(pulse);
-      bug.marker.rotation.y += delta * 0.65;
-      bug.markerCore.material.emissiveIntensity = 0.95 + Math.sin(elapsed * 6) * 0.4;
+      bug.marker.rotation.y += delta * 0.18;
+      bug.markerCore.material.emissiveIntensity = 0.7 + Math.sin(elapsed * 3.2) * 0.18;
     }
     if (bug.revealed) {
       bug.bugModel.position.y = 1.1 + Math.sin(elapsed * 4 + bug.position.x) * 0.14;
       bug.bugModel.rotation.y += delta * 2.6;
     }
-    bug.aimPosition.set(bug.group.position.x + bug.bugModel.position.x, bug.group.position.y + bug.bugModel.position.y, bug.group.position.z + bug.bugModel.position.z);
+    if (bug.revealed) bug.aimPosition.set(bug.group.position.x + bug.bugModel.position.x, bug.group.position.y + bug.bugModel.position.y, bug.group.position.z + bug.bugModel.position.z);
+    else bug.aimPosition.copy(bug.focusPoint);
   }
 }
 
@@ -2475,7 +2661,7 @@ function updateZooAnimals(delta) {
       exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045;
       exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
     } else {
-      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.8 + exhibit.phase) * 0.24;
+      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.1 + exhibit.phase) * 0.1 + Math.cos(elapsed * 1.1 + exhibit.phase) * 0.04;
       exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
       exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16;
     }
@@ -2534,7 +2720,14 @@ function updateMovement(delta) {
       grounded = true;
     }
   }
-  currentNoise = moving ? (sneaking ? 0.16 : 0.78) : 0.02;
+  const riskTarget = moving ? (sneaking ? 0.06 : 0.82) : 0.02;
+  const riskRate = moving ? (sneaking ? 0.8 : 0.18) : 0.42;
+  spookRisk = clamp(spookRisk + (riskTarget - spookRisk) * delta * riskRate, 0.02, 1);
+  currentNoise = spookRisk;
+  dom.noiseValue.textContent = currentNoise > 0.55 ? 'HIGH' : currentNoise > 0.25 ? 'MEDIUM' : 'LOW';
+  dom.noiseValue.style.color = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
+  dom.noiseMeter.style.width = `${Math.max(4, currentNoise * 100)}%`;
+  dom.noiseMeter.style.background = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
   if (moving && fishing.phase === 'waiting') startReelIn();
   camera.position.set(player.x, player.y + jumpOffset + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
 }
@@ -2556,9 +2749,9 @@ function updatePrompt() {
   const target = getInteractionTarget();
   let label = '';
   if (target) label = target.label;
-  const nearbyBug = ['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier' ? getNearbyBug() : null;
-  if (!target && nearbyBug && distanceTo(nearbyBug.position) < 8.6 && !nearbyBug.revealed) {
-    label = 'Inspect bug trace';
+  const aimedBug = ['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier' ? getAimBug(false) : null;
+  if (!target && aimedBug && distanceTo(aimedBug.focusPoint) < 7.2 && !aimedBug.revealed) {
+    label = 'Hold lens on pulsing plant section';
   }
   if (!label) {
     dom.promptCard.classList.add('is-hidden');
@@ -2567,7 +2760,7 @@ function updatePrompt() {
   }
   const promptKey = `${currentZone}:${label}:${activeTool}`;
   if (promptKey !== lastPromptKey) {
-    dom.promptKey.textContent = activeTool === 'magnifier' && nearbyBug ? 'E' : 'E';
+    dom.promptKey.textContent = 'E';
     dom.promptText.textContent = label;
     lastPromptKey = promptKey;
   }
@@ -2744,7 +2937,7 @@ function setTool(tool) {
   createHeldToolModel(tool);
   document.querySelectorAll('.tool-button').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
   updateHUD();
-  setStatus(tool === 'rod' ? 'Aim for a circular disturbance in the lake.' : tool === 'net' ? 'Sneak close. A fast swing is only useful at short range.' : 'Watch for a pulse above the leaves, then inspect it.');
+  setStatus(tool === 'rod' ? 'Aim for water, then hold to preview the landing ring.' : tool === 'net' ? 'Sneak close. A fast swing is only useful at short range.' : 'Hold the lens on a subtle pulse at the plant branch to inspect it.');
 }
 
 function setTipsMenuOpen(open) {
@@ -2974,19 +3167,19 @@ function updateQTE(delta) {
   if (!qteState || qteState.kind !== 'inspection') return;
   const bugElement = dom.inspectionZoom.querySelector('#inspection-bug');
   if (!bugElement) return;
-  if (!qteState.frozen && !qteState.dragging) {
+  if (!qteState.frozen && !qteState.dragging && !qteState.bugInJar) {
     if (qteState.hovering) qteState.hoverTime += delta;
     else qteState.hoverTime = Math.max(0, qteState.hoverTime - delta * 0.7);
     qteState.x += qteState.vx * delta;
-    qteState.y += qteState.vy * delta;
+    qteState.y += qteState.vy * delta + Math.sin(elapsed * 2.4) * delta * 1.8;
     if (qteState.x < 12 || qteState.x > 88) qteState.vx *= -1;
     if (qteState.y < 14 || qteState.y > 86) qteState.vy *= -1;
     if (qteState.hoverTime >= 1.15) {
       qteState.frozen = true;
       qteState.vx = 0;
       qteState.vy = 0;
-      dom.inspectionState.textContent = 'Frozen. Drag it into the petri dish.';
-      toast('The bug froze under the lens. Drag it carefully.', 'success');
+      dom.inspectionState.textContent = qteState.jarOpen ? 'Frozen. Drag it into the open jar.' : 'Frozen, but the jar is closed. Open it before dragging.';
+      toast('The bug froze under the lens. Drag it carefully into the jar.', 'success');
     }
   }
   bugElement.style.left = `${qteState.x}%`;
@@ -3002,7 +3195,8 @@ function animate() {
   updateMovement(delta);
   updateHeldTool();
   updateFishing(delta);
-  updateFishingVisuals();
+  updateCastPreview();
+  updateFishingVisuals(delta);
   updateCritters(delta);
   updateBugNodes(delta);
   updateTreeInteractions();
