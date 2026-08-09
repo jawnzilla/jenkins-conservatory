@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#16251d" />
+    <meta name="description" content="Jenkins Conservatory — a low-poly wildlife fieldwork slice." />
+    <title>Jenkins Conservatory</title>
+  </head>
+  <body>
+    <main id="game-shell" aria-label="Jenkins Conservatory game">
+      <canvas id="game-canvas" aria-label="Three.js game canvas"></canvas>
+      <div id="hud" class="hud">
+        <header class="topbar panel">
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">✦</span>
+            <div>
+              <p class="eyebrow">FIELD NOTE 001</p>
+              <h1>Jenkins Conservatory</h1>
+            </div>
+          </div>
+          <div class="topbar-meta">
+            <span id="zone-label">PARKING LOT</span>
+            <span class="meta-divider" aria-hidden="true"></span>
+            <span id="coin-label">120¢</span>
+          </div>
+        </header>
+
+        <section class="left-rail">
+          <div class="panel status-card">
+            <div class="status-row">
+              <span class="status-dot" id="lock-dot"></span>
+              <span id="lock-label">CLICK TO ENTER FIELD MODE</span>
+            </div>
+            <p id="status-message" class="status-message">Find the car to choose your first destination.</p>
+          </div>
+          <div id="prompt-card" class="panel prompt-card is-hidden" aria-live="polite">
+            <span class="prompt-key" id="prompt-key">E</span>
+            <span id="prompt-text">Interact</span>
+          </div>
+        </section>
+
+        <section class="right-rail">
+          <div class="panel equipment-card">
+            <div class="card-heading">
+              <span class="eyebrow">FIELD KIT</span>
+              <span id="save-status" class="save-status">SAVED</span>
+            </div>
+            <div id="equipment-list" class="equipment-list"></div>
+          </div>
+          <div id="noise-card" class="panel noise-card">
+            <div class="card-heading">
+              <span class="eyebrow">SPOOK RISK</span>
+              <span id="noise-value">LOW</span>
+            </div>
+            <div class="meter"><span id="noise-meter"></span></div>
+            <p>Hold <b>SHIFT</b> to move quietly.</p>
+          </div>
+        </section>
+
+        <div id="crosshair" class="crosshair" aria-hidden="true"><span></span></div>
+        <div id="action-hint" class="action-hint" aria-live="polite"></div>
+
+        <section id="action-dock" class="action-dock" aria-label="Current tool actions">
+          <button id="primary-action" class="action-button" type="button">CLICK TO LOOK</button>
+          <button id="reel-action" class="action-button accent is-hidden" type="button">REEL / SET HOOK</button>
+        </section>
+
+        <section id="equipment-dock" class="equipment-dock" aria-label="Equipment selection">
+          <button class="tool-button active" data-tool="rod" type="button"><span class="tool-icon">⌁</span><span>ROD</span></button>
+          <button class="tool-button" data-tool="net" type="button"><span class="tool-icon">◇</span><span>NET</span></button>
+          <button class="tool-button" data-tool="magnifier" type="button"><span class="tool-icon">⌕</span><span>GLASS</span></button>
+        </section>
+
+        <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+      </div>
+
+      <section id="travel-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="travel-title">
+        <div class="modal-card panel">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">VEHICLE TRANSIT</p>
+              <h2 id="travel-title">Choose a destination</h2>
+            </div>
+            <button class="icon-button" data-close-modal="travel-modal" type="button" aria-label="Close destination menu">×</button>
+          </div>
+          <div id="travel-options" class="travel-options"></div>
+          <p class="modal-footnote">Each stop loads as a distinct field zone. Your field kit is carried between them.</p>
+        </div>
+      </section>
+
+      <section id="shop-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="shop-title">
+        <div class="modal-card panel shop-modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">SUPPLY DEPOT</p>
+              <h2 id="shop-title">Field store</h2>
+            </div>
+            <button class="icon-button" data-close-modal="shop-modal" type="button" aria-label="Close store">×</button>
+          </div>
+          <div id="shop-items" class="shop-items"></div>
+          <p class="modal-footnote">Starter pack supplies are replenishable. Fish only bite when their lure and bait belong together.</p>
+        </div>
+      </section>
+
+      <section id="qte-modal" class="modal-shell qte-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="qte-title">
+        <div class="qte-card panel">
+          <p class="eyebrow">FIELD OBSERVATION</p>
+          <h2 id="qte-title">Something moved in the leaves.</h2>
+          <p id="qte-copy">Center the marker in the observation band, then click to focus the magnifying glass.</p>
+          <div class="qte-track" id="qte-track"><span class="qte-success-zone"></span><span class="qte-cursor"></span></div>
+          <button id="qte-action" class="action-button accent" type="button">FOCUS</button>
+          <p class="qte-tip">Movement pauses while you inspect. Press Esc to step away.</p>
+        </div>
+      </section>
+
+      <section id="collection-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="collection-title">
+        <div class="modal-card panel collection-modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">CONSERVATORY RECORD</p>
+              <h2 id="collection-title">The living collection</h2>
+            </div>
+            <button class="icon-button" data-close-modal="collection-modal" type="button" aria-label="Close collection">×</button>
+          </div>
+          <div id="collection-grid" class="collection-grid"></div>
+          <p class="modal-footnote">For now the zoo is a quiet showcase. Exhibits will become operational habitats in a future slice.</p>
+        </div>
+      </section>
+
+      <div id="loading-screen" class="loading-screen">
+        <div class="loading-card panel">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <p class="eyebrow">FIELD NOTE 001</p>
+          <h2>Jenkins Conservatory</h2>
+          <p>Preparing the low-poly field guide…</p>
+          <div class="loading-line"><span></span></div>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
