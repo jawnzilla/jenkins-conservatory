@@ -37,6 +37,14 @@ const ZONES = {
   }
 };
 
+const FOREST_WATER = {
+  centerX: 0,
+  centerZ: -17,
+  waterRadius: 10,
+  playerRadius: 8.65,
+  castRadius: 9.25
+};
+
 const SPECIES = {
   trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms' },
   sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs' },
@@ -187,7 +195,10 @@ let interactables = [];
 let hotspots = [];
 let critters = [];
 let bugNodes = [];
+let treeInteractions = [];
+let zooAnimals = [];
 let fishingVisuals = null;
+let toolAction = { name: '', startedAt: 0, duration: 0 };
 let spawnPoint = new THREE.Vector3(0, 1.72, 15);
 const player = new THREE.Vector3(0, 1.72, 15);
 
@@ -195,6 +206,10 @@ const fishing = {
   phase: 'idle',
   charge: 0,
   castTarget: null,
+  castLanding: null,
+  castBait: null,
+  castLure: null,
+  baitConsumed: false,
   biteAt: 0,
   biteDeadline: 0,
   reelProgress: 0,
@@ -352,6 +367,10 @@ function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 
   return addMesh(parent, new THREE.TorusGeometry(majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
 }
 
+function triggerToolAction(name, duration = 0.45) {
+  toolAction = { name, startedAt: elapsed, duration };
+}
+
 function updateHeldTool() {
   const root = heldToolGroup.userData.root;
   const basePosition = heldToolGroup.userData.basePosition;
@@ -359,13 +378,40 @@ function updateHeldTool() {
   if (!root || !basePosition || !baseRotation) return;
   const moving = isKeyDown('KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd');
   const stride = moving ? Math.sin(elapsed * 8.2) : Math.sin(elapsed * 1.8) * 0.2;
+  const actionName = toolAction.name;
+  const actionProgress = actionName ? clamp((elapsed - toolAction.startedAt) / toolAction.duration, 0, 1) : 0;
+  const actionPulse = Math.sin(actionProgress * Math.PI);
   root.position.copy(basePosition);
   root.position.y += stride * (moving ? 0.018 : 0.004);
   root.rotation.copy(baseRotation);
   root.rotation.z += stride * (moving ? 0.035 : 0.008);
   if (fishing.phase === 'charging') root.rotation.x -= fishing.charge * 0.2;
   if (fishing.phase === 'reeling') root.rotation.x += Math.sin(elapsed * 10) * 0.035;
+  if (actionName === 'rod-charge') {
+    root.position.y += actionPulse * 0.055;
+    root.rotation.z -= actionPulse * 0.12;
+  }
+  if (actionName === 'rod-cast') {
+    root.position.x += actionPulse * 0.08;
+    root.rotation.x += actionPulse * 0.34;
+    root.rotation.z -= actionPulse * 0.48;
+  }
+  if (actionName === 'rod-hook') {
+    root.position.y += actionPulse * 0.045;
+    root.rotation.x -= actionPulse * 0.28;
+  }
+  if (actionName === 'net-swing') {
+    root.position.x -= actionPulse * 0.09;
+    root.rotation.y += actionPulse * 0.26;
+    root.rotation.z += actionPulse * 0.55;
+  }
+  if (actionName === 'magnifier-inspect') {
+    root.position.z += actionPulse * 0.06;
+    root.rotation.x -= actionPulse * 0.18;
+  }
+  if (actionName && actionProgress >= 1) toolAction = { name: '', startedAt: 0, duration: 0 };
 }
+
 
 function setZonePalette(zoneKey) {
   const zone = ZONES[zoneKey];
@@ -439,6 +485,65 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
   world.add(group);
   return group;
 }
+
+function addTreeInteraction(x, z, label, message, reward = 4) {
+  const marker = new THREE.Group();
+  const ring = addMesh(marker, new THREE.TorusGeometry(0.27, 0.035, 6, 18), mat(0xd8ef85, { emissive: 0x9aad4b, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }), [0, 0, 0], [-Math.PI / 2, 0, 0]);
+  const core = sphere(marker, 0.065, 0xd8ef85, [0, 0, 0], { material: { emissive: 0x9aad4b, emissiveIntensity: 1.4 } });
+  marker.position.set(x, 1.05, z);
+  marker.visible = false;
+  world.add(marker);
+  const interaction = {
+    type: 'tree',
+    label,
+    message,
+    reward,
+    position: new THREE.Vector3(x, 0.95, z),
+    radius: 2.8,
+    marker,
+    ring,
+    core,
+    used: false
+  };
+  interactables.push(interaction);
+  treeInteractions.push(interaction);
+  return interaction;
+}
+
+function updateTreeInteractions() {
+  for (const interaction of treeInteractions) {
+    const near = distanceTo(interaction.position) < 8.5;
+    interaction.marker.visible = near && !interaction.used;
+    if (interaction.marker.visible) {
+      const pulse = 1 + Math.sin(elapsed * 4.2 + interaction.position.x) * 0.15;
+      interaction.marker.scale.setScalar(pulse);
+      interaction.marker.rotation.y += 0.018;
+      interaction.core.material.emissiveIntensity = 1.1 + Math.sin(elapsed * 5.5) * 0.35;
+    }
+  }
+}
+
+function inspectTree(interaction) {
+  if (!interaction || interaction.used) return;
+  interaction.used = true;
+  interaction.marker.visible = false;
+  save.coins += interaction.reward;
+  const hiddenBug = bugNodes
+    .filter((bug) => bug.cooldown <= 0 && !bug.revealed && distanceTo(bug.position) < 8)
+    .sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0];
+  if (hiddenBug) {
+    hiddenBug.revealed = true;
+    hiddenBug.bugModel.visible = true;
+    toast(`The tree revealed a ${SPECIES[hiddenBug.species].label.toLowerCase()} trace. Equip the net.`, 'success');
+    setStatus(`${interaction.message} A bug is moving above the leaves.`);
+  } else {
+    toast(`Tree note recorded. +${interaction.reward}¢`, 'success');
+    setStatus(interaction.message);
+  }
+  saveGame();
+  updateHUD();
+}
+
 
 function createFence(x, z, width, depth, color = 0x806e53) {
   const group = new THREE.Group();
@@ -518,7 +623,10 @@ function buildForest() {
     [-17, -25, 1.1], [15, -28, 1.35], [9, 4, 1.15], [-4, 2, 0.9], [18, 5, 0.8],
     [-20, -8, 1.1], [-19, 2, 0.95], [-21, -19, 1.25], [-18, -29, 1.05],
     [20, -8, 1.05], [19, 2, 0.92], [21, -21, 1.18], [18, -29, 1.08],
-    [-12, -29, 0.9], [11, -27, 0.95], [-15, -7, 0.84], [15, -7, 0.88]
+    [-12, -29, 0.9], [11, -27, 0.95], [-15, -7, 0.84], [15, -7, 0.88],
+    [-21, 8, 0.86], [21, 8, 0.9], [-13, -12, 0.92], [13, -12, 0.95],
+    [-13, -21, 0.9], [13, -21, 0.96], [-9, -29, 0.86], [8, -29, 0.9],
+    [-6, 6, 0.78], [6, 7, 0.82], [-19, -4, 0.88], [19, -4, 0.86]
   ];
   treeSpots.forEach(([x, z, scale], index) => createTree(x, z, scale, index % 2 ? 0x315a41 : 0x3f6b47));
   addRock(-7, 0.4, -6, 1.4, 0x667b6e);
@@ -533,6 +641,18 @@ function buildForest() {
   spawnCritter('squirrel', [10.3, 0.42, -5.8]);
   spawnCritter('rabbit', [12.2, 0.42, -22.8]);
   spawnCritter('squirrel', [-15.4, 0.42, -21.4]);
+  spawnCritter('rabbit', [-18.2, 0.42, -10.4]);
+  spawnCritter('squirrel', [18.2, 0.42, -11.2]);
+  spawnCritter('rabbit', [-10.8, 0.42, -27.4]);
+  spawnCritter('squirrel', [10.8, 0.42, -27.8]);
+  spawnCritter('rabbit', [-17.1, 0.42, 3.8]);
+  spawnCritter('squirrel', [16.8, 0.42, 3.2]);
+
+  addTreeInteraction(-13, -3, 'Check tree hollow', 'A squirrel has been using this hollow as a field cache.', 5);
+  addTreeInteraction(14, -2, 'Read bark marks', 'Fresh claw marks point toward the lake trail.', 4);
+  addTreeInteraction(-17, -25, 'Collect pinecone', 'A tidy pinecone cache marks a quiet animal route.', 3);
+  addTreeInteraction(15, -28, 'Inspect fallen branch', 'The branch is warm from a recent animal crossing.', 4);
+  addTreeInteraction(-10, 5, 'Listen at the trunk', 'A soft rustle answers from somewhere in the canopy.', 5);
 
   createBugNode('butterfly', [-10.5, 0.05, -1.8], 0xe7a6c4);
   createBugNode('bee', [11.2, 0.05, -10.2], 0xf0c849);
@@ -626,6 +746,7 @@ function buildZoo() {
     fish.rotation.y = i * 0.8;
     fish.userData.zooFish = true;
     world.add(fish);
+    zooAnimals.push({ group: fish, type: 'fish', center: fish.position.clone(), phase: i * 1.1, radiusX: 1.35, radiusZ: 0.62, speed: 0.42 + i * 0.04 });
   }
 
   const record = new THREE.Group();
@@ -649,6 +770,8 @@ function addExhibitAnimals(x, z, fallbackSpecies) {
     const model = createAnimalModel(species, species === 'butterfly' || species === 'bee' || species === 'dragonfly' ? 0.68 : 0.75);
     model.position.set(x - 1.2 + index * 2.4, species === 'rabbit' || species === 'squirrel' ? 0.5 : 1.7, z - 0.3 + index * 0.25);
     world.add(model);
+    const type = species === 'rabbit' || species === 'squirrel' ? 'ground' : 'flying';
+    zooAnimals.push({ group: model, type, center: model.position.clone(), phase: index * 1.7 + x * 0.08, radiusX: type === 'ground' ? 2.1 : 1.45, radiusZ: type === 'ground' ? 1.25 : 0.85, speed: type === 'ground' ? 0.18 : 0.5 });
   });
 }
 
@@ -719,6 +842,9 @@ function resetWorld() {
   hotspots = [];
   critters = [];
   bugNodes = [];
+  treeInteractions = [];
+  zooAnimals = [];
+  toolAction = { name: '', startedAt: 0, duration: 0 };
   removeFishingVisuals();
   resetFishing();
 }
@@ -747,6 +873,10 @@ function resetFishing() {
   fishing.phase = 'idle';
   fishing.charge = 0;
   fishing.castTarget = null;
+  fishing.castLanding = null;
+  fishing.castBait = null;
+  fishing.castLure = null;
+  fishing.baitConsumed = false;
   fishing.biteAt = 0;
   fishing.biteDeadline = 0;
   fishing.reelProgress = 0;
@@ -761,16 +891,16 @@ function removeFishingVisuals() {
   fishingVisuals = null;
 }
 
-function createFishingVisuals(hotspot) {
+function createFishingVisuals(landingPoint, hotspot = null) {
   removeFishingVisuals();
   const group = new THREE.Group();
-  const bobber = sphere(group, 0.14, 0xff7c63, [hotspot.position.x, 0.3, hotspot.position.z], { material: { emissive: 0x7a261d, emissiveIntensity: 1.05 } });
-  const bobberTop = sphere(group, 0.06, 0xf8ead0, [hotspot.position.x, 0.44, hotspot.position.z]);
+  const bobber = sphere(group, 0.14, 0xff7c63, [landingPoint.x, 0.3, landingPoint.z], { material: { emissive: 0x7a261d, emissiveIntensity: 1.05 } });
+  const bobberTop = sphere(group, 0.06, 0xf8ead0, [landingPoint.x, 0.44, landingPoint.z]);
   const lineGeometry = new THREE.BufferGeometry().setFromPoints([camera.position.clone(), bobber.position.clone()]);
   const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xf3dfb5, transparent: true, opacity: 0.8 }));
   group.add(line);
   world.add(group);
-  fishingVisuals = { group, bobber, bobberTop, line, hotspot };
+  fishingVisuals = { group, bobber, bobberTop, line, hotspot, landingPoint: landingPoint.clone() };
 }
 
 function updateFishingVisuals() {
@@ -804,12 +934,9 @@ function startCast() {
     toast(`No ${selectedBait} left. Visit the field store.`, 'warning');
     return;
   }
-  if ((save.supplies[selectedLure] || 0) <= 0) {
-    toast(`Your ${selectedLure} lure is out of stock.`, 'warning');
-    return;
-  }
   fishing.phase = 'charging';
   fishing.charge = 0;
+  triggerToolAction('rod-charge', 0.38);
   setStatus('Hold to load the cast. Aim at a water disturbance before releasing.');
 }
 
@@ -817,25 +944,26 @@ function finishCast() {
   if (fishing.phase !== 'charging') return;
   fishing.charge = clamp(fishing.charge, 0.18, 1);
   const target = getAimedHotspot();
-  if (!target) {
-    resetFishing();
-    toast('The cast fell short of a disturbance. Aim for the circular splash.', 'warning');
-    return;
-  }
-  save.supplies[selectedBait] = Math.max(0, save.supplies[selectedBait] - 1);
-  save.supplies[selectedLure] = Math.max(0, save.supplies[selectedLure] - 1);
+  const landingPoint = target ? target.position.clone() : getCastLandingPoint();
+  fishing.castBait = selectedBait;
+  fishing.castLure = selectedLure;
   fishing.phase = 'waiting';
   fishing.castTarget = target;
-  fishing.invalidCast = target.lure !== selectedLure || target.bait !== selectedBait;
+  fishing.castLanding = landingPoint;
+  fishing.invalidCast = !target || target.lure !== fishing.castLure || target.bait !== fishing.castBait;
   fishing.biteAt = fishing.invalidCast ? Number.POSITIVE_INFINITY : elapsed + 2.6 + Math.random() * 2;
-  createFishingVisuals(target);
+  triggerToolAction('rod-cast', 0.55);
+  createFishingVisuals(landingPoint, target);
   saveGame();
-  if (fishing.invalidCast) {
+  if (!target) {
+    setStatus('The lure landed outside a feeding disturbance. Reel it back and cast again.');
+    toast('Lure landed. No fish are responding at this spot.', 'warning');
+  } else if (fishing.invalidCast) {
     setStatus(`No response. This disturbance calls for ${formatName(target.lure)} + ${formatName(target.bait)}.`);
-    toast('Wrong presentation for this hot spot. Reel back and change the field kit.', 'warning');
+    toast('Wrong presentation for this hot spot. Reel back and change the bait or lure.', 'warning');
   } else {
     setStatus('The bobber is in the hot spot. Listen for the bite.');
-    toast(`${formatName(selectedLure)} landed in the disturbance.`, 'success');
+    toast(`${formatName(fishing.castLure)} landed in the disturbance.`, 'success');
   }
 }
 
@@ -855,6 +983,7 @@ function setHook() {
   fishing.phase = 'reeling';
   fishing.reelProgress = 0.18;
   fishing.reelHeld = false;
+  triggerToolAction('rod-hook', 0.32);
   setStatus(`Hook set. Reel in the ${SPECIES[fishing.fishSpecies].label.toLowerCase()}.`);
   toast('Hook set — keep reeling until the fish reaches shore.', 'success');
 }
@@ -883,10 +1012,16 @@ function updateFishing(delta) {
   if (fishing.phase === 'charging') {
     fishing.charge = clamp(fishing.charge + delta * 0.72, 0, 1);
   }
-  if (fishing.phase === 'waiting' && elapsed >= fishing.biteAt) {
+  if (fishing.phase === 'waiting' && fishing.castTarget && elapsed >= fishing.biteAt) {
     fishing.phase = 'bite';
     fishing.fishSpecies = fishing.castTarget.fishSpecies;
     fishing.biteDeadline = elapsed + 1.3;
+    if (!fishing.baitConsumed && fishing.castBait) {
+      save.supplies[fishing.castBait] = Math.max(0, save.supplies[fishing.castBait] - 1);
+      fishing.baitConsumed = true;
+      saveGame();
+      updateHUD();
+    }
     setStatus(`BITE — click now to set the hook.`);
     toast('BITE! Click the action button or left mouse now.', 'success');
   }
@@ -907,7 +1042,7 @@ function updateFishing(delta) {
     fishing.reelProgress += delta * (held ? 0.33 : -0.035);
     fishing.reelProgress = clamp(fishing.reelProgress, 0, 1);
     if (fishingVisuals) {
-      const start = fishing.castTarget.position;
+      const start = fishing.castLanding || fishingVisuals.hotspot?.position || fishingVisuals.bobber.position;
       tempVector.set(camera.position.x, 0.3, camera.position.z);
       fishingVisuals.bobber.position.lerp(tempVector, clamp(delta * (held ? 1.9 : 0.35), 0, 1));
       fishingVisuals.bobber.position.y = 0.3 + Math.sin(elapsed * 12) * 0.06;
@@ -922,6 +1057,7 @@ function updateFishing(delta) {
 
 function useNet() {
   if (currentZone !== 'forest' || !['net'].includes(activeTool)) return;
+  triggerToolAction('net-swing', 0.42);
   const bug = getAimBug(true) || getNearestRevealedBug();
   if (bug && bug.revealed) {
     catchBug(bug);
@@ -987,6 +1123,7 @@ function startBugObservation() {
     toast('The bug is visible. Equip the net to make the capture.', 'success');
     return;
   }
+  triggerToolAction('magnifier-inspect', 0.5);
   qteState = { bug, position: 0.12, direction: 1 };
   modalOpen = true;
   dom.qteCopy.textContent = `A ${SPECIES[bug.species].label.toLowerCase()} is hiding here. Center the marker in the observation band.`;
@@ -1021,6 +1158,25 @@ function getAimedHotspot() {
   raycaster.setFromCamera(centerScreen, camera);
   const hits = raycaster.intersectObjects(hotspots.map((hotspot) => hotspot.target), false);
   return hits.length ? hotspots.find((hotspot) => hotspot.target === hits[0].object) : null;
+}
+
+function getCastLandingPoint() {
+  raycaster.setFromCamera(centerScreen, camera);
+  const origin = raycaster.ray.origin;
+  const direction = raycaster.ray.direction;
+  const landing = new THREE.Vector3(FOREST_WATER.centerX, 0.18, FOREST_WATER.centerZ);
+  if (Math.abs(direction.y) > 0.01) {
+    const distance = (0.18 - origin.y) / direction.y;
+    if (distance > 0) landing.copy(origin).addScaledVector(direction, distance);
+  }
+  landing.y = 0.18;
+  const offset = new THREE.Vector3(landing.x - FOREST_WATER.centerX, 0, landing.z - FOREST_WATER.centerZ);
+  if (offset.lengthSq() > FOREST_WATER.castRadius * FOREST_WATER.castRadius) {
+    offset.normalize().multiplyScalar(FOREST_WATER.castRadius);
+    landing.x = FOREST_WATER.centerX + offset.x;
+    landing.z = FOREST_WATER.centerZ + offset.z;
+  }
+  return landing;
 }
 
 function getAimTarget(items, maxDistance, maxAngle = 0.34) {
@@ -1127,13 +1283,46 @@ function updateHotspots(delta) {
   }
 }
 
-function updateZooFish(delta) {
+function updateZooAnimals(delta) {
   if (currentZone !== 'zoo') return;
-  const fishMeshes = world.children.filter((child) => child.userData?.zooFish);
-  fishMeshes.forEach((fish, index) => {
-    fish.position.x += Math.sin(elapsed * 0.4 + index) * delta * 0.2;
-    fish.rotation.y += delta * (0.45 + index * 0.08);
-  });
+  for (const exhibit of zooAnimals) {
+    const angle = elapsed * exhibit.speed + exhibit.phase;
+    const nextX = exhibit.center.x + Math.cos(angle) * exhibit.radiusX;
+    const nextZ = exhibit.center.z + Math.sin(angle) * exhibit.radiusZ;
+    const deltaX = nextX - exhibit.group.position.x;
+    const deltaZ = nextZ - exhibit.group.position.z;
+    exhibit.group.position.x = nextX;
+    exhibit.group.position.z = nextZ;
+    if (exhibit.type === 'fish') {
+      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 1.8 + exhibit.phase) * 0.12;
+      exhibit.group.rotation.y = Math.atan2(-deltaZ, deltaX);
+    } else if (exhibit.type === 'ground') {
+      exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045;
+      exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
+    } else {
+      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.8 + exhibit.phase) * 0.24;
+      exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
+      exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16;
+    }
+  }
+}
+
+
+function constrainForestWaterBoundary() {
+  if (currentZone !== 'forest') return;
+  const offsetX = player.x - FOREST_WATER.centerX;
+  const offsetZ = player.z - FOREST_WATER.centerZ;
+  const distance = Math.hypot(offsetX, offsetZ);
+  if (distance >= FOREST_WATER.playerRadius) return;
+  if (distance < 0.001) {
+    player.x = FOREST_WATER.centerX;
+    player.z = FOREST_WATER.centerZ + FOREST_WATER.playerRadius;
+  } else {
+    const scale = FOREST_WATER.playerRadius / distance;
+    player.x = FOREST_WATER.centerX + offsetX * scale;
+    player.z = FOREST_WATER.centerZ + offsetZ * scale;
+  }
+  if (fishing.phase === 'idle') setStatus('The shoreline drops off here. Stay on the bank and cast from the edge.');
 }
 
 function updateMovement(delta) {
@@ -1157,6 +1346,7 @@ function updateMovement(delta) {
   const bounds = ZONES[currentZone].bounds;
   player.x = clamp(player.x, bounds.minX, bounds.maxX);
   player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
+  constrainForestWaterBoundary();
   currentNoise = moving ? (sneaking ? 0.16 : 0.78) : 0.02;
   if (moving && fishing.phase === 'waiting') startReelIn();
   camera.position.set(player.x, player.y + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
@@ -1224,7 +1414,7 @@ function updateHUD() {
   const lureLabel = formatName(selectedLure);
   dom.equipmentList.innerHTML = `
     <div class="equipment-item"><strong>BAIT <small>${baitLabel}</small></strong><em>${save.supplies[selectedBait] || 0}</em></div>
-    <div class="equipment-item"><strong>LURE <small>${lureLabel}</small></strong><em>${save.supplies[selectedLure] || 0}</em></div>
+    <div class="equipment-item"><strong>LURE <small>${lureLabel}</small></strong><em>REUSABLE</em></div>
     <div class="equipment-item"><strong>NETS</strong><em>${save.supplies.nets || 0}</em></div>
     <div class="equipment-item"><strong>GLASSES</strong><em>${save.supplies.magnifiers || 0}</em></div>
     <div class="equipment-item"><strong>FIELD NOTES</strong><em>${Object.values(save.caught).reduce((sum, count) => sum + count, 0)}</em></div>
@@ -1436,6 +1626,10 @@ function handleInteract() {
     openCollection();
     return;
   }
+  if (target?.type === 'tree') {
+    inspectTree(target);
+    return;
+  }
   if (currentZone === 'forest' && activeTool === 'magnifier') startBugObservation();
 }
 
@@ -1518,8 +1712,9 @@ function animate() {
   updateFishingVisuals();
   updateCritters(delta);
   updateBugNodes(delta);
+  updateTreeInteractions();
   updateHotspots(delta);
-  updateZooFish(delta);
+  updateZooAnimals(delta);
   updateQTE(delta);
   updatePrompt();
   updateCrosshair();
