@@ -141,6 +141,24 @@
         </div>
       </section>
 
+      <section id="cleaning-modal" class="modal-shell cleaning-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="cleaning-title">
+        <div class="cleaning-card panel">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">HABITAT CARE</p>
+              <h2 id="cleaning-title">Clean the enclosure</h2>
+            </div>
+            <button class="icon-button" data-close-modal="cleaning-modal" type="button" aria-label="Leave enclosure cleaning">×</button>
+          </div>
+          <p id="cleaning-copy" class="cleaning-copy">Clear each highlighted debris spot in order. A clean habitat keeps the collection healthy.</p>
+          <div id="cleaning-field" class="cleaning-field" aria-label="Enclosure cleaning area"></div>
+          <div class="cleaning-progress-row"><span id="cleaning-count">0 / 6 CLEARED</span><span>CARE ROUTE</span></div>
+          <div class="cleaning-progress-track"><span id="cleaning-progress"></span></div>
+          <button id="cleaning-action" class="action-button accent" type="button">SWEEP HIGHLIGHTED SPOT</button>
+          <p class="cleaning-tip">Click the glowing debris in sequence. Wrong spots reset the current sweep.</p>
+        </div>
+      </section>
+
       <section id="collection-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="collection-title">
         <div class="modal-card panel collection-modal-card">
           <div class="modal-header">
@@ -151,7 +169,7 @@
             <button class="icon-button" data-close-modal="collection-modal" type="button" aria-label="Close collection">×</button>
           </div>
           <div id="collection-grid" class="collection-grid"></div>
-          <p class="modal-footnote">For now the zoo is a quiet showcase. Exhibits will become operational habitats in a future slice.</p>
+          <p class="modal-footnote">Clean all three habitats before reviewing the living collection. Care notes persist between visits.</p>
         </div>
       </section>
 

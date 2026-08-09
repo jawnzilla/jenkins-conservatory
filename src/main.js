@@ -45,11 +45,23 @@ const FOREST_WATER = {
   castRadius: 9.25
 };
 
+const FOREST_DOCK = {
+  halfWidth: 1.85,
+  shoreZ: -7.15,
+  endZ: -15.55
+};
+
 const SPECIES = {
   trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms' },
   sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs' },
   rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◒', color: 0xe6d7bf, note: 'Sneak + net' },
   squirrel: { label: 'Red squirrel', type: 'ground', sigil: '◓', color: 0xb56843, note: 'Sneak + net' },
+  fox: { label: 'Red fox', type: 'ground', sigil: '◇', color: 0xc96c3e, note: 'Sneak + net' },
+  frog: { label: 'Green frog', type: 'ground', sigil: '◉', color: 0x6fb36d, note: 'Sneak + net' },
+  turtle: { label: 'Pond turtle', type: 'ground', sigil: '⊙', color: 0x71926b, note: 'Sneak + net' },
+  owl: { label: 'Tawny owl', type: 'flying', sigil: '◎', color: 0xb79a70, note: 'Sneak + net' },
+  raccoon: { label: 'Raccoon', type: 'ground', sigil: '◐', color: 0x899291, note: 'Sneak + net' },
+  sparrow: { label: 'House sparrow', type: 'flying', sigil: '⌁', color: 0x9a8064, note: 'Sneak + net' },
   butterfly: { label: 'Painted butterfly', type: 'bug', sigil: '✦', color: 0xf0a4c1, note: 'Magnify + net' },
   bee: { label: 'Meadow bee', type: 'bug', sigil: '✧', color: 0xf2c84b, note: 'Magnify + net' },
   dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌁', color: 0x83cfe7, note: 'Magnify + net' }
@@ -86,6 +98,7 @@ const DEFAULT_SAVE = {
     magnifiers: 1
   },
   caught: {},
+  cleanedEnclosures: {},
   lastZone: 'forest'
 };
 
@@ -126,6 +139,12 @@ const dom = {
   qteCopy: document.querySelector('#qte-copy'),
   collectionModal: document.querySelector('#collection-modal'),
   collectionGrid: document.querySelector('#collection-grid'),
+  cleaningModal: document.querySelector('#cleaning-modal'),
+  cleaningCopy: document.querySelector('#cleaning-copy'),
+  cleaningField: document.querySelector('#cleaning-field'),
+  cleaningProgress: document.querySelector('#cleaning-progress'),
+  cleaningCount: document.querySelector('#cleaning-count'),
+  cleaningAction: document.querySelector('#cleaning-action'),
   loadingScreen: document.querySelector('#loading-screen')
 };
 
@@ -197,8 +216,12 @@ let critters = [];
 let bugNodes = [];
 let treeInteractions = [];
 let zooAnimals = [];
+let zooEnclosures = [];
+let aquariumBubbles = [];
+let pollinatorFlowers = [];
 let fishingVisuals = null;
 let toolAction = { name: '', startedAt: 0, duration: 0 };
+let cleaningState = null;
 let spawnPoint = new THREE.Vector3(0, 1.72, 15);
 const player = new THREE.Vector3(0, 1.72, 15);
 
@@ -226,7 +249,8 @@ function loadSave() {
       ...structuredClone(DEFAULT_SAVE),
       ...parsed,
       supplies: { ...DEFAULT_SAVE.supplies, ...(parsed.supplies || {}) },
-      caught: { ...(parsed.caught || {}) }
+      caught: { ...(parsed.caught || {}) },
+      cleanedEnclosures: { ...(parsed.cleanedEnclosures || {}) }
     };
   } catch (error) {
     console.warn('Save data unavailable; using a fresh field kit.', error);
@@ -562,9 +586,186 @@ function createFence(x, z, width, depth, color = 0x806e53) {
   return group;
 }
 
-function createPath(x, z, width, length, color = 0xb3a47a) {
-  box(world, [width, 0.04, length], color, [x, 0, z], { material: { roughness: 1 } });
+function createAquarium() {
+  const tankZ = -21.8;
+  const glassMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xb8fff0,
+    roughness: 0.08,
+    metalness: 0.04,
+    transmission: 0.34,
+    thickness: 0.08,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const waterMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x2db6bf,
+    roughness: 0.16,
+    metalness: 0.04,
+    transmission: 0.12,
+    transparent: true,
+    opacity: 0.38,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+
+  box(world, [14.5, 0.32, 5.15], 0x2c493e, [0, 0.18, tankZ], { material: { roughness: 0.72 } });
+  box(world, [13.6, 0.42, 4.45], 0x6b7f5e, [0, 0.52, tankZ], { material: { roughness: 0.92 } });
+  box(world, [12.05, 0.2, 3.45], 0xc9b177, [0, 0.72, tankZ], { material: { roughness: 1 } });
+  box(world, [12.1, 2.9, 0.08], 0x1d5360, [0, 1.96, -23.62], { material: { roughness: 0.62, emissive: 0x103e4a, emissiveIntensity: 0.32 } });
+
+  const water = addMesh(world, new THREE.BoxGeometry(12.05, 2.55, 3.45), waterMaterial, [0, 1.98, tankZ]);
+  water.castShadow = false;
+  water.receiveShadow = false;
+  const surface = addMesh(world, new THREE.PlaneGeometry(11.9, 3.35), new THREE.MeshStandardMaterial({ color: 0x88f3e1, transparent: true, opacity: 0.23, emissive: 0x1d7c7d, emissiveIntensity: 0.5, roughness: 0.2, side: THREE.DoubleSide, depthWrite: false }), [0, 3.25, tankZ], [-Math.PI / 2, 0, 0]);
+  surface.castShadow = false;
+  surface.receiveShadow = false;
+
+  addMesh(world, new THREE.BoxGeometry(12.65, 3.55, 0.12), glassMaterial, [0, 1.95, -19.9]);
+  addMesh(world, new THREE.BoxGeometry(12.65, 3.55, 0.12), glassMaterial, [0, 1.95, -23.7]);
+  addMesh(world, new THREE.BoxGeometry(0.12, 3.55, 3.95), glassMaterial, [-6.32, 1.95, tankZ]);
+  addMesh(world, new THREE.BoxGeometry(0.12, 3.55, 3.95), glassMaterial, [6.32, 1.95, tankZ]);
+
+  for (const x of [-6.38, 6.38]) {
+    box(world, [0.22, 3.8, 0.22], 0x315b50, [x, 1.95, -21.8], { material: { roughness: 0.68 } });
+  }
+  box(world, [12.9, 0.22, 0.22], 0x315b50, [0, 3.72, -19.9], { material: { roughness: 0.68 } });
+  box(world, [12.9, 0.22, 0.22], 0x315b50, [0, 0.2, -19.9], { material: { roughness: 0.68 } });
+  box(world, [12.9, 0.18, 0.22], 0x315b50, [0, 3.72, -23.7], { material: { roughness: 0.68 } });
+  box(world, [8.6, 0.12, 0.38], 0xd9efc2, [0, 3.98, tankZ], { material: { emissive: 0x9ddbb2, emissiveIntensity: 1.1, roughness: 0.42 } });
+  box(world, [7.5, 0.06, 0.14], 0xf7d78c, [0, 3.88, tankZ], { material: { emissive: 0xf0bd5f, emissiveIntensity: 0.72 } });
+
+  const rocks = [
+    [-4.7, 0.92, -22.85, 0.5, 0x667a70], [-2.9, 0.88, -20.45, 0.34, 0x71877a],
+    [1.8, 0.92, -22.95, 0.48, 0x5b746d], [4.65, 0.88, -20.7, 0.42, 0x71877a],
+    [5.05, 0.88, -22.8, 0.3, 0x496861]
+  ];
+  rocks.forEach(([x, y, z, size, color]) => addMesh(world, new THREE.DodecahedronGeometry(size, 0), mat(color, { roughness: 0.96 }), [x, y, z], [0.12, 0.3, 0.08], [1.35, 0.7, 1]));
+  [[-5.1, -23.15, 1.65, 0x3b986f], [-3.7, -20.55, 1.2, 0x4aa879], [0.4, -23.1, 1.85, 0x378f6e], [3.55, -20.55, 1.35, 0x4da97c], [4.7, -23.1, 1.55, 0x378f6e]].forEach(([x, z, height, color]) => createAquaticPlant(x, z, height, color));
+
+  const bubblePositions = [[-4.2, 1.05, -21.9], [-3.7, 1.3, -22.2], [-1.2, 1.1, -20.9], [0.8, 0.95, -22.8], [2.1, 1.45, -21.2], [4.15, 1.08, -22.2], [5.1, 1.55, -21.35], [-5.3, 1.2, -20.8], [2.9, 1.0, -23.0]];
+  aquariumBubbles = bubblePositions.map(([x, y, z], index) => {
+    const bubble = sphere(world, 0.045 + (index % 3) * 0.018, 0xd4fff3, [x, y, z], { material: { transparent: true, opacity: 0.58, emissive: 0x8fe8d7, emissiveIntensity: 0.7, depthWrite: false } });
+    bubble.castShadow = false;
+    bubble.receiveShadow = false;
+    return { mesh: bubble, baseX: x, baseZ: z, baseY: y, speed: 0.22 + (index % 4) * 0.045, phase: index * 0.71 };
+  });
+
+  const fishPlan = [
+    ['trout', -4.1, 1.48, -21.6, 2.3, 0.72, 0.3],
+    ['sunfish', -1.8, 2.15, -22.45, 2.7, 0.82, 1.2],
+    ['sunfish', 0.8, 1.45, -20.85, 2.1, 0.64, 2.1],
+    ['trout', 3.3, 2.35, -22.55, 2.6, 0.78, 2.8],
+    ['sunfish', 4.25, 1.35, -21.25, 1.7, 0.6, 3.5],
+    ['trout', -0.1, 2.72, -21.9, 2.9, 0.7, 4.1]
+  ];
+  fishPlan.forEach(([species, x, y, z, radiusX, radiusZ, phase], index) => {
+    const fish = createAnimalModel(species, 0.72 + (index % 2) * 0.06);
+    fish.position.set(x, y, z);
+    fish.rotation.y = phase;
+    fish.userData.zooFish = true;
+    world.add(fish);
+    zooAnimals.push({ group: fish, type: 'fish', center: fish.position.clone(), phase, radiusX, radiusZ, speed: 0.22 + index * 0.035 });
+  });
 }
+
+function createAquaticPlant(x, z, height, color) {
+  const plant = new THREE.Group();
+  plant.position.set(x, 0.82, z);
+  cylinder(plant, 0.035, 0.055, height, color, [0, height * 0.5, 0], { segments: 5, rotation: [0.05, 0, 0.05] });
+  for (let index = 0; index < 4; index += 1) {
+    const side = index % 2 ? 1 : -1;
+    const leaf = sphere(plant, 0.12, color, [side * (0.12 + index * 0.035), height * (0.3 + index * 0.16), 0], { scale: [1.8, 0.34, 0.62], rotation: [0, 0, side * (0.42 + index * 0.08)] });
+    leaf.castShadow = false;
+  }
+  world.add(plant);
+  return plant;
+}
+
+function createPollinatorGarden() {
+  const flowerPlan = [
+    [6.5, -12.2, 0.82, 0xf1c84b], [7.6, -11.4, 0.68, 0xe889b0], [8.8, -12.5, 0.9, 0xb58ce0],
+    [9.9, -11.5, 0.72, 0xf3d667], [10.9, -12.3, 0.78, 0xe889b0], [12.0, -11.1, 0.62, 0xb58ce0],
+    [7.2, -8.5, 0.64, 0xf3d667], [8.5, -7.4, 0.8, 0xe889b0], [9.8, -8.8, 0.7, 0xf1c84b],
+    [11.0, -7.2, 0.84, 0xc69ae8], [6.2, -7.2, 0.66, 0xe889b0], [11.9, -8.6, 0.68, 0xf3d667]
+  ];
+  flowerPlan.forEach(([x, z, scale, color], index) => createPollinatorFlower(x, z, scale, color, index * 0.8));
+  addPollinatorDragonflies();
+}
+
+function createPollinatorFlower(x, z, scale, color, phase) {
+  const flower = new THREE.Group();
+  flower.position.set(x, 0, z);
+  const stem = cylinder(flower, 0.035, 0.05, 0.62 * scale, 0x4f8f55, [0, 0.31 * scale, 0], { segments: 5 });
+  stem.castShadow = false;
+  sphere(flower, 0.13, 0x4f8f55, [-0.12 * scale, 0.22 * scale, 0], { scale: [1.7, 0.32, 0.72], rotation: [0, 0, -0.42] });
+  sphere(flower, 0.13, 0x4f8f55, [0.12 * scale, 0.34 * scale, 0], { scale: [1.7, 0.32, 0.72], rotation: [0, 0, 0.42] });
+  const head = new THREE.Group();
+  head.position.set(0, 0.7 * scale, 0);
+  for (let petalIndex = 0; petalIndex < 5; petalIndex += 1) {
+    const angle = petalIndex * (Math.PI * 2 / 5);
+    sphere(head, 0.13, color, [Math.cos(angle) * 0.13 * scale, Math.sin(angle) * 0.13 * scale, 0], { scale: [1.15, 0.68, 0.62], rotation: [0, 0, angle] });
+  }
+  sphere(head, 0.105, 0xe8b84e, [0, 0, -0.02], { material: { emissive: 0x9c5f25, emissiveIntensity: 0.34 } });
+  flower.add(head);
+  world.add(flower);
+  pollinatorFlowers.push({ head, phase });
+}
+
+function addPollinatorDragonflies() {
+  const positions = [[6.7, 2.55, -8.1], [8.25, 2.85, -10.2], [9.65, 2.45, -11.1], [10.75, 2.75, -8.35], [12.0, 2.35, -10.9]];
+  positions.forEach(([x, y, z], index) => {
+    const dragonfly = createAnimalModel('dragonfly', 1.14);
+    dragonfly.position.set(x, y, z);
+    dragonfly.userData.zooDragonfly = true;
+    world.add(dragonfly);
+    zooAnimals.push({ group: dragonfly, type: 'flying', center: dragonfly.position.clone(), phase: index * 1.55 + 0.6, radiusX: 0.55 + (index % 3) * 0.2, radiusZ: 0.38 + (index % 2) * 0.12, speed: 0.64 + index * 0.07 });
+  });
+}
+
+function updatePollinatorGarden() {
+  for (const flower of pollinatorFlowers) {
+    flower.head.rotation.z = Math.sin(elapsed * 1.35 + flower.phase) * 0.045;
+    flower.head.rotation.y = Math.sin(elapsed * 0.8 + flower.phase) * 0.08;
+  }
+}
+
+function updateAquarium() {
+  if (currentZone !== 'zoo') return;
+  for (const bubble of aquariumBubbles) {
+    const cycle = (elapsed * bubble.speed + bubble.phase) % 2.35;
+    bubble.mesh.position.y = 0.9 + cycle;
+    bubble.mesh.position.x = bubble.baseX + Math.sin(elapsed * 1.8 + bubble.phase) * 0.07;
+    bubble.mesh.position.z = bubble.baseZ + Math.cos(elapsed * 1.5 + bubble.phase) * 0.06;
+    bubble.mesh.scale.setScalar(0.85 + Math.sin(elapsed * 3 + bubble.phase) * 0.14);
+  }
+}
+
+function createPath(x, z, width, length, color = 0xb3a47a) {
+  box(world, [width, 0.04, length], color, [x, 0, z]);
+}
+
+function createPondDock() {
+  const group = new THREE.Group();
+  const length = FOREST_DOCK.shoreZ - FOREST_DOCK.endZ;
+  const centerZ = (FOREST_DOCK.shoreZ + FOREST_DOCK.endZ) / 2;
+  box(group, [3.7, 0.34, length], 0x8b694a, [0, 0.34, centerZ]);
+  for (let z = FOREST_DOCK.shoreZ - 0.25; z > FOREST_DOCK.endZ; z -= 0.62) {
+    box(group, [3.46, 0.065, 0.13], 0xc29a62, [0, 0.55, z]);
+  }
+  for (const x of [-1.55, 1.55]) {
+    for (const z of [FOREST_DOCK.shoreZ + 0.05, FOREST_DOCK.endZ - 0.05]) {
+      cylinder(group, 0.13, 0.16, 1.35, 0x5e4838, [x, 0.55, z], { segments: 7 });
+    }
+    box(group, [0.1, 0.1, length - 0.22], 0xb58a5b, [x, 1.08, centerZ]);
+  }
+  world.add(group);
+  const label = makeLabel('POND DOCK', '#d8ef85', '#1e3428', 0.58);
+  label.position.set(0, 1.65, FOREST_DOCK.shoreZ - 0.55);
+  world.add(label);
+}
+
 
 function buildStore() {
   setZonePalette('store');
@@ -598,6 +799,8 @@ function buildStore() {
   createTree(14, -3, 1.05, 0x44694e);
   addSmallCrates(-4, 0, -2);
   addSmallCrates(5, 0, -1);
+  spawnCritter('raccoon', [-5.1, 0.42, -1.5]);
+  spawnCritter('sparrow', [5.2, 1.9, 0.4]);
 }
 
 function addSmallCrates(x, y, z) {
@@ -617,6 +820,7 @@ function buildForest() {
   const shoreline = addMesh(world, new THREE.RingGeometry(10.1, 10.45, 48), mat(0x8da36f, { roughness: 1 }), [0, 0.07, -17], [-Math.PI / 2, 0, 0]);
   shoreline.receiveShadow = true;
   addMesh(world, new THREE.CircleGeometry(10.7, 48), mat(0x6a7d55, { roughness: 1 }), [0, 0.02, -17], [-Math.PI / 2, 0, 0]);
+  createPondDock();
 
   const treeSpots = [
     [-16, -15, 1.3], [-13, -3, 1.5], [-10, 5, 1.1], [14, -2, 1.45], [17, -16, 1.2],
@@ -647,6 +851,9 @@ function buildForest() {
   spawnCritter('squirrel', [10.8, 0.42, -27.8]);
   spawnCritter('rabbit', [-17.1, 0.42, 3.8]);
   spawnCritter('squirrel', [16.8, 0.42, 3.2]);
+  spawnCritter('fox', [-19, 0.48, -14.2]);
+  spawnCritter('frog', [4.2, 0.42, -7.8]);
+  spawnCritter('owl', [12.8, 2.1, -22.5]);
 
   addTreeInteraction(-13, -3, 'Check tree hollow', 'A squirrel has been using this hollow as a field cache.', 5);
   addTreeInteraction(14, -2, 'Read bark marks', 'Fresh claw marks point toward the lake trail.', 4);
@@ -734,20 +941,7 @@ function buildZoo() {
   aquariumLabel.position.set(0, 3.1, -22);
   world.add(aquariumLabel);
 
-  box(world, [15, 3.4, 0.35], 0x456254, [0, 1.7, -24.4]);
-  box(world, [0.35, 3.4, 5.2], 0x456254, [-7.3, 1.7, -22]);
-  box(world, [0.35, 3.4, 5.2], 0x456254, [7.3, 1.7, -22]);
-  const tank = box(world, [11.5, 3.1, 3.8], 0x73b9b1, [0, 1.65, -21.8], { material: { transparent: true, opacity: 0.19, roughness: 0.18, metalness: 0.12 } });
-  tank.castShadow = false;
-  tank.receiveShadow = false;
-  for (let i = 0; i < 4; i += 1) {
-    const fish = createAnimalModel(i % 2 ? 'sunfish' : 'trout', 0.85);
-    fish.position.set(-3.2 + i * 2.1, 1.15 + (i % 2) * 0.5, -21.8 + (i % 3) * 0.4);
-    fish.rotation.y = i * 0.8;
-    fish.userData.zooFish = true;
-    world.add(fish);
-    zooAnimals.push({ group: fish, type: 'fish', center: fish.position.clone(), phase: i * 1.1, radiusX: 1.35, radiusZ: 0.62, speed: 0.42 + i * 0.04 });
-  }
+  createAquarium();
 
   const record = new THREE.Group();
   record.position.set(0, 0, -4.2);
@@ -759,18 +953,134 @@ function buildZoo() {
 
   createTree(-17, -5, 1.2, 0x3d6249);
   createTree(17, -5, 1.2, 0x3d6249);
-  addExhibitAnimals(-9, -10, ['rabbit', 'squirrel']);
-  addExhibitAnimals(9, -10, ['butterfly', 'bee', 'dragonfly']);
+  addExhibitAnimals(-9, -10, ['rabbit', 'squirrel', 'fox', 'turtle']);
+  addExhibitAnimals(9, -10, ['butterfly', 'bee', 'dragonfly', 'owl']);
+  createPollinatorGarden();
+  spawnCritter('frog', [-17.2, 0.42, -4.8]);
+  spawnCritter('raccoon', [17.1, 0.42, -4.6]);
+  addEnclosureInteractable('meadow', 'Clean meadow enclosure', -9, -5.55, 'Clear the meadow habitat so the ground animals have a safe field.');
+  addEnclosureInteractable('pollinator', 'Clean pollinator enclosure', 9, -5.55, 'Clear the pollinator habitat so the flying animals can forage.');
+  addEnclosureInteractable('water-wing', 'Clean water wing', 0, -18.65, 'Clear the water wing so the aquatic exhibit stays healthy.');
+}
+
+function addEnclosureInteractable(id, label, x, z, message) {
+  const marker = new THREE.Group();
+  const ring = addMesh(marker, new THREE.TorusGeometry(0.34, 0.045, 6, 18), mat(0xf2b268, { emissive: 0x8a4f24, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 }), [0, 0, 0], [-Math.PI / 2, 0, 0]);
+  const core = sphere(marker, 0.08, 0xf2b268, [0, 0, 0], { material: { emissive: 0x8a4f24, emissiveIntensity: 1.3 } });
+  marker.position.set(x, 1.15, z);
+  world.add(marker);
+  const enclosure = {
+    type: 'enclosure',
+    id,
+    label,
+    cleanLabel: label.replace('Clean ', 'Inspect '),
+    message,
+    position: new THREE.Vector3(x, 1.05, z),
+    radius: 3.8,
+    marker,
+    ring,
+    core,
+    cleaned: Boolean(save.cleanedEnclosures[id])
+  };
+  interactables.push(enclosure);
+  zooEnclosures.push(enclosure);
+  updateEnclosureVisual(enclosure);
+}
+
+function updateEnclosureVisual(enclosure) {
+  enclosure.label = enclosure.cleaned ? enclosure.cleanLabel : enclosure.label.replace('Inspect ', 'Clean ');
+  const color = enclosure.cleaned ? 0x89e0c7 : 0xf2b268;
+  enclosure.ring.material.color.set(color);
+  enclosure.ring.material.emissive.set(color);
+  enclosure.core.material.color.set(color);
+  enclosure.core.material.emissive.set(color);
+}
+
+function updateEnclosureMarkers() {
+  for (const enclosure of zooEnclosures) {
+    const near = distanceTo(enclosure.position) < 9.5;
+    enclosure.marker.visible = near;
+    if (near) {
+      const pulse = 1 + Math.sin(elapsed * 4 + enclosure.position.x) * 0.12;
+      enclosure.marker.scale.setScalar(pulse);
+      enclosure.marker.rotation.y += 0.018;
+      enclosure.core.material.emissiveIntensity = enclosure.cleaned ? 1.05 : 1.35 + Math.sin(elapsed * 5) * 0.28;
+    }
+  }
+}
+
+function startCleaning(enclosure) {
+  if (!enclosure) return;
+  if (enclosure.cleaned) {
+    setStatus(`${enclosure.message} This habitat is already clean.`);
+    toast('Habitat care is up to date.', 'success');
+    return;
+  }
+  const positions = [[14, 26], [68, 22], [36, 49], [80, 67], [56, 80], [20, 74]];
+  const symbols = ['✦', '◆', '⌁', '●', '✧', '◼'];
+  cleaningState = { enclosure, nextIndex: 0, total: positions.length };
+  dom.cleaningField.innerHTML = positions.map(([left, top], index) => `<button class="debris-spot ${index === 0 ? 'is-next' : ''}" data-cleaning-index="${index}" style="left:${left}%;top:${top}%" type="button" aria-label="Clear debris ${index + 1}">${symbols[index]}</button>`).join('');
+  dom.cleaningCopy.textContent = `${enclosure.message} Clear the highlighted debris in sequence.`;
+  dom.cleaningAction.textContent = 'SWEEP HIGHLIGHTED SPOT';
+  updateCleaningUI();
+  openModal(dom.cleaningModal);
+}
+
+function updateCleaningUI() {
+  if (!cleaningState) return;
+  const { nextIndex, total } = cleaningState;
+  dom.cleaningCount.textContent = `${nextIndex} / ${total} CLEARED`;
+  dom.cleaningProgress.style.width = `${(nextIndex / total) * 100}%`;
+  dom.cleaningField.querySelectorAll('.debris-spot').forEach((spot, index) => spot.classList.toggle('is-next', index === nextIndex));
+}
+
+function clearCleaningSpot(index) {
+  if (!cleaningState) return;
+  const spot = dom.cleaningField.querySelector(`[data-cleaning-index="${index}"]`);
+  if (index !== cleaningState.nextIndex) {
+    spot?.classList.add('is-wrong');
+    window.setTimeout(() => spot?.classList.remove('is-wrong'), 220);
+    toast('Start with the highlighted debris spot.', 'warning');
+    return;
+  }
+  spot?.classList.remove('is-next');
+  spot?.classList.add('is-cleaned');
+  cleaningState.nextIndex += 1;
+  if (cleaningState.nextIndex >= cleaningState.total) {
+    completeCleaning();
+    return;
+  }
+  updateCleaningUI();
+}
+
+function sweepHighlightedSpot() {
+  if (cleaningState) clearCleaningSpot(cleaningState.nextIndex);
+}
+
+function completeCleaning() {
+  if (!cleaningState) return;
+  const enclosure = cleaningState.enclosure;
+  enclosure.cleaned = true;
+  updateEnclosureVisual(enclosure);
+  save.cleanedEnclosures[enclosure.id] = true;
+  save.coins += 12;
+  saveGame();
+  updateHUD();
+  cleaningState = null;
+  closeModal(dom.cleaningModal);
+  toast(`${enclosure.label.replace('Inspect ', '')} is clean. +12¢`, 'success');
+  setStatus('Habitat care complete. Keep the other exhibits on the same route.');
 }
 
 function addExhibitAnimals(x, z, fallbackSpecies) {
   const available = fallbackSpecies.filter((species) => (save.caught[species] || 0) > 0);
-  const speciesToShow = available.length ? available : [fallbackSpecies[0]];
-  speciesToShow.slice(0, 2).forEach((species, index) => {
+  const speciesToShow = available.length ? [...available, ...fallbackSpecies.filter((species) => !available.includes(species))] : fallbackSpecies;
+  speciesToShow.slice(0, 3).forEach((species, index) => {
     const model = createAnimalModel(species, species === 'butterfly' || species === 'bee' || species === 'dragonfly' ? 0.68 : 0.75);
-    model.position.set(x - 1.2 + index * 2.4, species === 'rabbit' || species === 'squirrel' ? 0.5 : 1.7, z - 0.3 + index * 0.25);
+    const isGround = SPECIES[species].type === 'ground';
+    model.position.set(x - 2.4 + index * 2.4, isGround ? 0.5 : 1.7, z - 0.3 + index * 0.25);
     world.add(model);
-    const type = species === 'rabbit' || species === 'squirrel' ? 'ground' : 'flying';
+    const type = isGround ? 'ground' : 'flying';
     zooAnimals.push({ group: model, type, center: model.position.clone(), phase: index * 1.7 + x * 0.08, radiusX: type === 'ground' ? 2.1 : 1.45, radiusZ: type === 'ground' ? 1.25 : 0.85, speed: type === 'ground' ? 0.18 : 0.5 });
   });
 }
@@ -799,14 +1109,96 @@ function createAnimalModel(species, scale = 1) {
     cone(group, 0.15, 0.34, details.color, [0.19, 1.18, -0.38], { rotation: [0, 0, 0.22] });
     sphere(group, 0.28, 0xb96843, [0, 0.88, 0.78], { scale: [1.45, 1.55, 0.7], rotation: [0.5, 0, 0] });
     sphere(group, 0.2, 0xd38e5b, [0.11, 0.62, 0.44], { scale: [0.75, 1, 1.25] });
+  } else if (species === 'fox') {
+    sphere(group, 0.5, details.color, [0, 0.58, 0], { scale: [1.15, 0.88, 1.5] });
+    sphere(group, 0.32, details.color, [0, 0.9, -0.45], { scale: [1, 0.92, 0.95] });
+    cone(group, 0.16, 0.4, details.color, [-0.18, 1.2, -0.42], { rotation: [0, 0, -0.2] });
+    cone(group, 0.16, 0.4, details.color, [0.18, 1.2, -0.42], { rotation: [0, 0, 0.2] });
+    sphere(group, 0.06, 0x20231f, [-0.12, 0.95, -0.73]);
+    sphere(group, 0.06, 0x20231f, [0.12, 0.95, -0.73]);
+    sphere(group, 0.075, 0x29231f, [0, 0.86, -0.77]);
+    for (const x of [-0.25, 0.25]) {
+      box(group, [0.14, 0.46, 0.14], details.color, [x, 0.28, -0.34]);
+      box(group, [0.14, 0.46, 0.14], details.color, [x, 0.28, 0.34]);
+    }
+    sphere(group, 0.28, details.color, [0, 0.72, 0.82], { scale: [0.72, 1.15, 1.8], rotation: [0.44, 0, 0] });
+    sphere(group, 0.16, 0xf0d3a5, [0, 0.8, 1.38], { scale: [0.78, 0.92, 0.75] });
+  } else if (species === 'frog') {
+    sphere(group, 0.43, details.color, [0, 0.4, 0], { scale: [1.25, 0.72, 1.3] });
+    sphere(group, 0.34, details.color, [0, 0.62, -0.28], { scale: [1.18, 0.78, 0.9] });
+    for (const x of [-0.18, 0.18]) {
+      sphere(group, 0.12, 0xd9e28b, [x, 0.82, -0.48]);
+      sphere(group, 0.045, 0x20251d, [x, 0.84, -0.57]);
+      sphere(group, 0.2, 0x588e58, [x * 1.9, 0.25, -0.18], { scale: [1.1, 0.55, 1.5] });
+      sphere(group, 0.2, 0x588e58, [x * 1.9, 0.25, 0.28], { scale: [1.1, 0.55, 1.5] });
+    }
+    box(group, [0.22, 0.05, 0.12], 0x2b4f35, [0, 0.51, -0.63]);
+  } else if (species === 'turtle') {
+    sphere(group, 0.5, 0x3f664d, [0, 0.46, 0], { scale: [1.3, 0.58, 1.45] });
+    sphere(group, 0.43, details.color, [0, 0.62, 0.03], { scale: [1.15, 0.38, 1.28] });
+    sphere(group, 0.2, 0x6e9a69, [0, 0.5, -0.64], { scale: [0.9, 0.8, 1.15] });
+    for (const x of [-0.48, 0.48]) {
+      sphere(group, 0.18, 0x5b8860, [x, 0.32, -0.36], { scale: [1.15, 0.5, 1.35] });
+      sphere(group, 0.18, 0x5b8860, [x, 0.32, 0.36], { scale: [1.15, 0.5, 1.35] });
+    }
+    sphere(group, 0.035, 0x20251d, [-0.08, 0.58, -0.79]);
+    sphere(group, 0.035, 0x20251d, [0.08, 0.58, -0.79]);
+  } else if (species === 'owl') {
+    sphere(group, 0.43, details.color, [0, 0.62, 0], { scale: [1, 1.18, 0.86] });
+    sphere(group, 0.37, details.color, [0, 1.03, -0.02], { scale: [1.05, 0.94, 0.88] });
+    for (const x of [-0.15, 0.15]) {
+      sphere(group, 0.13, 0xf0e2ba, [x, 1.05, -0.35]);
+      sphere(group, 0.055, 0x20231f, [x, 1.05, -0.46]);
+    }
+    cone(group, 0.08, 0.2, 0xd68b4e, [0, 0.96, -0.54], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
+    box(group, [0.16, 0.58, 0.42], 0x8c7152, [-0.39, 0.66, 0], { rotation: [0, 0.16, -0.18] });
+    box(group, [0.16, 0.58, 0.42], 0x8c7152, [0.39, 0.66, 0], { rotation: [0, -0.16, 0.18] });
+  } else if (species === 'raccoon') {
+    sphere(group, 0.48, details.color, [0, 0.58, 0], { scale: [1.1, 0.9, 1.48] });
+    sphere(group, 0.31, details.color, [0, 0.88, -0.43], { scale: [1.02, 0.95, 0.94] });
+    box(group, [0.5, 0.16, 0.06], 0x454c4a, [0, 0.9, -0.65]);
+    sphere(group, 0.065, 0xe9e3cc, [-0.12, 0.91, -0.7]);
+    sphere(group, 0.065, 0xe9e3cc, [0.12, 0.91, -0.7]);
+    sphere(group, 0.05, 0x20231f, [-0.12, 0.91, -0.75]);
+    sphere(group, 0.05, 0x20231f, [0.12, 0.91, -0.75]);
+    cone(group, 0.14, 0.3, details.color, [-0.18, 1.14, -0.42], { rotation: [0, 0, -0.2] });
+    cone(group, 0.14, 0.3, details.color, [0.18, 1.14, -0.42], { rotation: [0, 0, 0.2] });
+    sphere(group, 0.27, details.color, [0, 0.72, 0.82], { scale: [0.7, 1.25, 1.8], rotation: [0.45, 0, 0] });
+    box(group, [0.31, 0.12, 0.12], 0x474b46, [0, 0.78, 0.58]);
+    box(group, [0.31, 0.12, 0.12], 0xe2c18b, [0, 0.82, 0.95]);
+    box(group, [0.31, 0.12, 0.12], 0x474b46, [0, 0.86, 1.27]);
+  } else if (species === 'sparrow') {
+    sphere(group, 0.34, details.color, [0, 0, 0], { scale: [1.25, 0.9, 1.45] });
+    sphere(group, 0.25, 0xc9b18d, [0, 0.17, -0.37], { scale: [1, 0.96, 0.92] });
+    cone(group, 0.09, 0.24, 0xd68b4e, [0, 0.13, -0.66], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
+    sphere(group, 0.045, 0x20231f, [-0.1, 0.25, -0.57]);
+    sphere(group, 0.045, 0x20231f, [0.1, 0.25, -0.57]);
+    box(group, [0.08, 0.42, 0.48], 0x765c4b, [-0.27, 0.02, 0], { rotation: [0, 0, -0.22] });
+    box(group, [0.08, 0.42, 0.48], 0x765c4b, [0.27, 0.02, 0], { rotation: [0, 0, 0.22] });
+    cone(group, 0.15, 0.38, details.color, [0, 0.02, 0.68], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
   } else if (species === 'trout' || species === 'sunfish') {
     const bodyColor = details.color;
-    sphere(group, 0.48, bodyColor, [0, 0, 0], { scale: [1.65, 0.72, 0.62], widthSegments: 12, heightSegments: 8 });
-    cone(group, 0.33, 0.64, bodyColor, [-0.98, 0, 0], { rotation: [0, 0, -Math.PI / 2], segments: 6 });
-    cone(group, 0.22, 0.48, 0xe7c46a, [0.08, 0.26, 0], { rotation: [0, 0, 0], segments: 5 });
-    cone(group, 0.18, 0.46, 0xc9edf0, [0.13, -0.24, 0], { rotation: [0, 0, Math.PI], segments: 5 });
-    sphere(group, 0.06, 0x20241e, [0.68, 0.16, -0.28]);
-    sphere(group, 0.06, 0x20241e, [0.68, 0.16, 0.28]);
+    const bellyColor = species === 'trout' ? 0xf0c18e : 0xb8d9d0;
+    const accentColor = species === 'trout' ? 0x8d4d3e : 0x315f7a;
+    const body = sphere(group, 0.48, bodyColor, [0, 0, 0], { scale: [1.62, 0.7, 0.66], widthSegments: 16, heightSegments: 10, material: { flatShading: false, roughness: 0.48 } });
+    sphere(group, 0.34, bellyColor, [0.18, -0.16, 0], { scale: [1.2, 0.46, 0.7], widthSegments: 12, heightSegments: 8, material: { flatShading: false, roughness: 0.56 } });
+    const tail = cone(group, 0.36, 0.7, bodyColor, [-1.02, 0, 0], { rotation: [0, 0, -Math.PI / 2], segments: 6 });
+    const dorsal = cone(group, 0.19, 0.52, accentColor, [-0.05, 0.34, 0], { rotation: [0, 0, Math.PI], segments: 4 });
+    const anal = cone(group, 0.16, 0.42, accentColor, [0.02, -0.31, 0], { segments: 4 });
+    const nearFin = cone(group, 0.15, 0.42, accentColor, [0.28, -0.02, -0.39], { rotation: [Math.PI / 2, 0, 0], segments: 4 });
+    const farFin = cone(group, 0.15, 0.42, accentColor, [0.28, -0.02, 0.39], { rotation: [-Math.PI / 2, 0, 0], segments: 4 });
+    for (const stripeX of [-0.38, -0.08, 0.22]) {
+      addMesh(group, new THREE.TorusGeometry(0.35, 0.025, 5, 14), mat(accentColor, { roughness: 0.62 }), [stripeX, 0, 0], [0, Math.PI / 2, 0]);
+    }
+    addMesh(group, new THREE.TorusGeometry(0.24, 0.026, 5, 14), mat(accentColor, { roughness: 0.54 }), [0.44, 0, 0], [0, Math.PI / 2, 0]);
+    for (const z of [-0.27, 0.27]) {
+      sphere(group, 0.075, 0xf4e9c7, [0.63, 0.16, z]);
+      sphere(group, 0.043, 0x17272a, [0.68, 0.17, z]);
+      sphere(group, 0.016, 0xffffff, [0.7, 0.19, z - Math.sign(z) * 0.01]);
+    }
+    body.userData.fishBody = true;
+    group.userData.fishTail = tail;
+    group.userData.fishFins = [dorsal, anal, nearFin, farFin].map((fin) => ({ mesh: fin, baseRotation: fin.rotation.clone() }));
   } else if (species === 'butterfly') {
     const wingMat = mat(details.color, { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.88, side: THREE.DoubleSide });
     addMesh(group, new THREE.CircleGeometry(0.36, 6), wingMat, [-0.3, 0.1, 0], [0, Math.PI / 2.5, -0.35], [1.1, 1.35, 1]);
@@ -825,9 +1217,11 @@ function createAnimalModel(species, scale = 1) {
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, 0.18]);
   } else if (species === 'dragonfly') {
     cylinder(group, 0.055, 0.075, 0.9, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 6 });
-    for (const x of [-0.2, 0.2]) {
-      addMesh(group, new THREE.CircleGeometry(0.2, 6), mat(details.color, { transparent: true, opacity: 0.62, side: THREE.DoubleSide }), [x, 0.12, 0], [0, Math.PI / 2, x > 0 ? -0.45 : 0.45]);
-    }
+    const wingMaterial = mat(details.color, { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false });
+    addMesh(group, new THREE.CircleGeometry(0.25, 6), wingMaterial, [-0.18, 0.12, -0.1], [0, 0, -0.28], [1.3, 0.58, 1]);
+    addMesh(group, new THREE.CircleGeometry(0.25, 6), wingMaterial, [0.18, 0.12, -0.1], [0, 0, 0.28], [1.3, 0.58, 1]);
+    addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [-0.28, 0.08, 0.1], [0, 0, -0.42], [1.15, 0.48, 1]);
+    addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [0.28, 0.08, 0.1], [0, 0, 0.42], [1.15, 0.48, 1]);
     sphere(group, 0.06, 0x26333e, [0.42, 0, 0]);
   }
 
@@ -844,6 +1238,10 @@ function resetWorld() {
   bugNodes = [];
   treeInteractions = [];
   zooAnimals = [];
+  zooEnclosures = [];
+  aquariumBubbles = [];
+  pollinatorFlowers = [];
+  cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
   removeFishingVisuals();
   resetFishing();
@@ -1056,14 +1454,14 @@ function updateFishing(delta) {
 }
 
 function useNet() {
-  if (currentZone !== 'forest' || !['net'].includes(activeTool)) return;
+  if (!['forest', 'store', 'zoo'].includes(currentZone) || activeTool !== 'net') return;
   triggerToolAction('net-swing', 0.42);
   const bug = getAimBug(true) || getNearestRevealedBug();
   if (bug && bug.revealed) {
     catchBug(bug);
     return;
   }
-  const critter = getAimCritter();
+  const critter = getNetCritterTarget();
   if (!critter) {
     toast('No clear net target. Sneak close and line up the animal.', 'warning');
     return;
@@ -1073,7 +1471,8 @@ function useNet() {
     return;
   }
   const distance = distanceTo(critter.group.position);
-  if (distance > 3.65 || currentNoise > 0.42) {
+  const noisyOutsideCloseRange = currentNoise > 0.56 && distance > 3.1;
+  if (distance > 5.5 || noisyOutsideCloseRange) {
     scareCritter(critter);
     toast('The net rustled too loudly. It fled into the brush.', 'warning');
     return;
@@ -1198,6 +1597,17 @@ function getAimCritter() {
   return getAimTarget(critters.filter((critter) => !critter.caught), 8.5, 0.34);
 }
 
+function getNetCritterTarget() {
+  const candidates = critters.filter((critter) => !critter.caught && critter.state !== 'flee');
+  const closeCandidates = candidates
+    .filter((critter) => distanceTo(critter.group.position) <= 5.5)
+    .sort((a, b) => distanceTo(a.group.position) - distanceTo(b.group.position));
+  const aimedClose = getAimTarget(closeCandidates, 5.5, 1.05);
+  if (aimedClose) return aimedClose;
+  if (closeCandidates.length) return closeCandidates[0];
+  return getAimTarget(candidates, 8.5, 0.75);
+}
+
 function getAimBug(revealedOnly = false) {
   return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && (!revealedOnly || bug.revealed)), 7.5, 0.62);
 }
@@ -1216,10 +1626,11 @@ function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
     const animal = critter.group;
+    const isFlying = SPECIES[critter.species].type === 'flying';
     critter.stateTime += delta;
     const distance = distanceTo(animal.position);
     if (critter.state === 'idle') {
-      const threat = distance < 5.2 && currentNoise > 0.34;
+      const threat = activeTool !== 'net' && distance < 5.2 && currentNoise > 0.34;
       if (threat) {
         scareCritter(critter);
       } else {
@@ -1228,13 +1639,13 @@ function updateCritters(delta) {
         animal.position.x += Math.sin(critter.direction) * delta * 0.28;
         animal.position.z += Math.cos(critter.direction) * delta * 0.28;
         if (animal.position.distanceTo(critter.home) > 4.1) critter.direction += Math.PI * 0.76;
-        animal.position.y = 0.42 + drift;
+        animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 3 + critter.home.x) * 0.2 : 0.42 + drift;
       }
     } else if (critter.state === 'flee') {
       critter.fleeTime -= delta;
       animal.position.x += Math.sin(critter.direction) * delta * 3.4;
       animal.position.z += Math.cos(critter.direction) * delta * 3.4;
-      animal.position.y = 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
+      animal.position.y = isFlying ? critter.home.y + Math.abs(Math.sin(elapsed * 9)) * 0.18 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
       if (critter.fleeTime <= 0) {
         critter.state = 'idle';
         critter.home.copy(animal.position);
@@ -1242,8 +1653,8 @@ function updateCritters(delta) {
       }
     }
     animal.rotation.y = critter.direction + Math.PI;
-    const aimed = getAimCritter() === critter;
-    if (aimed && distance < 4.5 && currentNoise < 0.42) {
+    const aimed = getNetCritterTarget() === critter;
+    if (aimed && distance < 5.5 && (currentNoise < 0.56 || distance <= 3.1)) {
       animal.userData.highlight = true;
     } else {
       animal.userData.highlight = false;
@@ -1296,6 +1707,11 @@ function updateZooAnimals(delta) {
     if (exhibit.type === 'fish') {
       exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 1.8 + exhibit.phase) * 0.12;
       exhibit.group.rotation.y = Math.atan2(-deltaZ, deltaX);
+      if (exhibit.group.userData.fishTail) exhibit.group.userData.fishTail.rotation.y = Math.sin(elapsed * 8.5 + exhibit.phase) * 0.24;
+      if (exhibit.group.userData.fishFins) exhibit.group.userData.fishFins.forEach((fin, index) => {
+        fin.mesh.rotation.x = fin.baseRotation.x + Math.sin(elapsed * 5.5 + exhibit.phase + index) * 0.045;
+        fin.mesh.rotation.z = fin.baseRotation.z + Math.cos(elapsed * 4.8 + exhibit.phase + index) * 0.035;
+      });
     } else if (exhibit.type === 'ground') {
       exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045;
       exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
@@ -1313,6 +1729,11 @@ function constrainForestWaterBoundary() {
   const offsetX = player.x - FOREST_WATER.centerX;
   const offsetZ = player.z - FOREST_WATER.centerZ;
   const distance = Math.hypot(offsetX, offsetZ);
+  const onDockCorridor = Math.abs(offsetX) <= FOREST_DOCK.halfWidth && player.z <= FOREST_DOCK.shoreZ + 0.7;
+  if (onDockCorridor) {
+    if (player.z < FOREST_DOCK.endZ) player.z = FOREST_DOCK.endZ;
+    return;
+  }
   if (distance >= FOREST_WATER.playerRadius) return;
   if (distance < 0.001) {
     player.x = FOREST_WATER.centerX;
@@ -1322,7 +1743,7 @@ function constrainForestWaterBoundary() {
     player.x = FOREST_WATER.centerX + offsetX * scale;
     player.z = FOREST_WATER.centerZ + offsetZ * scale;
   }
-  if (fishing.phase === 'idle') setStatus('The shoreline drops off here. Stay on the bank and cast from the edge.');
+  if (fishing.phase === 'idle') setStatus('The shoreline drops off here. Stay on the bank or use the pond dock.');
 }
 
 function updateMovement(delta) {
@@ -1491,7 +1912,7 @@ function updateActionDock() {
     dom.primaryAction.textContent = 'HOLD TO CAST';
   } else if (currentZone === 'forest' && activeTool === 'magnifier') {
     dom.primaryAction.textContent = 'INSPECT TRACE';
-  } else if (currentZone === 'forest' && activeTool === 'net') {
+  } else if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') {
     dom.primaryAction.textContent = 'USE NET';
   } else {
     dom.primaryAction.textContent = 'LOOK AROUND';
@@ -1562,12 +1983,14 @@ function closeModal(element) {
   element.classList.add('is-hidden');
   modalOpen = false;
   if (element === dom.qteModal) qteState = null;
+  if (element === dom.cleaningModal) cleaningState = null;
 }
 
 function closeAllModals() {
-  [dom.travelModal, dom.shopModal, dom.qteModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
+  [dom.travelModal, dom.shopModal, dom.qteModal, dom.cleaningModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
   modalOpen = false;
   qteState = null;
+  cleaningState = null;
 }
 
 function openTravel() {
@@ -1594,12 +2017,20 @@ function openShop() {
 }
 
 function openCollection() {
+  const remaining = zooEnclosures.filter((enclosure) => !enclosure.cleaned);
+  if (remaining.length) {
+    const names = remaining.map((enclosure) => enclosure.label.replace('Clean ', '')).join(', ');
+    toast(`Care required: ${names}.`, 'warning');
+    setStatus('Clean every zoo habitat before opening the living collection.');
+    return;
+  }
   dom.collectionGrid.innerHTML = Object.entries(SPECIES).map(([key, species]) => {
     const count = save.caught[key] || 0;
     return `<div class="collection-item ${count ? 'is-found' : ''}"><span class="collection-sigil">${count ? species.sigil : '·'}</span><strong>${count ? species.label : 'Unrecorded field note'}</strong><span>${count ? `${count} recorded · ${species.note}` : species.note}</span></div>`;
   }).join('');
   openModal(dom.collectionModal);
 }
+
 
 function buyItem(itemKey, group) {
   const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
@@ -1630,6 +2061,10 @@ function handleInteract() {
     inspectTree(target);
     return;
   }
+  if (target?.type === 'enclosure') {
+    startCleaning(target);
+    return;
+  }
   if (currentZone === 'forest' && activeTool === 'magnifier') startBugObservation();
 }
 
@@ -1645,7 +2080,7 @@ function handlePrimaryDown() {
     else if (fishing.phase === 'bite') setHook();
     else if (fishing.phase === 'waiting') startReelIn();
     else if (fishing.phase === 'reeling') fishing.reelHeld = true;
-  } else if (currentZone === 'forest' && activeTool === 'net') {
+  } else if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') {
     useNet();
   } else if (currentZone === 'forest' && activeTool === 'magnifier') {
     startBugObservation();
@@ -1677,7 +2112,7 @@ function handleActionDown() {
     return;
   }
   if (currentZone === 'forest' && activeTool === 'rod') startCast();
-  if (currentZone === 'forest' && activeTool === 'net') useNet();
+  if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') useNet();
   if (currentZone === 'forest' && activeTool === 'magnifier') startBugObservation();
 }
 
@@ -1713,8 +2148,11 @@ function animate() {
   updateCritters(delta);
   updateBugNodes(delta);
   updateTreeInteractions();
+  updateEnclosureMarkers();
   updateHotspots(delta);
   updateZooAnimals(delta);
+  updateAquarium();
+  updatePollinatorGarden();
   updateQTE(delta);
   updatePrompt();
   updateCrosshair();
