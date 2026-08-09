@@ -1145,8 +1145,10 @@ function updateMovement(delta) {
   const sneaking = isKeyDown('ShiftLeft', 'ShiftRight', 'shift');
   const speed = sneaking ? 2.1 : 4.2;
 
-  forwardDirection.set(Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
-  rightDirection.set(Math.cos(yaw), 0, Math.sin(yaw)).normalize();
+  camera.getWorldDirection(forwardDirection);
+  forwardDirection.y = 0;
+  forwardDirection.normalize();
+  rightDirection.crossVectors(forwardDirection, camera.up).normalize();
   tempVector.copy(forwardDirection).multiplyScalar(forwardInput);
   tempVector.addScaledVector(rightDirection, strafeInput);
   if (tempVector.lengthSq() > 1) tempVector.normalize();
@@ -1509,8 +1511,8 @@ function animate() {
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.05);
   elapsed += delta;
-  updateMovement(delta);
   updateCameraRotation();
+  updateMovement(delta);
   updateHeldTool();
   updateFishing(delta);
   updateFishingVisuals();
