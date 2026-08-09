@@ -133,13 +133,14 @@
       </section>
 
       <section id="qte-modal" class="modal-shell qte-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="qte-title">
-        <div class="qte-card panel">
+        <div class="qte-card inspection-card panel">
           <p class="eyebrow">FIELD OBSERVATION</p>
-          <h2 id="qte-title">Something moved in the leaves.</h2>
-          <p id="qte-copy">Center the marker in the observation band, then click to focus the magnifying glass.</p>
-          <div class="qte-track" id="qte-track"><span class="qte-success-zone"></span><span class="qte-cursor"></span></div>
-          <button id="qte-action" class="action-button accent" type="button">FOCUS</button>
-          <p class="qte-tip">Movement pauses while you inspect. Press Esc to step away.</p>
+          <h2 id="qte-title">Zoom the plant sample.</h2>
+          <p id="qte-copy">Hover over the moving bug until it freezes, then drag it into the petri dish.</p>
+          <div id="inspection-zoom" class="inspection-zoom" aria-label="Zoomed plant sample"></div>
+          <div class="inspection-tray"><div id="petri-dish" class="petri-dish" aria-label="Petri dish drop area">PETRI DISH</div><span id="inspection-state">Track the movement.</span></div>
+          <button id="qte-action" class="action-button accent is-hidden" type="button">PLACE IN DISH</button>
+          <p class="qte-tip">Worms and caterpillars freeze under the lens. Spiders are smaller and blend into the web.</p>
         </div>
       </section>
 

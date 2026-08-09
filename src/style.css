@@ -793,6 +793,91 @@ h2 {
   line-height: 1.5;
 }
 
+.inspection-card {
+  width: min(560px, 100%);
+}
+
+.inspection-zoom {
+  position: relative;
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid rgba(137, 224, 199, 0.42);
+  background: radial-gradient(circle at 50% 35%, rgba(136, 184, 120, 0.42), transparent 47%), linear-gradient(135deg, #365f48, #112b20);
+  box-shadow: inset 0 0 42px rgba(2, 9, 6, 0.42);
+}
+
+.inspection-plant-shape {
+  position: absolute;
+  left: 48%;
+  top: 14%;
+  width: 10px;
+  height: 84%;
+  background: #568b58;
+  transform: rotate(12deg);
+  box-shadow: 0 0 0 1px rgba(216, 239, 133, 0.12), -85px 75px 0 -1px #477d52, 74px 110px 0 -1px #6a9a5a;
+}
+
+.inspection-leaf-shape {
+  position: absolute;
+  width: 150px;
+  height: 45px;
+  border-radius: 100% 0 100% 0;
+  background: rgba(91, 151, 86, 0.68);
+}
+
+.inspection-leaf-shape.leaf-one { left: 8%; top: 54%; transform: rotate(-25deg); }
+.inspection-leaf-shape.leaf-two { right: 6%; top: 32%; transform: rotate(28deg) scale(0.82); }
+
+.inspection-bug {
+  position: absolute;
+  z-index: 2;
+  width: 33px;
+  height: 33px;
+  padding: 0;
+  border: 1px solid rgba(242, 200, 75, 0.9);
+  border-radius: 50%;
+  background: rgba(42, 35, 24, 0.9);
+  color: #f3d667;
+  cursor: crosshair;
+  font-size: 20px;
+  transform: translate(-50%, -50%);
+  transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.inspection-bug:hover,
+.inspection-bug.is-frozen {
+  border-color: var(--lime);
+  box-shadow: 0 0 0 7px rgba(216, 239, 133, 0.11), 0 0 24px rgba(216, 239, 133, 0.46);
+}
+
+.inspection-bug.is-frozen { cursor: grab; transform: translate(-50%, -50%) scale(1.12); }
+.inspection-bug.is-spider { width: 23px; height: 23px; color: #c4b4d4; font-size: 13px; opacity: 0.72; }
+
+.inspection-tray {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.petri-dish {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 58px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(191, 235, 224, 0.82);
+  border-radius: 50%;
+  background: rgba(119, 198, 185, 0.18);
+  box-shadow: inset 0 0 20px rgba(137, 224, 199, 0.18), 0 0 18px rgba(137, 224, 199, 0.18);
+  color: var(--aqua);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+#inspection-state { color: var(--muted); font-size: 11px; line-height: 1.4; }
+
 .qte-track {
   position: relative;
   width: 100%;
@@ -928,6 +1013,25 @@ h2 {
   border-color: var(--danger);
   color: var(--danger);
   animation: cleaning-shake 180ms ease;
+}
+
+.cleaning-shell.is-aquarium .cleaning-field {
+  background:
+    radial-gradient(ellipse at 25% 32%, rgba(239, 241, 224, 0.22) 0 10%, transparent 11%),
+    radial-gradient(ellipse at 68% 28%, rgba(239, 241, 224, 0.16) 0 8%, transparent 9%),
+    linear-gradient(135deg, rgba(84, 152, 151, 0.72), rgba(15, 54, 56, 0.92));
+}
+
+.smudge-spot {
+  border-color: rgba(239, 241, 224, 0.72);
+  color: var(--ink);
+  background: rgba(74, 113, 105, 0.82);
+  box-shadow: 0 0 0 8px rgba(239, 241, 224, 0.08), 0 0 22px rgba(239, 241, 224, 0.25);
+}
+
+.smudge-spot.is-cleaned {
+  opacity: 0.12;
+  color: var(--aqua);
 }
 
 @keyframes cleaning-shake {

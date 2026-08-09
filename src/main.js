@@ -56,6 +56,12 @@ const FOREST_DOCK = {
   endZ: -15.55
 };
 
+const POLLINATOR_PLOTS = [
+  [6.5, -12.2], [7.8, -12.4], [9.1, -12.1], [10.4, -12.3],
+  [11.7, -11.8], [6.8, -10.2], [8.2, -10.1], [9.5, -10.3],
+  [10.8, -10.0], [12.0, -9.6], [7.4, -8.4], [9.8, -8.2]
+];
+
 const SPECIES = {
   trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms' },
   sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs' },
@@ -151,6 +157,9 @@ const dom = {
   qteModal: document.querySelector('#qte-modal'),
   qteCursor: document.querySelector('.qte-cursor'),
   qteAction: document.querySelector('#qte-action'),
+  inspectionZoom: document.querySelector('#inspection-zoom'),
+  petriDish: document.querySelector('#petri-dish'),
+  inspectionState: document.querySelector('#inspection-state'),
   qteCopy: document.querySelector('#qte-copy'),
   collectionModal: document.querySelector('#collection-modal'),
   collectionGrid: document.querySelector('#collection-grid'),
@@ -183,6 +192,7 @@ camera.add(heldToolGroup);
 const world = new THREE.Group();
 scene.add(world);
 scene.add(camera);
+createSkybox();
 
 const hemiLight = new THREE.HemisphereLight(0xe9efcf, 0x20352a, 2.2);
 scene.add(hemiLight);
@@ -237,6 +247,10 @@ let pollinatorFlowers = [];
 let wildFlowerNodes = [];
 let beehives = [];
 let spiderWebs = [];
+let gardenPlots = [];
+let natureLoot = [];
+let aquariumSmudges = [];
+let skybox = null;
 let colliders = [];
 let storeRecordBoard = null;
 let fishingVisuals = null;
@@ -263,6 +277,7 @@ const fishing = {
   fishSpecies: null,
   fishSize: 0,
   fishWeight: 0,
+  practice: false,
   hookClicks: 0,
   hookTarget: 0,
   hookStartedAt: 0,
@@ -438,7 +453,15 @@ function createHeldToolModel(tool) {
   if (tool === 'net') {
     cylinder(root, 0.035, 0.06, 1.18, 0x80634b, [0, 0.28, 0.02], { segments: 8, rotation: [0.03, 0, 0.02] });
     torus(root, 0.36, 0.045, 0xd1b77e, [0, 1.04, 0], [0, 0, 0], 8, 24);
-    addMesh(root, new THREE.CircleGeometry(0.32, 18), mat(0xbad9cb, { transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }), [0, 1.04, 0.02]);
+    const netMaterial = new THREE.LineBasicMaterial({ color: 0xd7f1e7, transparent: true, opacity: 0.72 });
+    const netPoints = [];
+    for (let index = 0; index < 12; index += 1) {
+      const angle = index / 12 * Math.PI * 2;
+      netPoints.push(new THREE.Vector3(0, 1.04, 0.04));
+      netPoints.push(new THREE.Vector3(Math.cos(angle) * 0.32, 1.04 + Math.sin(angle) * 0.32, 0.04));
+    }
+    root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(netPoints), netMaterial));
+    for (const radius of [0.11, 0.22, 0.31]) torus(root, radius, 0.012, 0xd7f1e7, [0, 1.04, 0.05], [0, 0, 0], 6, 18);
   }
 
   if (tool === 'magnifier') {
@@ -460,6 +483,13 @@ function createHeldToolModel(tool) {
   heldToolGroup.userData.basePosition = root.position.clone();
   heldToolGroup.userData.baseRotation = root.rotation.clone();
   heldToolGroup.userData.tool = tool;
+}
+
+function createSkybox() {
+  const skyMaterial = new THREE.MeshBasicMaterial({ color: 0xb2c6b8, side: THREE.BackSide, fog: false, depthWrite: false });
+  skybox = new THREE.Mesh(new THREE.BoxGeometry(150, 150, 150), skyMaterial);
+  skybox.renderOrder = -10;
+  scene.add(skybox);
 }
 
 function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
@@ -515,6 +545,7 @@ function updateHeldTool() {
 function setZonePalette(zoneKey) {
   const zone = ZONES[zoneKey];
   scene.background = new THREE.Color(zone.background);
+  if (skybox) skybox.material.color.set(zoneKey === 'forest' ? 0x9ab9c3 : zoneKey === 'zoo' ? 0xb2c6b8 : 0xb8bd9d);
   scene.fog = new THREE.Fog(zone.fog, 34, 100);
   hemiLight.color.set(zoneKey === 'forest' ? 0xd6efcb : 0xe9efcf);
   hemiLight.groundColor.set(zoneKey === 'zoo' ? 0x2f4034 : 0x20352a);
@@ -593,11 +624,12 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
 function createBeehiveOnTree(tree, x, z, id, wild = false) {
   const hive = new THREE.Group();
   hive.position.set(x + 0.45, 3.1, z - 0.22);
-  const body = cylinder(hive, 0.42, 0.52, 0.82, 0xd59b4d, [0, 0, 0], { segments: 10, rotation: [0, 0, 0.12] });
-  for (const y of [-0.23, 0, 0.23]) {
-    torus(hive, 0.44, 0.035, 0x513c2c, [0, y, 0], [0, 0, 0], 8, 20);
+  const body = sphere(hive, 0.48, 0xd59b4d, [0, 0, 0], { scale: [0.9, 1.18, 0.86], widthSegments: 12, heightSegments: 8 });
+  cone(hive, 0.34, 0.48, 0xc98538, [0, -0.54, 0], { segments: 10 });
+  for (const y of [-0.28, 0, 0.28]) {
+    torus(hive, 0.42, 0.034, 0x513c2c, [0, y, 0], [0, 0, 0], 8, 20);
   }
-  cylinder(hive, 0.17, 0.17, 0.05, 0x2c2921, [0, -0.12, -0.47], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
+  cylinder(hive, 0.16, 0.16, 0.05, 0x2c2921, [0, -0.1, -0.44], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
   const marker = makeLabel(wild ? 'WILD HIVE' : 'HIVE', wild ? '#f2b268' : '#f6d56b', '#3b2b20', 0.38);
   marker.position.set(0, 0.78, 0);
   hive.add(marker);
@@ -668,21 +700,19 @@ function harvestWildFlower(node) {
   setStatus('The wild flower will return after the next field reset.');
 }
 
-function plantFlowerSeed() {
+function plantFlowerSeed(plot = null) {
   if (currentZone !== 'zoo') return;
+  plot = plot || gardenPlots.find((candidate) => !isGardenPlotOccupied(candidate) && distanceTo(candidate.position) < candidate.radius);
   if ((save.supplies.flowerSeeds || 0) <= 0) {
     toast('No flower seeds in the field kit. Harvest wild flowers or visit the store.', 'warning');
     return;
   }
-  const occupied = (save.gardenFlowers || []).map((flower) => new THREE.Vector3(flower.x, 0, flower.z));
-  const plots = [[6.5, -11.0], [7.8, -9.6], [9.2, -12.1], [10.8, -10.2], [11.8, -8.9], [7.1, -7.5], [10.4, -7.6]];
-  const plot = plots.find(([x, z]) => !occupied.some((entry) => entry.distanceTo(new THREE.Vector3(x, 0, z)) < 0.7));
   if (!plot) {
-    toast('The pollinator field is full. Wait for a flower to despawn.', 'warning');
+    toast('Aim at one of the empty planting spots inside the pollinator pen.', 'warning');
     return;
   }
   const now = Date.now();
-  const record = { id: `planted-${now}-${Math.floor(Math.random() * 1000)}`, x: plot[0], z: plot[1], scale: 0.68 + Math.random() * 0.22, color: [0xf1c84b, 0xe889b0, 0xb58ce0, 0xf3d667][Math.floor(Math.random() * 4)], seededAt: now, bloomsAt: now + FLOWER_GROW_MS, despawnsAt: now + FLOWER_GROW_MS + FLOWER_LIFE_MS };
+  const record = { id: `planted-${now}-${Math.floor(Math.random() * 1000)}`, x: plot.position.x, z: plot.position.z, scale: 0.68 + Math.random() * 0.22, color: [0xf1c84b, 0xe889b0, 0xb58ce0, 0xf3d667][Math.floor(Math.random() * 4)], seededAt: now, bloomsAt: now + FLOWER_GROW_MS, despawnsAt: now + FLOWER_GROW_MS + FLOWER_LIFE_MS };
   save.supplies.flowerSeeds -= 1;
   save.gardenFlowers = [...(save.gardenFlowers || []), record];
   createPollinatorFlower(record.x, record.z, record.scale, record.color, pollinatorFlowers.length * 0.8, record);
@@ -690,6 +720,34 @@ function plantFlowerSeed() {
   updateHUD();
   toast('Seed planted. It will bloom in 5 minutes and remain for 2 hours.', 'success');
   setStatus('A new seed is taking root. Check back after it blooms.');
+}
+
+function isGardenPlotOccupied(plot) {
+  return (save.gardenFlowers || []).some((flower) => Math.hypot(flower.x - plot.position.x, flower.z - plot.position.z) < 0.72);
+}
+
+function createGardenPlot(x, z, index) {
+  const group = new THREE.Group();
+  group.position.set(x, 0.09, z);
+  addMesh(group, new THREE.CircleGeometry(0.34, 18), mat(0x765d42, { roughness: 1, transparent: true, opacity: 0.84 }), [0, 0, 0], [-Math.PI / 2, 0, 0]);
+  const ring = addMesh(group, new THREE.TorusGeometry(0.36, 0.035, 6, 18), mat(0xf3d667, { emissive: 0x976d28, emissiveIntensity: 0.7, transparent: true, opacity: 0.9 }), [0, 0.02, 0], [-Math.PI / 2, 0, 0]);
+  const marker = makeLabel(`PLOT ${index + 1}`, '#f3d667', '#30442f', 0.2);
+  marker.position.set(0, 0.32, 0);
+  group.add(marker);
+  world.add(group);
+  const plot = { type: 'seed-plot', label: 'Plant flower seed here', position: new THREE.Vector3(x, 0.25, z), radius: 1.35, group, ring, marker };
+  gardenPlots.push(plot);
+  interactables.push(plot);
+}
+
+function updateGardenPlotMarkers() {
+  for (const plot of gardenPlots) {
+    const empty = !isGardenPlotOccupied(plot);
+    const near = distanceTo(plot.position) < 13;
+    plot.group.visible = empty || near;
+    plot.marker.visible = empty && near;
+    plot.ring.material.opacity = empty ? 0.9 : 0.12;
+  }
 }
 
 function updateBeehives() {
@@ -860,6 +918,7 @@ function createAquarium() {
   addMesh(world, new THREE.BoxGeometry(12.65, 3.55, 0.12), glassMaterial, [0, 1.95, -23.7]);
   addMesh(world, new THREE.BoxGeometry(0.12, 3.55, 3.95), glassMaterial, [-6.32, 1.95, tankZ]);
   addMesh(world, new THREE.BoxGeometry(0.12, 3.55, 3.95), glassMaterial, [6.32, 1.95, tankZ]);
+  aquariumSmudges = [[-4.25, 2.65, 0.9], [-1.55, 1.7, 0.72], [1.45, 2.45, 0.82], [4.3, 1.35, 0.68]].map(([x, y, scale], index) => createAquariumSmudge(x, y, scale, index));
 
   for (const x of [-6.38, 6.38]) {
     box(world, [0.22, 3.8, 0.22], 0x315b50, [x, 1.95, -21.8], { material: { roughness: 0.68 } });
@@ -904,6 +963,17 @@ function createAquarium() {
   });
 }
 
+function createAquariumSmudge(x, y, scale, index) {
+  const smudge = new THREE.Group();
+  smudge.position.set(x, y, -19.82);
+  const material = mat(index % 2 ? 0xbaa98f : 0x9f9c87, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 1 });
+  addMesh(smudge, new THREE.CircleGeometry(0.38 * scale, 14), material, [0, 0, 0]);
+  addMesh(smudge, new THREE.CircleGeometry(0.2 * scale, 12), material, [0.18 * scale, 0.08 * scale, -0.01]);
+  smudge.visible = !save.cleanedEnclosures['water-wing'];
+  world.add(smudge);
+  return smudge;
+}
+
 function createAquaticPlant(x, z, height, color) {
   const plant = new THREE.Group();
   plant.position.set(x, 0.82, z);
@@ -919,8 +989,8 @@ function createAquaticPlant(x, z, height, color) {
 
 function createPollinatorGarden() {
   const initialPlan = [
-    [7.1, -11.8, 0.82, 0xf1c84b], [9.2, -10.6, 0.72, 0xe889b0],
-    [11.2, -11.7, 0.9, 0xb58ce0], [8.2, -8.2, 0.78, 0xf3d667]
+    [6.5, -12.2, 0.82, 0xf1c84b], [9.1, -12.1, 0.72, 0xe889b0],
+    [11.7, -11.8, 0.9, 0xb58ce0], [8.2, -10.1, 0.78, 0xf3d667]
   ];
   if (!Array.isArray(save.gardenFlowers)) {
     const now = Date.now();
@@ -936,13 +1006,7 @@ function createPollinatorGarden() {
   const now = Date.now();
   save.gardenFlowers = save.gardenFlowers.filter((flower) => flower.despawnsAt > now);
   save.gardenFlowers.forEach((flower, index) => createPollinatorFlower(flower.x, flower.z, flower.scale, flower.color, index * 0.8, flower));
-  const seedBed = { type: 'seed-bed', label: 'Plant a flower seed', position: new THREE.Vector3(9, 0.9, -5.2), radius: 3.2 };
-  interactables.push(seedBed);
-  box(world, [2.2, 0.12, 1.3], 0x7b6a4b, [9, 0.08, -5.2]);
-  const seedLabel = makeLabel('PLANT SEEDS', '#f3d667', '#30442f', 0.34);
-  seedLabel.position.set(9, 1.35, -5.2);
-  world.add(seedLabel);
-  addCollider(9, -5.2, 0.72, { zone: 'zoo' });
+  POLLINATOR_PLOTS.forEach(([x, z], index) => createGardenPlot(x, z, index));
   const gardenTrees = [[6.4, -8.2], [12.8, -8.5]];
   gardenTrees.forEach(([x, z], index) => {
     const tree = createTree(x, z, 0.82, index ? 0x3e724f : 0x477957);
@@ -1001,6 +1065,7 @@ function updatePollinatorGarden() {
     flower.head.rotation.y = Math.sin(elapsed * 0.8 + flower.phase) * 0.08;
   }
   pollinatorFlowers = pollinatorFlowers.filter((flower) => flower.group.parent === world);
+  updateGardenPlotMarkers();
 }
 
 function updateAquarium() {
@@ -1038,6 +1103,20 @@ function createPondDock() {
   world.add(label);
 }
 
+function createPracticePond() {
+  const centerX = -15.2;
+  const centerZ = -20.8;
+  addMesh(world, new THREE.CircleGeometry(4.35, 40), mat(0x3d94a0, { roughness: 0.2, transparent: true, opacity: 0.88 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
+  addMesh(world, new THREE.RingGeometry(4.38, 4.62, 40), mat(0x8da36f, { roughness: 1 }), [centerX, 0.07, centerZ], [-Math.PI / 2, 0, 0]);
+  const practiceLabel = makeLabel('PRACTICE POND', '#8be0c3', '#183d3c', 0.52);
+  practiceLabel.position.set(centerX, 2.55, centerZ - 0.2);
+  world.add(practiceLabel);
+  addRock(centerX - 3.5, 0.2, centerZ - 1.5, 0.32, 0x667b6e);
+  addRock(centerX + 3.3, 0.18, centerZ + 1.2, 0.28, 0x718474);
+  createHotspot(centerX - 1.55, centerZ - 0.65, 'trout', 'spinner', 'worms');
+  createHotspot(centerX + 1.35, centerZ + 0.9, 'sunfish', 'feather', 'grubs');
+}
+
 function createStorekeeper() {
   const npc = new THREE.Group();
   npc.position.set(0, 1.05, -6.45);
@@ -1054,10 +1133,11 @@ function createStorekeeper() {
   addCollider(0, -6.45, 0.55, { zone: 'store' });
 }
 
-function createShopDisplay(item, x, z, row = 0) {
+function createShopDisplay(item, x, z, row = 0, rotation = 0) {
   const display = new THREE.Group();
   const displayY = row ? 1.75 : 0;
   display.position.set(x, displayY, z);
+  display.rotation.y = rotation;
   box(display, [1.9, 2.05, 0.14], 0x405d48, [0, 1.05, 0]);
   box(display, [1.72, 0.12, 0.72], 0xc29a62, [0, 0.48, 0.12]);
   box(display, [1.72, 0.1, 0.72], 0x334f3d, [0, 0.56, 0.1]);
@@ -1138,8 +1218,16 @@ function buildStore() {
   createStorekeeper();
   createStoreRecordBoard();
 
-  const shopXs = [-5.6, 0, 5.6];
-  SHOP_ITEMS.forEach((item, index) => createShopDisplay(item, shopXs[index % 3], -7.9, Math.floor(index / 3)));
+  const backXs = [-5.8, 0, 5.8];
+  SHOP_ITEMS.slice(0, 3).forEach((item, index) => createShopDisplay(item, backXs[index], -6.72, 1));
+  const sideSpots = [
+    [-8.62, -1.5, Math.PI / 2, 0], [-8.62, -4.55, Math.PI / 2, 0],
+    [8.62, -1.5, -Math.PI / 2, 0], [8.62, -4.55, -Math.PI / 2, 0]
+  ];
+  SHOP_ITEMS.slice(3).forEach((item, index) => {
+    const [x, z, rotation, row] = sideSpots[index];
+    createShopDisplay(item, x, z, row, rotation);
+  });
   createTree(-14, -4, 1.1, 0x44694e);
   createTree(14, -3, 1.05, 0x44694e);
   addSmallCrates(-4, 0, -2);
@@ -1157,6 +1245,7 @@ function buildForest() {
   setZonePalette('forest');
   addGround(ZONES.forest.ground);
   createMountainBoundary('forest');
+  createNatureScatter('forest');
   createParkingHub('LAKE FIELD', ZONES.forest.accent);
   createPath(0, -1.7, 5.5, 25, 0x9d946e);
   box(world, [5.5, 0.07, 7], 0x7f815e, [0, 0, -10], { rotation: [0, 0, 0.04] });
@@ -1248,14 +1337,108 @@ function createHotspot(x, z, fishSpecies, lure, bait) {
   const bubbleA = sphere(group, 0.08, 0xd7f7ec, [-0.65, 0.35, 0.15], { material: { transparent: true, opacity: 0.82 } });
   const bubbleB = sphere(group, 0.06, 0xd7f7ec, [0.55, 0.32, -0.25], { material: { transparent: true, opacity: 0.78 } });
   world.add(group);
-  hotspots.push({ group, target, ringOne, ringTwo, center, bubbleA, bubbleB, fishSpecies, lure, bait, position: new THREE.Vector3(x, 0.18, z) });
+  hotspots.push({ group, target, ringOne, ringTwo, center, bubbleA, bubbleB, fishSpecies, lure, bait, practice: currentZone === 'zoo', position: new THREE.Vector3(x, 0.18, z) });
 }
 
 function spawnCritter(species, position) {
   const group = createAnimalModel(species, 0.9);
   group.position.set(...position);
   world.add(group);
-  critters.push({ species, group, home: new THREE.Vector3(...position), direction: Math.random() * Math.PI * 2, state: 'idle', stateTime: Math.random() * 2, fleeTime: 0, caught: false });
+  critters.push({ species, group, home: new THREE.Vector3(...position), direction: Math.random() * Math.PI * 2, state: 'idle', stateTime: Math.random() * 2, fleeTime: 0, caught: false, hidden: false, respawnAt: 0 });
+}
+
+function createGroundFoliage(x, z, scale = 1, color = 0x4d8055) {
+  const foliage = new THREE.Group();
+  foliage.position.set(x, 0, z);
+  for (let index = 0; index < 4; index += 1) {
+    const height = (0.34 + (index % 3) * 0.16) * scale;
+    cone(foliage, 0.12 * scale, height, new THREE.Color(color).offsetHSL(index * 0.015, 0, (index % 2) * 0.05), [Math.sin(index * 1.7) * 0.18 * scale, height * 0.5, Math.cos(index * 1.7) * 0.15 * scale], { segments: 5 });
+  }
+  world.add(foliage);
+  return foliage;
+}
+
+function createNatureStick(x, z, index = 0) {
+  const stick = new THREE.Group();
+  stick.position.set(x, 0.07, z);
+  cylinder(stick, 0.045, 0.06, 0.95, 0x77583d, [0, 0, 0], { segments: 6, rotation: [0, 0.18, 0.94 + index * 0.08] });
+  cylinder(stick, 0.028, 0.035, 0.42, 0x8b6848, [0.2, 0.08, 0.1], { segments: 5, rotation: [0.1, -0.45, 0.3] });
+  const marker = makeLabel('LOOT', '#f2b268', '#3b2e23', 0.22);
+  marker.position.set(0, 0.72, 0);
+  stick.add(marker);
+  world.add(stick);
+  const loot = { type: 'nature-loot', label: 'Loot fallen stick', position: new THREE.Vector3(x, 0.35, z), radius: 1.6, group: stick, marker, used: false };
+  natureLoot.push(loot);
+  interactables.push(loot);
+  addCollider(x, z, 0.16, { zone: currentZone });
+  return loot;
+}
+
+function createNatureScatter(zoneKey) {
+  const layouts = {
+    forest: {
+      foliage: [[-4, -4], [3, -4.8], [-6, -10], [5, -6], [-15, -9], [15, -10], [-18, -20], [18, -22], [-8, -26], [8, -27], [-19, 5], [19, 6]],
+      rocks: [[-4.5, -4.2, 0.35], [4.8, -5.4, 0.28], [-17.5, -8, 0.42], [16.5, -9, 0.32], [-8.2, -26.4, 0.26], [8.4, -27.2, 0.3]],
+      sticks: [[-2.8, -3.6], [4.3, -8.1], [-14.8, -11.1], [13.9, -18.3], [-7.6, -23.8], [10.8, -25.4], [18.6, 1.2]]
+    },
+    zoo: {
+      foliage: [[-15, -8], [-13, -17], [-5, -8], [4, -6], [15, -8], [16, -18], [-19, -18], [19, -24]],
+      rocks: [[-15, -15, 0.26], [-12, -24, 0.3], [4.6, -6.4, 0.22], [15, -16, 0.28], [18, -8, 0.24]],
+      sticks: [[-15.8, -11.8], [-12.4, -19.2], [-3.9, -7], [14.5, -13.6], [17.2, -22.7]]
+    }
+  }[zoneKey];
+  if (!layouts) return;
+  layouts.foliage.forEach(([x, z], index) => createGroundFoliage(x, z, 0.7 + (index % 3) * 0.18, index % 2 ? 0x4d8055 : 0x5b8d5b));
+  layouts.rocks.forEach(([x, z, scale], index) => addRock(x, 0.18, z, scale, index % 2 ? 0x718474 : 0x667b6e));
+  layouts.sticks.forEach(([x, z], index) => createNatureStick(x, z, index));
+}
+
+function lootNatureStick(loot) {
+  if (!loot || loot.used) return;
+  loot.used = true;
+  loot.group.visible = false;
+  save.coins += 2;
+  saveGame();
+  updateHUD();
+  toast('Fallen stick looted. +2¢', 'success');
+  setStatus('The ground cover is full of small field finds.');
+}
+
+function steerCritterFromEdge(critter, delta) {
+  const bounds = ZONES[currentZone].bounds;
+  const margin = 2.2;
+  let steerX = 0;
+  let steerZ = 0;
+  if (critter.group.position.x < bounds.minX + margin) steerX += 1;
+  if (critter.group.position.x > bounds.maxX - margin) steerX -= 1;
+  if (critter.group.position.z < bounds.minZ + margin) steerZ += 1;
+  if (critter.group.position.z > bounds.maxZ - margin) steerZ -= 1;
+  if (!steerX && !steerZ) return;
+  const desired = Math.atan2(steerX, steerZ);
+  let turn = desired - critter.direction;
+  while (turn > Math.PI) turn -= Math.PI * 2;
+  while (turn < -Math.PI) turn += Math.PI * 2;
+  critter.direction += clamp(turn, -delta * 3.8, delta * 3.8);
+}
+
+function respawnCritter(critter) {
+  const bounds = ZONES[currentZone].bounds;
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const x = bounds.minX + 2.5 + Math.random() * (bounds.maxX - bounds.minX - 5);
+    const z = bounds.minZ + 2.5 + Math.random() * (bounds.maxZ - bounds.minZ - 5);
+    if (Math.hypot(x - player.x, z - player.z) < 9) continue;
+    const isFlying = SPECIES[critter.species].type === 'flying' || ['butterfly', 'bee', 'dragonfly'].includes(critter.species);
+    critter.group.position.set(x, isFlying ? 1.6 + Math.random() * 1.2 : 0.42, z);
+    critter.home.copy(critter.group.position);
+    critter.direction = Math.random() * Math.PI * 2;
+    critter.state = 'idle';
+    critter.stateTime = 0;
+    critter.hidden = false;
+    critter.respawnAt = 0;
+    world.add(critter.group);
+    return;
+  }
+  critter.respawnAt = elapsed + 1;
 }
 
 function createBugNode(species, position, color) {
@@ -1284,6 +1467,7 @@ function buildZoo() {
   setZonePalette('zoo');
   addGround(ZONES.zoo.ground);
   createMountainBoundary('zoo');
+  createNatureScatter('zoo');
   createParkingHub('CONSERVATORY', ZONES.zoo.accent);
   createPath(0, -2.5, 6, 25, 0xc0ad78);
   createPath(-9, -9, 3.2, 15, 0xc0ad78);
@@ -1303,6 +1487,7 @@ function buildZoo() {
   world.add(aquariumLabel);
 
   createAquarium();
+  createPracticePond();
 
   const record = new THREE.Group();
   record.position.set(0, 0, -4.2);
@@ -1355,6 +1540,7 @@ function updateEnclosureVisual(enclosure) {
   enclosure.ring.material.emissive.set(color);
   enclosure.core.material.color.set(color);
   enclosure.core.material.emissive.set(color);
+  if (enclosure.id === 'water-wing') aquariumSmudges.forEach((smudge) => { smudge.visible = !enclosure.cleaned; });
 }
 
 function updateEnclosureMarkers() {
@@ -1377,9 +1563,13 @@ function startCleaning(enclosure) {
     toast('Habitat care is up to date.', 'success');
     return;
   }
+  if (enclosure.id === 'water-wing') {
+    startAquariumCleaning(enclosure);
+    return;
+  }
   const positions = [[14, 26], [68, 22], [36, 49], [80, 67], [56, 80], [20, 74]];
   const symbols = ['✦', '◆', '⌁', '●', '✧', '◼'];
-  cleaningState = { enclosure, nextIndex: 0, total: positions.length };
+  cleaningState = { mode: 'debris', enclosure, nextIndex: 0, total: positions.length };
   dom.cleaningField.innerHTML = positions.map(([left, top], index) => `<button class="debris-spot ${index === 0 ? 'is-next' : ''}" data-cleaning-index="${index}" style="left:${left}%;top:${top}%" type="button" aria-label="Clear debris ${index + 1}">${symbols[index]}</button>`).join('');
   dom.cleaningCopy.textContent = `${enclosure.message} Clear the highlighted debris in sequence.`;
   dom.cleaningAction.textContent = 'SWEEP HIGHLIGHTED SPOT';
@@ -1387,9 +1577,31 @@ function startCleaning(enclosure) {
   openModal(dom.cleaningModal);
 }
 
+function startAquariumCleaning(enclosure) {
+  cleaningState = { mode: 'aquarium', enclosure, round: 0, nextIndex: 0, total: 5, totalRounds: 3 };
+  dom.cleaningModal.classList.add('is-aquarium');
+  renderAquariumCleaningRound();
+  dom.cleaningAction.textContent = 'MOUSE OVER THE NUMBERED SMUDGES';
+  openModal(dom.cleaningModal);
+}
+
+function renderAquariumCleaningRound() {
+  if (!cleaningState || cleaningState.mode !== 'aquarium') return;
+  const positions = [[18, 26], [48, 18], [76, 31], [63, 68], [28, 72]];
+  dom.cleaningField.innerHTML = positions.map(([left, top], index) => `<button class="debris-spot smudge-spot ${index === 0 ? 'is-next' : ''}" data-cleaning-index="${index}" style="left:${left}%;top:${top}%" type="button" aria-label="Polish smudge ${index + 1}">${index + 1}</button>`).join('');
+  dom.cleaningCopy.textContent = `Glass smudge pass ${cleaningState.round + 1} of ${cleaningState.totalRounds}. Mouse over each number in order three times to clear the aquarium glass.`;
+  updateCleaningUI();
+}
+
 function updateCleaningUI() {
   if (!cleaningState) return;
   const { nextIndex, total } = cleaningState;
+  if (cleaningState.mode === 'aquarium') {
+    dom.cleaningCount.textContent = `${cleaningState.round} / ${cleaningState.totalRounds} SMUDGE LAYERS CLEARED · ${nextIndex} / ${total}`;
+    dom.cleaningProgress.style.width = `${((cleaningState.round + nextIndex / total) / cleaningState.totalRounds) * 100}%`;
+    dom.cleaningField.querySelectorAll('.debris-spot').forEach((spot, index) => spot.classList.toggle('is-next', index === nextIndex));
+    return;
+  }
   dom.cleaningCount.textContent = `${nextIndex} / ${total} CLEARED`;
   dom.cleaningProgress.style.width = `${(nextIndex / total) * 100}%`;
   dom.cleaningField.querySelectorAll('.debris-spot').forEach((spot, index) => spot.classList.toggle('is-next', index === nextIndex));
@@ -1407,6 +1619,21 @@ function clearCleaningSpot(index) {
   spot?.classList.remove('is-next');
   spot?.classList.add('is-cleaned');
   cleaningState.nextIndex += 1;
+  if (cleaningState.mode === 'aquarium') {
+    if (cleaningState.nextIndex >= cleaningState.total) {
+      aquariumSmudges[cleaningState.round].visible = false;
+      cleaningState.round += 1;
+      if (cleaningState.round >= cleaningState.totalRounds) {
+        completeCleaning();
+        return;
+      }
+      cleaningState.nextIndex = 0;
+      renderAquariumCleaningRound();
+      return;
+    }
+    updateCleaningUI();
+    return;
+  }
   if (cleaningState.nextIndex >= cleaningState.total) {
     completeCleaning();
     return;
@@ -1428,6 +1655,7 @@ function completeCleaning() {
   saveGame();
   updateHUD();
   cleaningState = null;
+  dom.cleaningModal.classList.remove('is-aquarium');
   closeModal(dom.cleaningModal);
   toast(`${enclosure.label.replace('Inspect ', '')} is clean. +12¢`, 'success');
   setStatus('Habitat care complete. Keep the other exhibits on the same route.');
@@ -1569,20 +1797,19 @@ function createAnimalModel(species, scale = 1) {
     cylinder(group, 0.015, 0.015, 0.35, 0x483c35, [0.1, 0.36, 0], { rotation: [0, 0, 0.35], segments: 5 });
   } else if (species === 'bee') {
     sphere(group, 0.3, details.color, [0, 0, 0], { scale: [1.15, 0.8, 0.8] });
-    for (const x of [-0.1, 0.12]) {
-      box(group, [0.08, 0.65, 0.78], 0x262a20, [x, 0, 0], { rotation: [0, 0, 0] });
-    }
+    for (const x of [-0.1, 0.12]) torus(group, 0.245, 0.035, 0x262a20, [x, 0, 0], [0, Math.PI / 2, 0], 8, 18);
     addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [-0.18, 0.28, 0], [0.1, Math.PI / 2, 0.2]);
     addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [0.18, 0.28, 0], [-0.1, Math.PI / 2, -0.2]);
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, -0.18]);
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, 0.18]);
   } else if (species === 'dragonfly') {
     cylinder(group, 0.055, 0.075, 0.9, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 6 });
-    const wingMaterial = mat(details.color, { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false });
-    addMesh(group, new THREE.CircleGeometry(0.25, 6), wingMaterial, [-0.18, 0.12, -0.1], [0, 0, -0.28], [1.3, 0.58, 1]);
-    addMesh(group, new THREE.CircleGeometry(0.25, 6), wingMaterial, [0.18, 0.12, -0.1], [0, 0, 0.28], [1.3, 0.58, 1]);
-    addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [-0.28, 0.08, 0.1], [0, 0, -0.42], [1.15, 0.48, 1]);
-    addMesh(group, new THREE.CircleGeometry(0.2, 6), wingMaterial, [0.28, 0.08, 0.1], [0, 0, 0.42], [1.15, 0.48, 1]);
+    const wingMaterial = { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false };
+    box(group, [0.72, 0.025, 0.16], details.color, [-0.22, 0.12, -0.14], { material: wingMaterial });
+    box(group, [0.72, 0.025, 0.16], details.color, [-0.22, 0.12, 0.14], { material: wingMaterial });
+    box(group, [0.62, 0.025, 0.13], details.color, [0.2, 0.08, -0.12], { material: wingMaterial });
+    box(group, [0.62, 0.025, 0.13], details.color, [0.2, 0.08, 0.12], { material: wingMaterial });
+    for (const x of [-0.4, -0.1, 0.2, 0.5]) cylinder(group, 0.012, 0.012, 0.2, 0x4c6e7e, [x, 0.14, 0], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
     sphere(group, 0.06, 0x26333e, [0.42, 0, 0]);
   } else if (species === 'caterpillar') {
     for (let index = 0; index < 5; index += 1) {
@@ -1622,6 +1849,9 @@ function resetWorld() {
   wildFlowerNodes = [];
   beehives = [];
   spiderWebs = [];
+  gardenPlots = [];
+  natureLoot = [];
+  aquariumSmudges = [];
   colliders = [];
   storeRecordBoard = null;
   cleaningState = null;
@@ -1665,6 +1895,7 @@ function resetFishing() {
   fishing.fishSpecies = null;
   fishing.fishSize = 0;
   fishing.fishWeight = 0;
+  fishing.practice = false;
   fishing.hookClicks = 0;
   fishing.hookTarget = 0;
   fishing.hookStartedAt = 0;
@@ -1717,9 +1948,9 @@ function updateFishingVisuals() {
 }
 
 function startCast() {
-  if (currentZone !== 'forest' || activeTool !== 'rod') return;
+  if (!['forest', 'zoo'].includes(currentZone) || activeTool !== 'rod') return;
   if (fishing.phase !== 'idle') return;
-  if ((save.supplies[selectedBait] || 0) <= 0) {
+  if (currentZone === 'forest' && (save.supplies[selectedBait] || 0) <= 0) {
     toast(`No ${selectedBait} left. Visit the field store.`, 'warning');
     return;
   }
@@ -1736,10 +1967,11 @@ function finishCast() {
   const landingPoint = target ? target.position.clone() : getCastLandingPoint();
   fishing.castBait = selectedBait;
   fishing.castLure = selectedLure;
+  fishing.practice = Boolean(target?.practice && currentZone === 'zoo');
   fishing.phase = 'waiting';
   fishing.castTarget = target;
   fishing.castLanding = landingPoint;
-  fishing.invalidCast = !target || target.lure !== fishing.castLure || target.bait !== fishing.castBait;
+  fishing.invalidCast = !target || (!fishing.practice && (target.lure !== fishing.castLure || target.bait !== fishing.castBait));
   fishing.biteAt = fishing.invalidCast ? Number.POSITIVE_INFINITY : elapsed + 2.6 + Math.random() * 2;
   triggerToolAction('rod-cast', 0.55);
   createFishingVisuals(landingPoint, target);
@@ -1820,6 +2052,13 @@ function breakFishingLine() {
 
 function landFish() {
   const species = fishing.fishSpecies;
+  if (fishing.practice) {
+    resetFishing();
+    removeFishingVisuals();
+    toast('Practice catch released. No bait, lure, coins, or records were used.', 'success');
+    setStatus('Practice pond reset. Try another cast without affecting your field notes.');
+    return;
+  }
   const record = {
     species,
     size: Number(fishing.fishSize.toFixed(1)),
@@ -1858,7 +2097,7 @@ function updateFishing(delta) {
     fishing.fishSize = 7.5 + Math.random() * (fishing.fishSpecies === 'trout' ? 13.5 : 8.5);
     fishing.fishWeight = fishing.fishSpecies === 'trout' ? 0.7 + Math.random() * 4.3 : 0.25 + Math.random() * 1.8;
     fishing.biteDeadline = elapsed + 1.3;
-    if (!fishing.baitConsumed && fishing.castBait) {
+    if (!fishing.practice && !fishing.baitConsumed && fishing.castBait) {
       save.supplies[fishing.castBait] = Math.max(0, save.supplies[fishing.castBait] - 1);
       fishing.baitConsumed = true;
       saveGame();
@@ -1916,6 +2155,7 @@ function updateFishing(delta) {
       if (fishingVisuals.bobber.position.distanceTo(start) < 0.8 && held) {
         fishingVisuals.bobber.position.lerp(tempVector, 0.04);
       }
+      if (held && fishingVisuals.bobber.position.distanceTo(tempVector) < 0.58) fishing.reelProgress = 1;
     }
     if (fishing.reelProgress >= 1) landFish();
   }
@@ -1991,47 +2231,72 @@ function startBugObservation() {
     return;
   }
   triggerToolAction('magnifier-inspect', 0.5);
-  qteState = { bug, position: 0.12, direction: 1 };
+  dom.inspectionZoom.innerHTML = '<div class="inspection-plant-shape"></div><div class="inspection-leaf-shape leaf-one"></div><div class="inspection-leaf-shape leaf-two"></div><button id="inspection-bug" class="inspection-bug" type="button" aria-label="Moving bug">✣</button>';
+  const bugElement = dom.inspectionZoom.querySelector('#inspection-bug');
+  const spider = bug.species === 'spider';
+  qteState = { kind: 'inspection', bug, x: spider ? 72 : 28, y: spider ? 30 : 46, vx: spider ? -8 : 10, vy: spider ? 5 : -7, hovering: false, hoverTime: 0, frozen: false, dragging: false };
+  bugElement.classList.toggle('is-spider', spider);
+  bugElement.textContent = bug.species === 'worm' ? '≈' : bug.species === 'caterpillar' ? '◍' : '✣';
+  bugElement.addEventListener('pointerenter', () => { if (qteState) qteState.hovering = true; });
+  bugElement.addEventListener('pointerleave', () => { if (qteState && !qteState.dragging) qteState.hovering = false; });
+  bugElement.addEventListener('pointerdown', (event) => {
+    if (!qteState?.frozen) return;
+    qteState.dragging = true;
+    bugElement.setPointerCapture(event.pointerId);
+  });
+  bugElement.addEventListener('pointermove', (event) => {
+    if (!qteState?.dragging) return;
+    const rect = dom.inspectionZoom.getBoundingClientRect();
+    qteState.x = clamp(((event.clientX - rect.left) / rect.width) * 100, 8, 92);
+    qteState.y = clamp(((event.clientY - rect.top) / rect.height) * 100, 10, 88);
+  });
+  bugElement.addEventListener('pointerup', (event) => {
+    if (!qteState?.dragging) return;
+    qteState.dragging = false;
+    const bugRect = bugElement.getBoundingClientRect();
+    const dishRect = dom.petriDish.getBoundingClientRect();
+    const inside = bugRect.left + bugRect.width / 2 > dishRect.left && bugRect.left + bugRect.width / 2 < dishRect.right && bugRect.top + bugRect.height / 2 > dishRect.top && bugRect.top + bugRect.height / 2 < dishRect.bottom;
+    if (inside) completeBugCapture(bug);
+    else dom.inspectionState.textContent = 'Missed the dish. Drag the frozen bug into the circle.';
+    bugElement.releasePointerCapture?.(event.pointerId);
+  });
   modalOpen = true;
-  dom.qteCopy.textContent = `A ${SPECIES[bug.species].label.toLowerCase()} is hiding here. Center the marker in the observation band.`;
+  dom.qteCopy.textContent = `A ${SPECIES[bug.species].label.toLowerCase()} is hiding on this plant. Hover over it until it freezes, then drag it into the petri dish.`;
+  dom.inspectionState.textContent = 'Hover over the moving bug until it freezes.';
   dom.qteModal.classList.remove('is-hidden');
   document.exitPointerLock?.();
   setStatus('Movement paused for close observation.');
 }
 
 function resolveBugObservation() {
-  if (!qteState) return;
-  const success = qteState.position >= 0.42 && qteState.position <= 0.59;
-  const bug = qteState.bug;
+  if (qteState?.kind === 'inspection' && qteState.frozen) completeBugCapture(qteState.bug);
+}
+
+function completeBugCapture(bug) {
+  if (!bug) return;
   qteState = null;
   modalOpen = false;
   dom.qteModal.classList.add('is-hidden');
-  if (success) {
-    bug.revealed = true;
-    bug.bugModel.visible = true;
-    bug.marker.visible = true;
-    if (['worm', 'caterpillar', 'spider'].includes(bug.species)) {
-      bug.cooldown = 10;
-      bug.revealed = false;
-      bug.bugModel.visible = false;
-      bug.marker.visible = false;
-      save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
-      if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
-      save.coins += bug.species === 'worm' ? 4 : 8;
-      saveGame();
-      updateHUD();
-      toast(`${SPECIES[bug.species].label} collected${bug.species === 'worm' ? ' — fishing lure added' : ''}.`, 'success');
-      setStatus(bug.species === 'worm' ? 'The worm is ready to use as fishing bait.' : 'The tiny field note is safely recorded.');
-    } else {
-      setTool('net');
-      toast(`${SPECIES[bug.species].label} revealed. Net it before it disappears.`, 'success');
-      setStatus('The bug is visible. Equip the net and make a clean swing.');
-    }
-  } else {
-    bug.cooldown = 3;
-    toast('The lens slipped off the movement. Try the trace again.', 'warning');
-    setStatus('The leaves settle. The visual trace will return.');
+  if (['worm', 'caterpillar', 'spider'].includes(bug.species)) {
+    bug.cooldown = 10;
+    bug.revealed = false;
+    bug.bugModel.visible = false;
+    bug.marker.visible = false;
+    save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+    if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
+    save.coins += bug.species === 'worm' ? 4 : 8;
+    saveGame();
+    updateHUD();
+    toast(`${SPECIES[bug.species].label} placed in the petri dish${bug.species === 'worm' ? ' — fishing lure added' : ''}.`, 'success');
+    setStatus(bug.species === 'worm' ? 'The worm is ready to use as fishing bait.' : 'The tiny field note is safely recorded.');
+    return;
   }
+  bug.revealed = true;
+  bug.bugModel.visible = true;
+  bug.marker.visible = true;
+  setTool('net');
+  toast(`${SPECIES[bug.species].label} revealed. Net it before it disappears.`, 'success');
+  setStatus('The bug is visible. Equip the net and make a clean swing.');
 }
 
 function getAimedHotspot() {
@@ -2107,6 +2372,10 @@ function getNearestRevealedBug() {
 function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
+    if (critter.hidden) {
+      if (elapsed >= critter.respawnAt) respawnCritter(critter);
+      continue;
+    }
     const animal = critter.group;
     const isFlying = SPECIES[critter.species].type === 'flying' || ['butterfly', 'bee', 'dragonfly'].includes(critter.species);
     critter.stateTime += delta;
@@ -2116,6 +2385,7 @@ function updateCritters(delta) {
       if (threat) {
         scareCritter(critter);
       } else {
+        steerCritterFromEdge(critter, delta);
         critter.direction += Math.sin(elapsed * 0.28 + critter.home.x) * delta * 0.07;
         const drift = Math.sin(critter.stateTime * 0.65 + critter.home.z) * 0.035;
         animal.position.x += Math.sin(critter.direction) * delta * 0.28;
@@ -2128,6 +2398,13 @@ function updateCritters(delta) {
       animal.position.x += Math.sin(critter.direction) * delta * 3.4;
       animal.position.z += Math.cos(critter.direction) * delta * 3.4;
       animal.position.y = isFlying ? critter.home.y + Math.abs(Math.sin(elapsed * 9)) * 0.18 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
+      const bounds = ZONES[currentZone].bounds;
+      if (animal.position.x < bounds.minX - 1 || animal.position.x > bounds.maxX + 1 || animal.position.z < bounds.minZ - 1 || animal.position.z > bounds.maxZ + 1) {
+        world.remove(animal);
+        critter.hidden = true;
+        critter.respawnAt = elapsed + 1.6 + Math.random() * 2.4;
+        continue;
+      }
       if (critter.fleeTime <= 0) {
         critter.state = 'idle';
         critter.home.copy(animal.position);
@@ -2311,7 +2588,7 @@ function getInteractionTarget() {
 
 function updateCrosshair() {
   let targeted = false;
-  if (currentZone === 'forest' && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
   if (['forest', 'zoo'].includes(currentZone) && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
   if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
   dom.crosshair.classList.toggle('is-targeted', targeted);
@@ -2342,7 +2619,7 @@ function updateHUD() {
 }
 
 function updateFishingTips() {
-  const visible = save.tipsEnabled !== false && currentZone === 'forest' && activeTool === 'rod';
+  const visible = save.tipsEnabled !== false && ['forest', 'zoo'].includes(currentZone) && activeTool === 'rod';
   dom.fishingTips.classList.toggle('is-hidden', !visible);
   if (!visible) {
     dom.actionHint.textContent = '';
@@ -2371,7 +2648,7 @@ function updateFishingTips() {
 }
 
 function updateFishingCallout() {
-  const visible = currentZone === 'forest' && activeTool === 'rod' && !modalOpen && !qteState;
+  const visible = ['forest', 'zoo'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState;
   dom.fishingCallout.classList.toggle('is-hidden', !visible);
   if (!visible) return;
   let message = 'AIM FOR A WATER HOT SPOT';
@@ -2392,7 +2669,7 @@ function updateFishingCallout() {
 }
 
 function updateActionDock() {
-  const fishingActive = currentZone === 'forest' && ['charging', 'waiting', 'bite', 'hooking', 'returning', 'reeling'].includes(fishing.phase);
+  const fishingActive = ['forest', 'zoo'].includes(currentZone) && ['charging', 'waiting', 'bite', 'hooking', 'returning', 'reeling'].includes(fishing.phase);
   if (modalOpen || qteState) {
     dom.actionDock.classList.add('is-hidden');
     return;
@@ -2428,7 +2705,7 @@ function updateActionDock() {
     dom.primaryAction.textContent = 'CLICK TO ENTER FIELD';
   } else if (fishing.phase === 'charging') {
     dom.primaryAction.textContent = `RELEASE CAST ${Math.round(fishing.charge * 100)}%`;
-  } else if (currentZone === 'forest' && activeTool === 'rod') {
+  } else if (['forest', 'zoo'].includes(currentZone) && activeTool === 'rod') {
     dom.primaryAction.textContent = 'HOLD TO CAST';
   } else if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') {
     dom.primaryAction.textContent = 'INSPECT TRACE';
@@ -2503,7 +2780,10 @@ function closeModal(element) {
   element.classList.add('is-hidden');
   modalOpen = false;
   if (element === dom.qteModal) qteState = null;
-  if (element === dom.cleaningModal) cleaningState = null;
+  if (element === dom.cleaningModal) {
+    cleaningState = null;
+    dom.cleaningModal.classList.remove('is-aquarium');
+  }
 }
 
 function closeAllModals() {
@@ -2511,6 +2791,7 @@ function closeAllModals() {
   modalOpen = false;
   qteState = null;
   cleaningState = null;
+  dom.cleaningModal.classList.remove('is-aquarium');
 }
 
 function openTravel() {
@@ -2611,8 +2892,16 @@ function handleInteract() {
     harvestWildFlower(target);
     return;
   }
-  if (target?.type === 'seed-bed') {
-    plantFlowerSeed();
+  if (target?.type === 'seed-plot') {
+    if (isGardenPlotOccupied(target)) {
+      setStatus('That planting spot is occupied. Choose an empty marked spot.');
+      return;
+    }
+    plantFlowerSeed(target);
+    return;
+  }
+  if (target?.type === 'nature-loot') {
+    lootNatureStick(target);
     return;
   }
   if (target?.type === 'enclosure') {
@@ -2629,7 +2918,7 @@ function handlePrimaryDown() {
     return;
   }
   primaryHeld = true;
-  if (currentZone === 'forest' && activeTool === 'rod') {
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'rod') {
     if (fishing.phase === 'idle') startCast();
     else if (fishing.phase === 'bite') setHook();
     else if (fishing.phase === 'hooking') setHook();
@@ -2670,7 +2959,7 @@ function handleActionDown() {
     dom.canvas.requestPointerLock?.();
     return;
   }
-  if (currentZone === 'forest' && activeTool === 'rod') startCast();
+  if (['forest', 'zoo'].includes(currentZone) && activeTool === 'rod') startCast();
   if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') useNet();
   if (['forest', 'zoo'].includes(currentZone) && activeTool === 'magnifier') startBugObservation();
 }
@@ -2682,17 +2971,27 @@ function handleActionUp() {
 }
 
 function updateQTE(delta) {
-  if (!qteState) return;
-  qteState.position += qteState.direction * delta * 0.88;
-  if (qteState.position >= 1) {
-    qteState.position = 1;
-    qteState.direction = -1;
+  if (!qteState || qteState.kind !== 'inspection') return;
+  const bugElement = dom.inspectionZoom.querySelector('#inspection-bug');
+  if (!bugElement) return;
+  if (!qteState.frozen && !qteState.dragging) {
+    if (qteState.hovering) qteState.hoverTime += delta;
+    else qteState.hoverTime = Math.max(0, qteState.hoverTime - delta * 0.7);
+    qteState.x += qteState.vx * delta;
+    qteState.y += qteState.vy * delta;
+    if (qteState.x < 12 || qteState.x > 88) qteState.vx *= -1;
+    if (qteState.y < 14 || qteState.y > 86) qteState.vy *= -1;
+    if (qteState.hoverTime >= 1.15) {
+      qteState.frozen = true;
+      qteState.vx = 0;
+      qteState.vy = 0;
+      dom.inspectionState.textContent = 'Frozen. Drag it into the petri dish.';
+      toast('The bug froze under the lens. Drag it carefully.', 'success');
+    }
   }
-  if (qteState.position <= 0) {
-    qteState.position = 0;
-    qteState.direction = 1;
-  }
-  dom.qteCursor.style.left = `${qteState.position * 100}%`;
+  bugElement.style.left = `${qteState.x}%`;
+  bugElement.style.top = `${qteState.y}%`;
+  bugElement.classList.toggle('is-frozen', qteState.frozen);
 }
 
 function animate() {
@@ -2823,6 +3122,11 @@ dom.reelAction.addEventListener('pointerdown', (event) => {
 window.addEventListener('pointerup', () => handleActionUp());
 
 dom.qteAction.addEventListener('click', resolveBugObservation);
+dom.cleaningAction.addEventListener('click', sweepHighlightedSpot);
+dom.cleaningField.addEventListener('pointerover', (event) => {
+  const spot = event.target.closest('[data-cleaning-index]');
+  if (spot && cleaningState?.mode === 'aquarium') clearCleaningSpot(Number(spot.dataset.cleaningIndex));
+});
 
 dom.tipsToggleButton.addEventListener('click', () => {
   setTipsMenuOpen(dom.tipsMenu.classList.contains('is-hidden'));
