@@ -799,7 +799,7 @@ h2 {
 
 .inspection-zoom {
   position: relative;
-  min-height: 280px;
+  min-height: 330px;
   overflow: hidden;
   border: 1px solid rgba(137, 224, 199, 0.42);
   background: radial-gradient(circle at 50% 35%, rgba(136, 184, 120, 0.42), transparent 47%), linear-gradient(135deg, #365f48, #112b20);
@@ -808,10 +808,10 @@ h2 {
 
 .inspection-plant-shape {
   position: absolute;
-  left: 47%;
-  top: 9%;
-  width: 13px;
-  height: 92%;
+  left: 45%;
+  top: 2%;
+  width: 20px;
+  height: 101%;
   border-radius: 10px;
   background: #568b58;
   transform: rotate(8deg);
@@ -820,28 +820,28 @@ h2 {
 
 .inspection-branch-shape {
   position: absolute;
-  height: 10px;
+  height: 16px;
   border-radius: 10px;
   background: #568b58;
   transform-origin: left center;
   box-shadow: 0 0 0 1px rgba(216, 239, 133, 0.1);
 }
 
-.inspection-branch-shape.branch-left { left: 47%; top: 43%; width: 38%; transform: rotate(202deg); }
-.inspection-branch-shape.branch-right { left: 49%; top: 57%; width: 39%; transform: rotate(-18deg); }
-.inspection-branch-shape.branch-top { left: 48%; top: 28%; width: 30%; transform: rotate(-52deg); }
+.inspection-branch-shape.branch-left { left: 46%; top: 48%; width: 49%; transform: rotate(202deg); }
+.inspection-branch-shape.branch-right { left: 47%; top: 61%; width: 50%; transform: rotate(-18deg); }
+.inspection-branch-shape.branch-top { left: 47%; top: 27%; width: 42%; transform: rotate(-52deg); }
 
 .inspection-leaf-shape {
   position: absolute;
-  width: 170px;
-  height: 56px;
+  width: 220px;
+  height: 76px;
   border-radius: 100% 0 100% 0;
   background: rgba(91, 151, 86, 0.68);
 }
 
-.inspection-leaf-shape.leaf-one { left: 7%; top: 55%; transform: rotate(-25deg); }
-.inspection-leaf-shape.leaf-two { right: 4%; top: 31%; transform: rotate(28deg) scale(0.92); }
-.inspection-leaf-shape.leaf-three { left: 25%; top: 15%; transform: rotate(-42deg) scale(0.78); }
+.inspection-leaf-shape.leaf-one { left: 2%; top: 59%; transform: rotate(-25deg); }
+.inspection-leaf-shape.leaf-two { right: -2%; top: 26%; transform: rotate(28deg) scale(0.92); }
+.inspection-leaf-shape.leaf-three { left: 20%; top: 10%; transform: rotate(-42deg) scale(0.86); }
 
 .inspection-bug {
   position: absolute;
