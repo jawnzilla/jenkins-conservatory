@@ -114,6 +114,7 @@ const dom = {
   loadingScreen: document.querySelector('#loading-screen')
 };
 
+dom.canvas.tabIndex = 0;
 const renderer = new THREE.WebGLRenderer({ canvas: dom.canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
 renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -1053,13 +1054,13 @@ function updateZooFish(delta) {
 function updateMovement(delta) {
   if (modalOpen || qteState) return;
   moveDirection.set(0, 0, 0);
-  if (keys.has('KeyW') || keys.has('ArrowUp')) moveDirection.z -= 1;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) moveDirection.z += 1;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) moveDirection.x -= 1;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) moveDirection.x += 1;
+  if (isKeyDown('KeyW', 'w')) moveDirection.z -= 1;
+  if (isKeyDown('KeyS', 's')) moveDirection.z += 1;
+  if (isKeyDown('KeyA', 'a')) moveDirection.x -= 1;
+  if (isKeyDown('KeyD', 'd')) moveDirection.x += 1;
   const moving = moveDirection.lengthSq() > 0;
   if (moving) moveDirection.normalize();
-  const sneaking = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const sneaking = isKeyDown('ShiftLeft', 'ShiftRight', 'shift');
   const speed = sneaking ? 2.1 : 4.2;
   forwardDirection.set(Math.sin(yaw), 0, -Math.cos(yaw));
   rightDirection.set(Math.cos(yaw), 0, Math.sin(yaw));
@@ -1081,6 +1082,10 @@ function updateMovement(delta) {
 function updateCameraRotation() {
   pitch = clamp(pitch, -1.35, 1.35);
   camera.rotation.set(pitch, yaw, 0, 'YXZ');
+}
+
+function isKeyDown(...values) {
+  return values.some((value) => keys.has(value));
 }
 
 function updatePrompt() {
@@ -1412,8 +1417,11 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  keys.add(event.code);
-  if (event.code === 'Escape') {
+  const normalizedKey = rememberKey(event, true);
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd'].includes(event.code) || ['w', 'a', 's', 'd'].includes(normalizedKey)) {
+    event.preventDefault();
+  }
+  if (event.code === 'Escape' || normalizedKey === 'escape') {
     keys.clear();
     if (qteState) {
       closeModal(dom.qteModal);
@@ -1422,7 +1430,7 @@ window.addEventListener('keydown', (event) => {
       closeAllModals();
     }
   }
-  if (event.code === 'KeyE') handleInteract();
+  if (event.code === 'KeyE' || normalizedKey === 'e') handleInteract();
   if (event.code === 'Digit1') setTool('rod');
   if (event.code === 'Digit2') setTool('net');
   if (event.code === 'Digit3') setTool('magnifier');
@@ -1432,9 +1440,22 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('keyup', (event) => {
-  keys.delete(event.code);
+  const normalizedKey = rememberKey(event, false);
   if (event.code === 'KeyR' && fishing.phase === 'reeling') fishing.reelHeld = false;
+  if (normalizedKey === 'r' && fishing.phase === 'reeling') fishing.reelHeld = false;
 });
+
+function rememberKey(event, isDown) {
+  const normalizedKey = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+  if (isDown) {
+    keys.add(event.code);
+    if (normalizedKey) keys.add(normalizedKey);
+  } else {
+    keys.delete(event.code);
+    if (normalizedKey) keys.delete(normalizedKey);
+  }
+  return normalizedKey;
+}
 
 window.addEventListener('blur', () => {
   keys.clear();
@@ -1459,6 +1480,7 @@ dom.canvas.addEventListener('click', () => {
 
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === dom.canvas;
+  if (pointerLocked) dom.canvas.focus();
   dom.lockDot.classList.toggle('is-live', pointerLocked);
   dom.lockLabel.textContent = pointerLocked ? 'FIELD MODE ACTIVE' : 'CLICK TO ENTER FIELD MODE';
   updateActionDock();
