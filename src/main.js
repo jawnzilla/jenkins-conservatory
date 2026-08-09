@@ -130,6 +130,7 @@ const dom = {
   noiseValue: document.querySelector('#noise-value'),
   noiseMeter: document.querySelector('#noise-meter'),
   crosshair: document.querySelector('#crosshair'),
+  fishingCallout: document.querySelector('#fishing-callout'),
   actionHint: document.querySelector('#action-hint'),
   actionDock: document.querySelector('#action-dock'),
   primaryAction: document.querySelector('#primary-action'),
@@ -262,6 +263,12 @@ const fishing = {
   fishSpecies: null,
   fishSize: 0,
   fishWeight: 0,
+  hookClicks: 0,
+  hookTarget: 0,
+  hookStartedAt: 0,
+  tensionState: 'clear',
+  nextTensionAt: 0,
+  tensionEndsAt: 0,
   invalidCast: false
 };
 
@@ -770,7 +777,7 @@ function inspectTree(interaction) {
 }
 
 
-function createFence(x, z, width, depth, color = 0x806e53) {
+function createFence(x, z, width, depth, color = 0x806e53, solid = true) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   const railY = [0.7, 1.3];
@@ -784,11 +791,33 @@ function createFence(x, z, width, depth, color = 0x806e53) {
     cylinder(group, 0.11, 0.14, 1.9, color, [post[0], 0.9, post[1]], { segments: 6 });
   }
   world.add(group);
-  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
-  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
-  addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
-  addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
+  if (solid) {
+    addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
+    addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
+    addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
+    addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
+  }
   return group;
+}
+
+function createMountainBoundary(zoneKey) {
+  const bounds = ZONES[zoneKey].bounds;
+  const points = [];
+  for (let x = bounds.minX + 1.5; x <= bounds.maxX - 1.5; x += 2.6) {
+    points.push([x, bounds.minZ]);
+    points.push([x, bounds.maxZ]);
+  }
+  for (let z = bounds.minZ + 2.6; z <= bounds.maxZ - 2.6; z += 2.6) {
+    points.push([bounds.minX, z]);
+    points.push([bounds.maxX, z]);
+  }
+  points.forEach(([x, z], index) => {
+    const height = 2.8 + (index % 4) * 0.7;
+    const radius = 1.25 + (index % 3) * 0.22;
+    const mountain = addMesh(world, new THREE.DodecahedronGeometry(radius, 1), mat(index % 2 ? 0x4a5b4d : 0x596c5a), [x, height * 0.5, z], [0.12, index * 0.37, 0.08], [1.25, height / (radius * 2), 1.05]);
+    mountain.userData.edgeMountain = true;
+    addCollider(x, z, radius * 1.2, { zone: zoneKey });
+  });
 }
 
 function createAquarium() {
@@ -1027,9 +1056,11 @@ function createStorekeeper() {
 
 function createShopDisplay(item, x, z, row = 0) {
   const display = new THREE.Group();
-  display.position.set(x, 0, z);
-  box(display, [1.65, 0.12, 0.9], 0xc29a62, [0, 0.58, 0]);
-  box(display, [1.45, 0.08, 0.72], 0x334f3d, [0, 0.68, 0]);
+  const displayY = row ? 1.75 : 0;
+  display.position.set(x, displayY, z);
+  box(display, [1.9, 2.05, 0.14], 0x405d48, [0, 1.05, 0]);
+  box(display, [1.72, 0.12, 0.72], 0xc29a62, [0, 0.48, 0.12]);
+  box(display, [1.72, 0.1, 0.72], 0x334f3d, [0, 0.56, 0.1]);
   if (item.group === 'tool') {
     cylinder(display, 0.06, 0.08, 0.9, item.key === 'nets' ? 0x80634b : 0x76533f, [0, 1.15, 0], { rotation: [0.1, 0, 0.18], segments: 8 });
     torus(display, item.key === 'nets' ? 0.3 : 0.22, 0.035, 0xd1b77e, [0, 1.62, 0], [0, 0, 0], 8, 18);
@@ -1044,10 +1075,10 @@ function createShopDisplay(item, x, z, row = 0) {
     sphere(display, 0.08, 0x5d8a52, [0, 1.12, -0.1]);
   }
   const label = makeLabel(item.label, '#f2b268', '#2d4232', 0.26);
-  label.position.set(0, 1.98, 0);
+  label.position.set(0, 2.0, -0.12);
   display.add(label);
   world.add(display);
-  const interactable = { type: 'shop-item', label: `Buy ${item.label}`, position: new THREE.Vector3(x, 1.05, z), radius: 3.0, itemKey: item.key, group: item.group, display };
+  const interactable = { type: 'shop-item', label: `Buy ${item.label}`, position: new THREE.Vector3(x, displayY + 1.05, z), radius: 3.0, itemKey: item.key, group: item.group, display };
   interactables.push(interactable);
   addCollider(x, z, 0.72, { zone: 'store' });
 }
@@ -1083,18 +1114,18 @@ function buildStore() {
   createParkingHub('FIELD DEPOT', ZONES.store.accent);
   createPath(0, 0, 7, 20, 0x9f956d);
 
-  box(world, [15, 0.6, 0.45], 0x2e4936, [0, 3.6, -8.5]);
-  box(world, [0.45, 3.6, 9], 0x35523e, [-7.3, 1.8, -4.3]);
-  box(world, [0.45, 3.6, 9], 0x35523e, [7.3, 1.8, -4.3]);
-  box(world, [15, 0.25, 9], 0x283b31, [0, 3.9, -4.3], { rotation: [0.06, 0, -0.04] });
-  box(world, [15, 0.28, 0.35], 0x7a6445, [0, 0.25, -8.5]);
+  box(world, [19, 0.6, 0.45], 0x2e4936, [0, 3.6, -8.5]);
+  box(world, [0.45, 3.6, 9], 0x35523e, [-9.3, 1.8, -4.3]);
+  box(world, [0.45, 3.6, 9], 0x35523e, [9.3, 1.8, -4.3]);
+  box(world, [19, 0.25, 9], 0x283b31, [0, 3.9, -4.3], { rotation: [0.06, 0, -0.04] });
+  box(world, [19, 0.28, 0.35], 0x7a6445, [0, 0.25, -8.5]);
   box(world, [4.5, 2.6, 0.2], 0xa86f49, [0, 1.4, -8.7]);
   const storefront = makeLabel('SUPPLIES', '#f2b268', '#3a2b25', 1.14);
   storefront.position.set(0, 3.0, -8.96);
   world.add(storefront);
-  addCollider(-7.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
-  addCollider(7.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
-  addCollider(0, -8.5, 0.25, { type: 'rect', halfWidth: 7.5, halfDepth: 0.25, zone: 'store' });
+  addCollider(-9.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
+  addCollider(9.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
+  addCollider(0, -8.5, 0.25, { type: 'rect', halfWidth: 9.5, halfDepth: 0.25, zone: 'store' });
 
   const counter = new THREE.Group();
   counter.position.set(0, 0, -5.5);
@@ -1107,11 +1138,8 @@ function buildStore() {
   createStorekeeper();
   createStoreRecordBoard();
 
-  for (const x of [-5.6, -3.1, 3.1, 5.6]) {
-    box(world, [1.4, 2.4, 0.65], 0x58765a, [x, 1.2, -6.9]);
-    box(world, [1.1, 0.08, 0.7], 0xf2b268, [x, 2.42, -6.9]);
-  }
-  SHOP_ITEMS.forEach((item, index) => createShopDisplay(item, -5.2 + (index % 3) * 3.2, -3.6 - Math.floor(index / 3) * 2.0, index));
+  const shopXs = [-5.6, 0, 5.6];
+  SHOP_ITEMS.forEach((item, index) => createShopDisplay(item, shopXs[index % 3], -7.9, Math.floor(index / 3)));
   createTree(-14, -4, 1.1, 0x44694e);
   createTree(14, -3, 1.05, 0x44694e);
   addSmallCrates(-4, 0, -2);
@@ -1128,6 +1156,7 @@ function addSmallCrates(x, y, z) {
 function buildForest() {
   setZonePalette('forest');
   addGround(ZONES.forest.ground);
+  createMountainBoundary('forest');
   createParkingHub('LAKE FIELD', ZONES.forest.accent);
   createPath(0, -1.7, 5.5, 25, 0x9d946e);
   box(world, [5.5, 0.07, 7], 0x7f815e, [0, 0, -10], { rotation: [0, 0, 0.04] });
@@ -1254,14 +1283,15 @@ function createBugNode(species, position, color) {
 function buildZoo() {
   setZonePalette('zoo');
   addGround(ZONES.zoo.ground);
+  createMountainBoundary('zoo');
   createParkingHub('CONSERVATORY', ZONES.zoo.accent);
   createPath(0, -2.5, 6, 25, 0xc0ad78);
   createPath(-9, -9, 3.2, 15, 0xc0ad78);
   createPath(9, -9, 3.2, 15, 0xc0ad78);
 
-  createFence(-9, -10, 8, 8);
-  createFence(9, -10, 8, 8);
-  createFence(0, -22, 14, 5, 0x66806d);
+  createFence(-9, -10, 8, 8, 0x806e53, false);
+  createFence(9, -10, 8, 8, 0x806e53, false);
+  createFence(0, -22, 14, 5, 0x66806d, false);
   const rabbitLabel = makeLabel('MEADOW', '#d8ef85', '#23352d', 0.64);
   rabbitLabel.position.set(-9, 2.8, -10);
   world.add(rabbitLabel);
@@ -1635,6 +1665,12 @@ function resetFishing() {
   fishing.fishSpecies = null;
   fishing.fishSize = 0;
   fishing.fishWeight = 0;
+  fishing.hookClicks = 0;
+  fishing.hookTarget = 0;
+  fishing.hookStartedAt = 0;
+  fishing.tensionState = 'clear';
+  fishing.nextTensionAt = 0;
+  fishing.tensionEndsAt = 0;
   fishing.invalidCast = false;
 }
 
@@ -1728,25 +1764,58 @@ function startReelIn() {
 }
 
 function setHook() {
-  if (fishing.phase !== 'bite') return;
-  if (elapsed > fishing.biteDeadline) {
-    failHook();
+  if (fishing.phase === 'bite') {
+    if (elapsed > fishing.biteDeadline) {
+      failHook();
+      return;
+    }
+    fishing.phase = 'hooking';
+    fishing.hookClicks = 1;
+    fishing.hookTarget = Math.round(clamp(4 + fishing.fishWeight * 2.15, 5, 14));
+    fishing.hookStartedAt = elapsed;
+    triggerToolAction('rod-hook', 0.32);
+    setStatus(`Set the hook: click ${fishing.hookTarget} times over 2 seconds.`);
+    return;
+  }
+  if (fishing.phase !== 'hooking') return;
+  fishing.hookClicks += 1;
+  triggerToolAction('rod-hook', 0.16);
+  if (fishing.hookClicks > fishing.hookTarget + 2) failHook('You over-set the hook and the fish tore free.');
+}
+
+function completeHooking() {
+  const clicks = fishing.hookClicks;
+  const target = fishing.hookTarget;
+  if (clicks < target - 1 || clicks > target + 2) {
+    failHook(clicks < target ? 'The hook never seated. The fish slipped away.' : 'You over-set the hook and the fish tore free.');
     return;
   }
   fishing.phase = 'reeling';
   fishing.reelProgress = 0.18;
   fishing.reelHeld = false;
-  triggerToolAction('rod-hook', 0.32);
+  fishing.tensionState = 'clear';
+  fishing.nextTensionAt = elapsed + 3.5 + Math.random() * 4.5;
   setStatus(`Hook set. Reel in the ${SPECIES[fishing.fishSpecies].label.toLowerCase()}.`);
-  toast('Hook set — keep reeling until the fish reaches shore.', 'success');
+  toast('Hook set — watch the callout and stop reeling when the fish surges.', 'success');
 }
 
-function failHook() {
+function failHook(message = '') {
   const species = fishing.fishSpecies ? SPECIES[fishing.fishSpecies].label : 'fish';
   resetFishing();
   removeFishingVisuals();
-  toast(`Too slow. The ${species.toLowerCase()} slipped the hook.`, 'danger');
+  toast(message || `Too slow. The ${species.toLowerCase()} slipped the hook.`, 'danger');
   setStatus('The disturbance is quiet again. Try another cast.');
+}
+
+function breakFishingLine() {
+  const lure = fishing.castLure;
+  if (lure) save.supplies[lure] = Math.max(0, (save.supplies[lure] || 0) - 1);
+  resetFishing();
+  removeFishingVisuals();
+  saveGame();
+  updateHUD();
+  toast(`The line snapped. Your ${formatName(lure || 'lure')} was lost.`, 'danger');
+  setStatus('The fish is gone. Revisit the store if you need another lure.');
 }
 
 function landFish() {
@@ -1801,6 +1870,7 @@ function updateFishing(delta) {
   if (fishing.phase === 'bite' && elapsed > fishing.biteDeadline) {
     failHook();
   }
+  if (fishing.phase === 'hooking' && elapsed - fishing.hookStartedAt >= 2) completeHooking();
   if (fishing.phase === 'returning' && fishingVisuals) {
     tempVector.set(camera.position.x, 0.3, camera.position.z);
     fishingVisuals.bobber.position.lerp(tempVector, clamp(delta * 2.6, 0, 1));
@@ -1812,12 +1882,35 @@ function updateFishing(delta) {
   }
   if (fishing.phase === 'reeling') {
     const held = fishing.reelHeld || primaryHeld || actionHeld;
-    fishing.reelProgress += delta * (held ? 0.33 : -0.035);
+    if (fishing.tensionState === 'clear' && elapsed >= fishing.nextTensionAt) {
+      fishing.tensionState = 'stop';
+      fishing.tensionEndsAt = elapsed + 1.35;
+      setStatus('STOP REELING. The fish is surging and the line is under tension.');
+      toast('Let the fish run — do not reel during the surge.', 'warning');
+    }
+    if (fishing.tensionState === 'stop') {
+      if (held && Math.random() < delta * 0.035) {
+        breakFishingLine();
+        return;
+      }
+      if (elapsed >= fishing.tensionEndsAt) {
+        if (!held) {
+          fishing.reelProgress = Math.max(0, fishing.reelProgress - 0.16);
+          setStatus('The fish gained line. Resume reeling carefully.');
+        }
+        fishing.tensionState = 'clear';
+        fishing.nextTensionAt = elapsed + 3.5 + Math.random() * 4.5;
+      }
+      return;
+    }
+    const weightFactor = clamp(fishing.fishWeight / 5, 0, 1);
+    const reelRate = 0.34 - weightFactor * 0.16;
+    fishing.reelProgress += delta * (held ? reelRate : -0.035);
     fishing.reelProgress = clamp(fishing.reelProgress, 0, 1);
     if (fishingVisuals) {
       const start = fishing.castLanding || fishingVisuals.hotspot?.position || fishingVisuals.bobber.position;
       tempVector.set(camera.position.x, 0.3, camera.position.z);
-      fishingVisuals.bobber.position.lerp(tempVector, clamp(delta * (held ? 1.9 : 0.35), 0, 1));
+      fishingVisuals.bobber.position.lerp(tempVector, clamp(delta * (held ? 1.9 - weightFactor * 0.8 : 0.35), 0, 1));
       fishingVisuals.bobber.position.y = 0.3 + Math.sin(elapsed * 12) * 0.06;
       fishingVisuals.bobberTop.position.set(fishingVisuals.bobber.position.x, fishingVisuals.bobber.position.y + 0.14, fishingVisuals.bobber.position.z);
       if (fishingVisuals.bobber.position.distanceTo(start) < 0.8 && held) {
@@ -2119,10 +2212,7 @@ function constrainForestWaterBoundary() {
   const offsetZ = player.z - FOREST_WATER.centerZ;
   const distance = Math.hypot(offsetX, offsetZ);
   const onDockCorridor = Math.abs(offsetX) <= FOREST_DOCK.halfWidth && player.z <= FOREST_DOCK.shoreZ + 0.7;
-  if (onDockCorridor) {
-    if (player.z < FOREST_DOCK.endZ) player.z = FOREST_DOCK.endZ;
-    return;
-  }
+  if (onDockCorridor) return;
   if (distance >= FOREST_WATER.playerRadius) return;
   if (distance < 0.001) {
     player.x = FOREST_WATER.centerX;
@@ -2264,6 +2354,7 @@ function updateFishingTips() {
     charging: 'cast',
     waiting: 'cast',
     bite: 'hook',
+    hooking: 'hook',
     returning: 'cast',
     reeling: 'reel'
   }[fishing.phase] || 'loadout';
@@ -2271,15 +2362,37 @@ function updateFishingTips() {
   dom.actionHint.textContent = {
     idle: 'Use B / L to match the kit, then aim at a circular water disturbance.',
     charging: 'Hold to load the cast. Release while the crosshair is over the disturbance.',
-    waiting: 'The bobber is in the disturbance. Wait for the bite, then set the hook quickly.',
-    bite: 'BITE! Click SET HOOK before the bite window closes.',
+    waiting: fishing.castTarget ? (fishing.invalidCast ? `Wrong presentation. Switch to ${formatName(fishing.castTarget.bait)} + ${formatName(fishing.castTarget.lure)}.` : 'Viable spot. Wait for the bite.') : 'No hot spot. Reel the line back in.',
+    bite: 'BITE! Click SET HOOK, then click enough times over 2 seconds.',
+    hooking: `Set hook: ${fishing.hookClicks} / ${fishing.hookTarget} clicks.`,
     returning: 'The line is coming back. Change the bait or lure before trying again.',
-    reeling: 'Hold REEL LINE / left click until the fish reaches shore.'
+    reeling: fishing.tensionState === 'stop' ? 'STOP REELING — let the fish run.' : 'Hold REEL LINE / left click until the fish reaches shore.'
   }[fishing.phase] || '';
 }
 
+function updateFishingCallout() {
+  const visible = currentZone === 'forest' && activeTool === 'rod' && !modalOpen && !qteState;
+  dom.fishingCallout.classList.toggle('is-hidden', !visible);
+  if (!visible) return;
+  let message = 'AIM FOR A WATER HOT SPOT';
+  let tone = '';
+  if (fishing.phase === 'charging') message = `HOLD TO CAST · ${Math.round(fishing.charge * 100)}%`;
+  if (fishing.phase === 'waiting' && !fishing.castTarget) { message = 'REEL LINE · NOT IN A HOT SPOT'; tone = 'is-warning'; }
+  if (fishing.phase === 'waiting' && fishing.invalidCast) { message = `SWITCH TO ${formatName(fishing.castTarget.bait)} + ${formatName(fishing.castTarget.lure)}`; tone = 'is-warning'; }
+  if (fishing.phase === 'waiting' && fishing.castTarget && !fishing.invalidCast) { message = 'WAIT · VIABLE HOT SPOT'; tone = 'is-ready'; }
+  if (fishing.phase === 'bite') { message = 'BITE · CLICK SET HOOK NOW'; tone = 'is-bite'; }
+  if (fishing.phase === 'hooking') { message = `SET HOOK · ${fishing.hookClicks} / ${fishing.hookTarget} CLICKS`; tone = 'is-bite'; }
+  if (fishing.phase === 'returning') { message = 'REEL LINE · WATER IS QUIET'; tone = 'is-warning'; }
+  if (fishing.phase === 'reeling') {
+    message = fishing.tensionState === 'stop' ? 'STOP REELING · FISH IS SURGING' : 'REEL LINE · KEEP THE FISH MOVING HOME';
+    tone = fishing.tensionState === 'stop' ? 'is-warning' : 'is-ready';
+  }
+  dom.fishingCallout.textContent = message;
+  dom.fishingCallout.className = `fishing-callout ${tone}`;
+}
+
 function updateActionDock() {
-  const fishingActive = currentZone === 'forest' && ['charging', 'waiting', 'bite', 'returning', 'reeling'].includes(fishing.phase);
+  const fishingActive = currentZone === 'forest' && ['charging', 'waiting', 'bite', 'hooking', 'returning', 'reeling'].includes(fishing.phase);
   if (modalOpen || qteState) {
     dom.actionDock.classList.add('is-hidden');
     return;
@@ -2295,6 +2408,12 @@ function updateActionDock() {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
     dom.reelAction.textContent = 'SET HOOK';
+    return;
+  }
+  if (fishing.phase === 'hooking') {
+    dom.primaryAction.classList.add('is-hidden');
+    dom.reelAction.classList.remove('is-hidden');
+    dom.reelAction.textContent = `SET HOOK ${fishing.hookClicks}/${fishing.hookTarget}`;
     return;
   }
   if (fishing.phase === 'reeling') {
@@ -2513,6 +2632,7 @@ function handlePrimaryDown() {
   if (currentZone === 'forest' && activeTool === 'rod') {
     if (fishing.phase === 'idle') startCast();
     else if (fishing.phase === 'bite') setHook();
+    else if (fishing.phase === 'hooking') setHook();
     else if (fishing.phase === 'waiting') startReelIn();
     else if (fishing.phase === 'reeling') fishing.reelHeld = true;
   } else if (['forest', 'store', 'zoo'].includes(currentZone) && activeTool === 'net') {
@@ -2535,6 +2655,10 @@ function handleActionDown() {
     return;
   }
   if (fishing.phase === 'bite') {
+    setHook();
+    return;
+  }
+  if (fishing.phase === 'hooking') {
     setHook();
     return;
   }
@@ -2592,6 +2716,7 @@ function animate() {
   updateQTE(delta);
   updatePrompt();
   updateCrosshair();
+  updateFishingCallout();
   updateActionDock();
   updateFishingTips();
   updateCameraRotation();
