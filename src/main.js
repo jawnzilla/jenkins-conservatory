@@ -696,12 +696,16 @@ function createBeehiveOnTree(tree, x, z, id, wild = false) {
   for (const y of [-0.28, 0, 0.28]) {
     torus(hive, 0.42, 0.034, 0x513c2c, [0, y, 0], [0, 0, 0], 8, 20);
   }
-  cylinder(hive, 0.16, 0.16, 0.05, 0x2c2921, [0, -0.1, -0.44], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
+  sphere(hive, 0.11, 0x2c2921, [0, -0.1, -0.43], { scale: [1, 0.72, 0.25] });
+  const honeyDrip = new THREE.Group();
+  sphere(honeyDrip, 0.045, 0xf1bd45, [0, -0.18, -0.48], { scale: [0.68, 1.9, 0.55], material: { emissive: 0x8a5c16, emissiveIntensity: 0.28 } });
+  sphere(honeyDrip, 0.026, 0xf7d36a, [0.015, -0.3, -0.49], { material: { emissive: 0x8a5c16, emissiveIntensity: 0.22 } });
+  hive.add(honeyDrip);
   const marker = makeLabel(wild ? 'WILD HIVE' : 'HIVE', wild ? '#f2b268' : '#f6d56b', '#3b2b20', 0.38);
   marker.position.set(0, 0.78, 0);
   hive.add(marker);
   world.add(hive);
-  const entry = { id, group: hive, body, marker, position: new THREE.Vector3(x + 0.45, 3.1, z - 0.22), radius: 2.8, wild, lootedAt: 0, baseScale: 1 };
+  const entry = { id, group: hive, body, marker, honeyDrip, position: new THREE.Vector3(x + 0.45, 3.1, z - 0.22), radius: 2.8, wild, lootedAt: -1000, baseScale: 1 };
   beehives.push(entry);
   interactables.push({ type: 'hive', label: wild ? 'Loot wild beehive' : 'Loot showcase beehive', position: entry.position.clone(), radius: 3.2, hive: entry });
   addCollider(entry.position.x, entry.position.z, 0.55, { zone: currentZone });
@@ -824,6 +828,7 @@ function updateBeehives() {
     const size = clamp(0.72 + beeCount * 0.045 + flowerCount * 0.075, 0.72, 1.9);
     hive.group.scale.setScalar(size);
     hive.marker.visible = distanceTo(hive.position) < 9 && elapsed > hive.lootedAt + 1.5;
+    hive.honeyDrip.visible = elapsed > hive.lootedAt + 12;
     hive.marker.position.y = 0.78 + Math.sin(elapsed * 3 + hive.position.x) * 0.04;
   }
 }
@@ -835,6 +840,7 @@ function lootHive(hive) {
   }
   const amount = 2 + Math.max(0, Math.floor((save.caught.bee || 0) / 2));
   hive.lootedAt = elapsed;
+  hive.honeyDrip.visible = false;
   save.honey = (save.honey || 0) + amount;
   save.coins += amount * 2;
   saveGame();
@@ -1444,14 +1450,14 @@ function createNatureStick(x, z, index = 0) {
 function createNatureScatter(zoneKey) {
   const layouts = {
     forest: {
-      foliage: [[-4, -4], [3, -4.8], [-6, -10], [5, -6], [-15, -9], [15, -10], [-18, -20], [18, -22], [-8, -26], [8, -27], [-19, 5], [19, 6]],
-      rocks: [[-4.5, -4.2, 0.35], [4.8, -5.4, 0.28], [-17.5, -8, 0.42], [16.5, -9, 0.32], [-8.2, -26.4, 0.26], [8.4, -27.2, 0.3]],
-      sticks: [[-2.8, -3.6], [4.3, -8.1], [-14.8, -11.1], [13.9, -18.3], [-7.6, -23.8], [10.8, -25.4], [18.6, 1.2]]
+      foliage: [[-4, -4], [3, -4.8], [-6, -10], [5, -6], [-15, -9], [15, -10], [-18, -20], [18, -22], [-8, -26], [8, -27], [-19, 5], [19, 6], [-20, -6], [20, -6], [-20, -14], [20, -14], [-18, -27], [18, -27], [-12, 7], [12, 7], [-5, -28], [5, -28]],
+      rocks: [[-4.5, -4.2, 0.35], [4.8, -5.4, 0.28], [-17.5, -8, 0.42], [16.5, -9, 0.32], [-8.2, -26.4, 0.26], [8.4, -27.2, 0.3], [-20, -14, 0.24], [20, -14, 0.27]],
+      sticks: [[-2.8, -3.6], [4.3, -8.1], [-14.8, -11.1], [13.9, -18.3], [-7.6, -23.8], [10.8, -25.4], [18.6, 1.2], [-19, -6.5], [19, -15.5], [-11.5, 7.2]]
     },
     zoo: {
-      foliage: [[-15, -8], [-13, -17], [-5, -8], [4, -6], [15, -8], [16, -18], [-19, -18], [19, -24]],
-      rocks: [[-15, -15, 0.26], [-12, -24, 0.3], [4.6, -6.4, 0.22], [15, -16, 0.28], [18, -8, 0.24]],
-      sticks: [[-15.8, -11.8], [-12.4, -19.2], [-3.9, -7], [14.5, -13.6], [17.2, -22.7]]
+      foliage: [[-12.1, -12.7], [-10.2, -12.1], [-7.2, -12.5], [-12.4, -9.3], [-10.1, -7.9], [-6.8, -8.4], [6.5, -12.6], [8.5, -12.0], [11.4, -12.5], [6.3, -9.3], [9.4, -7.8], [11.8, -9.5]],
+      rocks: [[-12.2, -11.8, 0.26], [-7.1, -11.6, 0.22], [-11.8, -8.1, 0.25], [6.6, -11.8, 0.24], [11.4, -11.5, 0.22], [11.1, -8.1, 0.24]],
+      sticks: [[-11.5, -10.8], [-8.2, -12.8], [-6.8, -8.9], [6.9, -10.5], [10.5, -12.9], [11.6, -8.7]]
     }
   }[zoneKey];
   if (!layouts) return;
@@ -1900,26 +1906,32 @@ function createAnimalModel(species, scale = 1) {
     group.userData.fishFins = [dorsal, anal, nearFin, farFin].map((fin) => ({ mesh: fin, baseRotation: fin.rotation.clone() }));
   } else if (species === 'butterfly') {
     const wingMat = mat(details.color, { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.88, side: THREE.DoubleSide });
-    addMesh(group, new THREE.CircleGeometry(0.36, 6), wingMat, [-0.3, 0.1, 0], [0, Math.PI / 2.5, -0.35], [1.1, 1.35, 1]);
-    addMesh(group, new THREE.CircleGeometry(0.36, 6), wingMat, [0.3, 0.1, 0], [0, -Math.PI / 2.5, 0.35], [1.1, 1.35, 1]);
+    const leftWing = addMesh(group, new THREE.CircleGeometry(0.36, 6), wingMat, [-0.3, 0.1, 0], [0, Math.PI / 2.5, -0.35], [1.1, 1.35, 1]);
+    const rightWing = addMesh(group, new THREE.CircleGeometry(0.36, 6), wingMat, [0.3, 0.1, 0], [0, -Math.PI / 2.5, 0.35], [1.1, 1.35, 1]);
+    group.userData.wings = [leftWing, rightWing];
+    group.userData.wingSpeed = 12;
     cylinder(group, 0.055, 0.055, 0.8, 0x483c35, [0, 0.08, 0], { rotation: [0, 0, Math.PI / 2], segments: 6 });
     cylinder(group, 0.015, 0.015, 0.35, 0x483c35, [-0.1, 0.36, 0], { rotation: [0, 0, -0.35], segments: 5 });
     cylinder(group, 0.015, 0.015, 0.35, 0x483c35, [0.1, 0.36, 0], { rotation: [0, 0, 0.35], segments: 5 });
   } else if (species === 'bee') {
     sphere(group, 0.3, details.color, [0, 0, 0], { scale: [1.15, 0.8, 0.8] });
     for (const x of [-0.1, 0.12]) torus(group, 0.245, 0.035, 0x262a20, [x, 0, 0], [0, Math.PI / 2, 0], 8, 18);
-    addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [-0.18, 0.28, 0], [0.1, Math.PI / 2, 0.2]);
-    addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [0.18, 0.28, 0], [-0.1, Math.PI / 2, -0.2]);
+    const leftWing = addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [-0.18, 0.28, 0], [0.1, Math.PI / 2, 0.2]);
+    const rightWing = addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [0.18, 0.28, 0], [-0.1, Math.PI / 2, -0.2]);
+    group.userData.wings = [leftWing, rightWing];
+    group.userData.wingSpeed = 18;
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, -0.18]);
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, 0.18]);
   } else if (species === 'dragonfly') {
     cylinder(group, 0.025, 0.09, 1.08, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
     sphere(group, 0.075, 0x26333e, [0.58, 0, 0], { scale: [1.25, 0.82, 0.82] });
     const wingMaterial = { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false };
-    box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, -0.42], { material: wingMaterial, rotation: [0, 0.08, -0.05] });
-    box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, -0.36], { material: wingMaterial, rotation: [0, -0.08, 0.06] });
-    box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, 0.42], { material: wingMaterial, rotation: [0, -0.08, 0.05] });
-    box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, 0.36], { material: wingMaterial, rotation: [0, 0.08, -0.06] });
+    const frontLeftWing = box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, -0.42], { material: wingMaterial, rotation: [0, 0.08, -0.05] });
+    const rearLeftWing = box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, -0.36], { material: wingMaterial, rotation: [0, -0.08, 0.06] });
+    const frontRightWing = box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, 0.42], { material: wingMaterial, rotation: [0, -0.08, 0.05] });
+    const rearRightWing = box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, 0.36], { material: wingMaterial, rotation: [0, 0.08, -0.06] });
+    group.userData.wings = [frontLeftWing, rearLeftWing, frontRightWing, rearRightWing];
+    group.userData.wingSpeed = 34;
     for (const x of [-0.32, -0.02, 0.28]) cylinder(group, 0.01, 0.01, 0.22, 0x4c6e7e, [x, 0.15, 0], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
   } else if (species === 'caterpillar') {
     for (let index = 0; index < 5; index += 1) {
@@ -2549,6 +2561,20 @@ function getNearestRevealedBug() {
     .sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
 }
 
+function animateWings(group, phase = 0, speed = group.userData.wingSpeed || 12) {
+  const wings = group.userData.wings;
+  if (!wings?.length) return;
+  const flap = Math.sin(elapsed * speed + phase);
+  wings.forEach((wing, index) => {
+    if (!wing.userData.baseRotation) wing.userData.baseRotation = wing.rotation.clone();
+    if (!wing.userData.baseScale) wing.userData.baseScale = wing.scale.clone();
+    const side = index % 2 === 0 ? 1 : -1;
+    wing.rotation.x = wing.userData.baseRotation.x + flap * 0.42 * side;
+    wing.rotation.z = wing.userData.baseRotation.z + flap * 0.08 * side;
+    wing.scale.y = wing.userData.baseScale.y * (0.82 + Math.abs(flap) * 0.18);
+  });
+}
+
 function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
@@ -2558,6 +2584,7 @@ function updateCritters(delta) {
     }
     const animal = critter.group;
     const isFlying = SPECIES[critter.species].type === 'flying' || ['butterfly', 'bee', 'dragonfly'].includes(critter.species);
+    if (isFlying) animateWings(animal, critter.home.x, SPECIES[critter.species].type === 'bug' && critter.species === 'dragonfly' ? 34 : critter.species === 'bee' ? 18 : 12);
     critter.stateTime += delta;
     const distance = distanceTo(animal.position);
     if (critter.state === 'idle') {
@@ -2596,7 +2623,7 @@ function updateCritters(delta) {
         critter.stateTime = 0;
       }
     }
-    animal.rotation.y = critter.direction + Math.PI;
+    animal.rotation.y = critter.species === 'dragonfly' ? critter.direction - Math.PI / 2 : critter.direction + Math.PI;
     const aimed = getNetCritterTarget() === critter;
     if (aimed && distance < 5.5 && (currentNoise < 0.56 || distance <= 3.1)) {
       animal.userData.highlight = true;
@@ -2662,7 +2689,8 @@ function updateZooAnimals(delta) {
       exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
     } else {
       exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.1 + exhibit.phase) * 0.1 + Math.cos(elapsed * 1.1 + exhibit.phase) * 0.04;
-      exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
+      if (exhibit.group.userData.wings) animateWings(exhibit.group, exhibit.phase, exhibit.group.userData.wingSpeed || 12);
+      exhibit.group.rotation.y = exhibit.group.userData.wingSpeed === 34 ? Math.atan2(-deltaZ, deltaX) : Math.atan2(deltaX, -deltaZ);
       exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16;
     }
   }
