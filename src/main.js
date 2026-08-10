@@ -130,6 +130,7 @@ const DEFAULT_SAVE = {
   records: {},
   honey: 0,
   ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0 },
+  cooked: { grilledFish: 0, glazedCarrots: 0 },
   meals: 0,
   lastZone: 'forest'
 };
@@ -319,6 +320,7 @@ function loadSave() {
       records: { ...(parsed.records || {}) },
       honey: Number(parsed.honey || 0),
       ingredients: { ...DEFAULT_SAVE.ingredients, ...(parsed.ingredients || {}) },
+      cooked: { ...DEFAULT_SAVE.cooked, ...(parsed.cooked || {}) },
       meals: Number(parsed.meals || 0)
     };
   } catch (error) {
@@ -706,14 +708,14 @@ function createBranchTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b
     branch.rotation.set(Math.cos(angle) * tilt, 0, -Math.sin(angle) * tilt);
     const crown = new THREE.Group();
     crown.position.set(Math.sin(angle) * length * 0.52, height + length * 0.24, Math.cos(angle) * length * 0.52);
-    cone(crown, 0.56, 1.2, leafColor, [0, 0.38, 0], { segments: 7 });
-    cone(crown, 0.38, 0.9, new THREE.Color(foliage).offsetHSL(0, 0, 0.12), [0.1, 0.9, -0.05], { segments: 7 });
+    sphere(crown, 0.52, leafColor, [0, 0.38, 0], { scale: [1.18, 0.52, 1.02], widthSegments: 8, heightSegments: 5 });
+    sphere(crown, 0.35, new THREE.Color(foliage).offsetHSL(0, 0, 0.12), [0.1, 0.78, -0.05], { scale: [1.12, 0.48, 0.94], widthSegments: 8, heightSegments: 5 });
     group.add(crown);
   };
   [0.2, 2.22, 4.3].forEach((angle, index) => makeBranch(angle, 3.6 + (index % 2) * 0.2, 1.5 - index * 0.1));
   makeBranch(5.35, 2.25, 1.18, 0.74);
-  cone(group, 0.78, 1.75, foliage, [0, 5.05, 0], { segments: 8 });
-  cone(group, 0.53, 1.3, leafColor, [0.08, 5.92, 0.03], { segments: 8 });
+  sphere(group, 0.88, foliage, [0, 5.08, 0], { scale: [1.15, 0.46, 1.02], widthSegments: 9, heightSegments: 5 });
+  sphere(group, 0.57, leafColor, [0.08, 5.68, 0.03], { scale: [1.12, 0.5, 0.95], widthSegments: 8, heightSegments: 5 });
   world.add(group);
   addCollider(x, z, 0.64 * scale, { zone: currentZone });
   return group;
@@ -723,10 +725,6 @@ function createBeehiveOnTree(tree, x, z, id, wild = false, mountHeight = 3.1) {
   const hive = new THREE.Group();
   hive.position.set(x + 0.45, mountHeight, z - 0.22);
   const body = sphere(hive, 0.48, 0xd59b4d, [0, 0, 0], { scale: [0.9, 1.18, 0.86], widthSegments: 12, heightSegments: 8 });
-  cone(hive, 0.34, 0.48, 0xc98538, [0, -0.54, 0], { segments: 10 });
-  for (const y of [-0.28, 0, 0.28]) {
-    torus(hive, 0.42, 0.034, 0x513c2c, [0, y, 0], [0, 0, 0], 8, 20);
-  }
   sphere(hive, 0.11, 0x2c2921, [0, -0.1, -0.43], { scale: [1, 0.72, 0.25] });
   const honeyDrip = new THREE.Group();
   sphere(honeyDrip, 0.045, 0xf1bd45, [0, -0.18, -0.48], { scale: [0.68, 1.9, 0.55], material: { emissive: 0x8a5c16, emissiveIntensity: 0.28 } });
@@ -1667,7 +1665,25 @@ function createDuck(x, z, index = 0) {
   const group = createAnimalModel('duck', 0.72);
   group.position.set(x, 0.22, z);
   world.add(group);
-  ducks.push({ group, home: new THREE.Vector3(x, 0.22, z), phase: index * 2.4, direction: index ? -0.8 : 1.1, state: 'float', fleeEndsAt: 0, respawnAt: 0 });
+  group.userData.duckWingBases = group.userData.wings.map((wing) => ({ position: wing.position.clone(), rotation: wing.rotation.clone(), scale: wing.scale.clone() }));
+  ducks.push({ group, home: new THREE.Vector3(x, 0.22, z), phase: index * 2.4, direction: index ? -0.8 : 1.1, state: 'float', fleeEndsAt: 0, flightStartedAt: 0, respawnAt: 0 });
+}
+
+function updateDuckFlightPose(duck) {
+  const progress = duck.state === 'flee' ? clamp((elapsed - duck.flightStartedAt) / 0.75, 0, 1) : 0;
+  const flap = duck.state === 'flee' ? Math.sin(elapsed * 18 + duck.phase) : 0;
+  duck.group.rotation.x = -progress * 0.25;
+  duck.group.userData.wings.forEach((wing, index) => {
+    const base = duck.group.userData.duckWingBases[index];
+    const side = index === 0 ? -1 : 1;
+    const spread = 0.5 + progress * 1.25;
+    wing.position.x = base.position.x * spread;
+    wing.position.y = base.position.y + progress * 0.12;
+    wing.rotation.z = base.rotation.z + flap * 0.38 * side;
+    wing.rotation.y = flap * 0.28 * side;
+    wing.scale.x = base.scale.x * (0.55 + progress * 0.95);
+    wing.scale.y = base.scale.y * (0.75 + progress * 0.25);
+  });
 }
 
 function updateDucks(delta) {
@@ -1678,6 +1694,7 @@ function updateDucks(delta) {
         duck.group.position.copy(duck.home);
         duck.group.position.y = 0.22;
         duck.state = 'float';
+        duck.flightStartedAt = 0;
         world.add(duck.group);
       }
       continue;
@@ -1692,11 +1709,13 @@ function updateDucks(delta) {
       group.position.x += dx * delta * 1.45;
       group.position.z += dz * delta * 1.45;
       group.position.y = 0.24 + Math.sin(elapsed * 2.5 + duck.phase) * 0.035;
+      updateDuckFlightPose(duck);
       duck.direction = Math.atan2(dx, dz);
       if ((distance < 5.8 && currentNoise > 0.28) || distance < 2.1) {
         tempVector.subVectors(group.position, player).setY(0).normalize();
         duck.direction = Math.atan2(tempVector.x, tempVector.z);
         duck.state = 'flee';
+        duck.flightStartedAt = elapsed;
         duck.fleeEndsAt = elapsed + 3.2;
         toast('The ducks startled and flew toward the far shore.', 'warning');
       }
@@ -1704,7 +1723,7 @@ function updateDucks(delta) {
       group.position.x += Math.sin(duck.direction) * delta * 5.2;
       group.position.z += Math.cos(duck.direction) * delta * 5.2;
       group.position.y += delta * 1.25;
-      animateWings(group, duck.phase, 12);
+      updateDuckFlightPose(duck);
       if (elapsed >= duck.fleeEndsAt || Math.hypot(group.position.x - FOREST_WATER.centerX, group.position.z - FOREST_WATER.centerZ) > FOREST_WATER.waterRadius + 4) {
         world.remove(group);
         duck.state = 'hidden';
@@ -2084,14 +2103,14 @@ function createAnimalModel(species, scale = 1) {
     group.userData.fishTail = tail;
     group.userData.fishFins = [dorsal, anal, nearFin, farFin].map((fin) => ({ mesh: fin, baseRotation: fin.rotation.clone() }));
   } else if (species === 'butterfly') {
-    const wingMat = mat(details.color, { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.88, side: THREE.DoubleSide });
-    const leftWing = addMesh(group, new THREE.CircleGeometry(0.34, 7), wingMat, [-0.22, 0.1, 0], [0, Math.PI / 2.5, -0.22], [1.02, 1.32, 1]);
-    const rightWing = addMesh(group, new THREE.CircleGeometry(0.34, 7), wingMat, [0.22, 0.1, 0], [0, -Math.PI / 2.5, 0.22], [1.02, 1.32, 1]);
+    const leftWing = sphere(group, 0.32, details.color, [-0.11, 0.1, 0], { scale: [0.82, 0.12, 1.25], widthSegments: 7, heightSegments: 5, material: { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.9, side: THREE.DoubleSide } });
+    const rightWing = sphere(group, 0.32, details.color, [0.11, 0.1, 0], { scale: [0.82, 0.12, 1.25], widthSegments: 7, heightSegments: 5, material: { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.9, side: THREE.DoubleSide } });
     group.userData.wings = [leftWing, rightWing];
     group.userData.wingSpeed = 12;
-    cylinder(group, 0.052, 0.052, 0.34, 0x483c35, [0, 0.1, 0], { rotation: [0, 0, Math.PI / 2], segments: 6 });
-    cylinder(group, 0.014, 0.014, 0.24, 0x483c35, [0.13, 0.29, 0], { rotation: [0, 0, -0.5], segments: 5 });
-    cylinder(group, 0.014, 0.014, 0.24, 0x483c35, [0.13, 0.29, 0], { rotation: [0, 0, 0.5], segments: 5 });
+    group.userData.isButterfly = true;
+    cylinder(group, 0.043, 0.052, 0.38, 0x483c35, [0, 0.13, 0], { segments: 6 });
+    cylinder(group, 0.012, 0.012, 0.22, 0x483c35, [-0.04, 0.4, 0], { rotation: [0, 0, -0.42], segments: 5 });
+    cylinder(group, 0.012, 0.012, 0.22, 0x483c35, [0.04, 0.4, 0], { rotation: [0, 0, 0.42], segments: 5 });
   } else if (species === 'bee') {
     sphere(group, 0.3, details.color, [0, 0, 0], { scale: [1.15, 0.8, 0.8] });
     for (const x of [-0.1, 0.12]) torus(group, 0.245, 0.035, 0x262a20, [x, 0, 0], [0, Math.PI / 2, 0], 8, 18);
@@ -2731,7 +2750,16 @@ function animateWings(group, phase = 0, speed = group.userData.wingSpeed || 12) 
   wings.forEach((wing, index) => {
     if (!wing.userData.baseRotation) wing.userData.baseRotation = wing.rotation.clone();
     if (!wing.userData.baseScale) wing.userData.baseScale = wing.scale.clone();
-    const side = index % 2 === 0 ? 1 : -1;
+    if (!wing.userData.basePosition) wing.userData.basePosition = wing.position.clone();
+    const side = group.userData.isButterfly ? (index === 0 ? -1 : 1) : (index % 2 === 0 ? 1 : -1);
+    if (group.userData.isButterfly) {
+      const spread = 0.065 + Math.abs(flap) * 0.16;
+      wing.position.x = side * spread;
+      wing.rotation.y = wing.userData.baseRotation.y + flap * 0.58 * side;
+      wing.rotation.z = wing.userData.baseRotation.z + flap * 0.16 * side;
+      wing.scale.y = wing.userData.baseScale.y * (0.82 + Math.abs(flap) * 0.22);
+      return;
+    }
     wing.rotation.x = wing.userData.baseRotation.x + flap * 0.42 * side;
     wing.rotation.z = wing.userData.baseRotation.z + flap * 0.08 * side;
     wing.scale.y = wing.userData.baseScale.y * (0.82 + Math.abs(flap) * 0.18);
@@ -2992,6 +3020,7 @@ function updateHUD() {
     <div class="equipment-item"><strong>CARROTS</strong><em>${save.ingredients.carrots || 0}</em></div>
     <div class="equipment-item"><strong>HONEY</strong><em>${save.honey || 0}</em></div>
     <div class="equipment-item"><strong>PAN</strong><em>${save.supplies.pans || 0}</em></div>
+    <div class="equipment-item"><strong>COOKED</strong><em>${(save.cooked.grilledFish || 0) + (save.cooked.glazedCarrots || 0)}</em></div>
     <div class="equipment-item"><strong>FIELD NOTES</strong><em>${Object.values(save.caught).reduce((sum, count) => sum + count, 0)}</em></div>
     <div class="equipment-item equipment-help"><span>B / L</span><span>cycle kit</span></div>
   `;
@@ -3275,7 +3304,8 @@ function buyShopDisplay(display) {
 
 function inspectFridge() {
   const ingredients = save.ingredients || DEFAULT_SAVE.ingredients;
-  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish · carrots ${ingredients.carrots || 0} · honey ${save.honey || 0} · picked flowers ${ingredients.flowers || 0}`;
+  const cooked = save.cooked || DEFAULT_SAVE.cooked;
+  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish · carrots ${ingredients.carrots || 0} · honey ${save.honey || 0} · picked flowers ${ingredients.flowers || 0} · grilled fish ${cooked.grilledFish || 0} · glazed carrots ${cooked.glazedCarrots || 0}`;
   toast(`Fridge inventory — ${inventory}`, 'success');
   setStatus(inventory);
 }
@@ -3288,29 +3318,21 @@ function cookAtStove() {
   }
   const ingredients = save.ingredients;
   const fish = (ingredients.trout || 0) > 0 ? 'trout' : (ingredients.sunfish || 0) > 0 ? 'sunfish' : null;
-  if (fish && (ingredients.carrots || 0) > 0) {
-    ingredients[fish] -= 1;
-    ingredients.carrots -= 1;
-    save.meals = (save.meals || 0) + 1;
-    save.coins += 6;
-    saveGame();
-    updateHUD();
-    toast(`Pan-seared ${fish} and carrot cooked. +6¢`, 'success');
-    setStatus('A warm field meal is ready. The remaining ingredients are chilled in the fridge.');
+  if (!fish || (ingredients.carrots || 0) <= 0 || (save.honey || 0) <= 0) {
+    toast('Need 1 fish, 1 carrot, and 1 honey to cook both recipes.', 'warning');
+    setStatus('The stove needs one fish, one carrot, one honey, and a pan.');
     return;
   }
-  if ((ingredients.flowers || 0) > 0 && (save.honey || 0) > 0) {
-    ingredients.flowers -= 1;
-    save.honey -= 1;
-    save.meals = (save.meals || 0) + 1;
-    saveGame();
-    updateHUD();
-    toast('Honey-flower tea prepared at the stove.', 'success');
-    setStatus('The pan is ready; gather a fish and carrot, or flowers and honey, for another recipe.');
-    return;
-  }
-  toast('Need a fish + carrot, or picked flowers + honey, to cook.', 'warning');
-  setStatus('Check the fridge for ingredients.');
+  ingredients[fish] -= 1;
+  ingredients.carrots -= 1;
+  save.honey -= 1;
+  save.cooked.grilledFish = (save.cooked.grilledFish || 0) + 1;
+  save.cooked.glazedCarrots = (save.cooked.glazedCarrots || 0) + 1;
+  save.meals = (save.meals || 0) + 2;
+  saveGame();
+  updateHUD();
+  toast('Grilled fish and glazed carrots added to the inventory.', 'success');
+  setStatus('Two prepared items are stored for a future consumption system.');
 }
 
 function sleepAtCabin() {
