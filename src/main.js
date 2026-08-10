@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import './style.css';
 
 const SAVE_KEY = 'jenkins-conservatory-save-v1';
-const ZONE_ORDER = ['store', 'forest', 'zoo'];
+const ZONE_ORDER = ['store', 'forest', 'zoo', 'lake'];
 const FLOWER_GROW_MS = 5 * 60 * 1000;
 const FLOWER_LIFE_MS = 2 * 60 * 60 * 1000;
 const PLAYER_RADIUS = 0.46;
@@ -39,8 +39,25 @@ const ZONES = {
     ground: 0x697862,
     accent: 0xd8ef85,
     bounds: { minX: -23, maxX: 23, minZ: -64, maxZ: 18 }
+  },
+  lake: {
+    label: 'JENKINS LAKE',
+    title: 'Jenkins Lake',
+    note: 'Follow the forest road to Captain Mark and the lake gate.',
+    background: 0x8da19a,
+    fog: 0x8da19a,
+    ground: 0x506b54,
+    accent: 0x8be0c3,
+    fogNear: 27,
+    fogFar: 94,
+    bounds: { minX: -28, maxX: 28, minZ: -68, maxZ: 25 }
   }
 };
+
+const JENKINS_LAKE_PLACEHOLDER_ACCESS = true;
+const JENKINS_LAKE_ROAD = [
+  [0, 18], [-0.8, 10], [1.1, 1], [-1.2, -8], [0.6, -17], [0, -28]
+];
 
 const FOREST_WATER = {
   centerX: 0,
@@ -185,6 +202,7 @@ const DEFAULT_SAVE = {
   ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0, mushrooms: 0, morels: 0, treeMushrooms: 0, wildRice: 0, scallions: 0, berries: 0, duckEggs: 0 },
   cooked: { grilledFish: 0, glazedCarrots: 0, risotto: 0, sunfishSalad: 0, troutEggsBenedict: 0 },
   meals: 0,
+  jenkinsLakePass: false,
   lastZone: 'forest'
 };
 
@@ -331,6 +349,13 @@ let carrotNodes = [];
 let ducks = [];
 let duckEggNodes = [];
 let colliders = [];
+let lakeArrival = null;
+let lakeCarInterior = null;
+let lakeParkedCar = null;
+let lakeCaptain = null;
+let lakeGateCollider = null;
+let lakeGateOpen = false;
+let lakeGateNotified = false;
 let storeRecordBoard = null;
 let fishingVisuals = null;
 let toolAction = { name: '', startedAt: 0, duration: 0 };
@@ -436,12 +461,14 @@ function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0
 }
 
 function addCollider(x, z, radius, options = {}) {
-  colliders.push({ x, z, radius, ...options });
+  const collider = { x, z, radius, enabled: true, ...options };
+  colliders.push(collider);
+  return collider;
 }
 
 function resolveWorldCollisions() {
   for (const collider of colliders) {
-    if (collider.zone && collider.zone !== currentZone) continue;
+    if (collider.enabled === false || (collider.zone && collider.zone !== currentZone)) continue;
     if (collider.type === 'rect') {
       const nearestX = clamp(player.x, collider.x - collider.halfWidth, collider.x + collider.halfWidth);
       const nearestZ = clamp(player.z, collider.z - collider.halfDepth, collider.z + collider.halfDepth);
@@ -643,6 +670,7 @@ function triggerToolAction(name, duration = 0.45) {
 }
 
 function updateHeldTool() {
+  heldToolGroup.visible = !(currentZone === 'lake' && lakeArrival?.active);
   const root = heldToolGroup.userData.root;
   const basePosition = heldToolGroup.userData.basePosition;
   const baseRotation = heldToolGroup.userData.baseRotation;
@@ -691,8 +719,8 @@ function updateHeldTool() {
 function setZonePalette(zoneKey) {
   const zone = ZONES[zoneKey];
   scene.background = new THREE.Color(zone.background);
-  if (skybox) skybox.material.color.set(zoneKey === 'forest' ? 0x9ab9c3 : zoneKey === 'zoo' ? 0xb2c6b8 : 0xb8bd9d);
-  scene.fog = new THREE.Fog(zone.fog, 34, 100);
+  if (skybox) skybox.material.color.set(zoneKey === 'forest' ? 0x9ab9c3 : zoneKey === 'zoo' ? 0xb2c6b8 : zoneKey === 'lake' ? 0xa4b7b0 : 0xb8bd9d);
+  scene.fog = new THREE.Fog(zone.fog, zone.fogNear || 34, zone.fogFar || 100);
   hemiLight.color.set(zoneKey === 'forest' ? 0xd6efcb : 0xe9efcf);
   hemiLight.groundColor.set(zoneKey === 'zoo' ? 0x2f4034 : 0x20352a);
   sunLight.color.set(zoneKey === 'forest' ? 0xfff3ce : 0xffedc3);
@@ -752,6 +780,129 @@ function createCar() {
   label.position.set(0, 2.55, 0);
   group.add(label);
   return group;
+}
+
+function addClosedDoor(parent, x, y, z, width, height, color = 0x5a4738) {
+  const door = box(parent, [width, height, 0.14], color, [x, y, z]);
+  box(parent, [0.07, height * 0.88, 0.08], 0x392e27, [x - width * 0.23, y, z - 0.08]);
+  box(parent, [0.07, height * 0.88, 0.08], 0x392e27, [x + width * 0.23, y, z - 0.08]);
+  box(parent, [width * 0.92, 0.08, 0.08], 0x392e27, [x, y, z - 0.08]);
+  return door;
+}
+
+function createLakeBarn(x, z) {
+  const width = 14;
+  const depth = 10;
+  const height = 4.6;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  box(group, [width, 0.16, depth], 0x73533b, [0, 0.08, 0]);
+  box(group, [0.24, height, depth], 0x8c6848, [-width / 2, height / 2, 0]);
+  box(group, [0.24, height, depth], 0x8c6848, [width / 2, height / 2, 0]);
+  box(group, [width, height, 0.24], 0x8c6848, [0, height / 2, -depth / 2]);
+  box(group, [width, height, 0.24], 0x8c6848, [0, height / 2, depth / 2]);
+  box(group, [width + 0.5, 0.3, depth + 0.5], 0x3e4f42, [0, height + 0.18, 0], { rotation: [0.03, 0, -0.04] });
+  addClosedDoor(group, 0, 2.0, -depth / 2 - 0.08, 4.8, 3.6, 0x4d3e34);
+  addClosedDoor(group, 0, 2.0, depth / 2 + 0.08, 4.8, 3.6, 0x4d3e34);
+  for (const side of [-1, 1]) {
+    for (const zOffset of [-2.8, 0, 2.8]) box(group, [0.06, 0.9, 1.25], 0xa8c6b1, [side * (width / 2 + 0.02), 2.65, zOffset], { material: { transparent: true, opacity: 0.55 } });
+  }
+  const label = makeLabel('POLE BARN · CLOSED', '#f2b268', '#2f3d30', 0.48);
+  label.position.set(0, height + 0.72, -depth / 2 - 0.12);
+  group.add(label);
+  world.add(group);
+  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.2, zone: 'lake' });
+  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.2, zone: 'lake' });
+  addCollider(x - width / 2, z, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: depth / 2, zone: 'lake' });
+  addCollider(x + width / 2, z, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: depth / 2, zone: 'lake' });
+  interactables.push({ type: 'closed-door', label: 'Pole barn doors are locked', position: new THREE.Vector3(x, 1.8, z - depth / 2 - 0.25), radius: 2.6 });
+  interactables.push({ type: 'closed-door', label: 'Pole barn doors are locked', position: new THREE.Vector3(x, 1.8, z + depth / 2 + 0.25), radius: 2.6 });
+  return group;
+}
+
+function createLakeCabin(x, z) {
+  const width = 14;
+  const depth = 12;
+  const height = 3.7;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  box(group, [width, 0.16, depth], 0x76523a, [0, 0.08, 0]);
+  box(group, [0.24, height, depth], 0x936a49, [-width / 2, height / 2, 0]);
+  box(group, [0.24, height, depth], 0x936a49, [width / 2, height / 2, 0]);
+  box(group, [width, height, 0.24], 0x936a49, [0, height / 2, -depth / 2]);
+  box(group, [width, height, 0.24], 0x936a49, [0, height / 2, depth / 2]);
+  box(group, [width + 0.5, 0.35, depth + 0.5], 0x4a5c4b, [0, height + 0.22, 0], { rotation: [0.04, 0, -0.03] });
+  addClosedDoor(group, 0, 1.55, depth / 2 + 0.08, 3.2, 2.8, 0x4d3c31);
+  for (const windowX of [-4.2, 4.2]) box(group, [2.2, 1.25, 0.08], 0xaecbbd, [windowX, 2.25, depth / 2 + 0.02], { material: { transparent: true, opacity: 0.56 } });
+  const label = makeLabel('LAKE CABIN · CLOSED', '#d8ef85', '#30442f', 0.5);
+  label.position.set(0, height + 0.7, depth / 2 + 0.1);
+  group.add(label);
+  world.add(group);
+  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.2, zone: 'lake' });
+  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.2, zone: 'lake' });
+  addCollider(x - width / 2, z, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: depth / 2, zone: 'lake' });
+  addCollider(x + width / 2, z, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: depth / 2, zone: 'lake' });
+  interactables.push({ type: 'closed-door', label: 'The cabin door is locked', position: new THREE.Vector3(x, 1.45, z + depth / 2 + 0.25), radius: 2.4 });
+  return group;
+}
+
+function createLakeShack(x, z) {
+  const width = 9;
+  const depth = 8;
+  const height = 3.3;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  box(group, [width, 0.16, depth], 0x76523a, [0, 0.08, 0]);
+  box(group, [0.2, height, depth], 0x866249, [-width / 2, height / 2, 0]);
+  box(group, [0.2, height, depth], 0x866249, [width / 2, height / 2, 0]);
+  box(group, [width, height, 0.2], 0x866249, [0, height / 2, -depth / 2]);
+  box(group, [width, height, 0.2], 0x866249, [0, height / 2, depth / 2]);
+  box(group, [width + 0.35, 0.28, depth + 0.35], 0x4d5e4d, [0, height + 0.16, 0], { rotation: [0.03, 0, 0.04] });
+  addClosedDoor(group, 0, 1.35, depth / 2 + 0.08, 2.25, 2.3, 0x4b3c30);
+  const label = makeLabel('FIELD SHACK', '#f2b268', '#30442f', 0.42);
+  label.position.set(0, height + 0.58, depth / 2 + 0.08);
+  group.add(label);
+  world.add(group);
+  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: 'lake' });
+  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: 'lake' });
+  addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
+  addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
+  return group;
+}
+
+function createLakeCaptain(x, z) {
+  const captain = new THREE.Group();
+  captain.position.set(x, 0, z);
+  sphere(captain, 0.3, 0xb98262, [0, 1.5, 0]);
+  cylinder(captain, 0.42, 0.5, 1.15, 0x455f69, [0, 0.82, 0], { segments: 8 });
+  box(captain, [0.62, 0.08, 0.44], 0xc29a62, [0, 1.82, 0]);
+  cylinder(captain, 0.16, 0.2, 0.16, 0x374a4c, [0, 1.97, 0], { segments: 8 });
+  cylinder(captain, 0.07, 0.07, 0.78, 0xb98262, [-0.5, 0.8, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
+  cylinder(captain, 0.07, 0.07, 0.78, 0xb98262, [0.5, 0.8, 0], { rotation: [0, 0, -Math.PI / 2], segments: 7 });
+  const label = makeLabel('CAPTAIN MARK', '#f2b268', '#2f3d30', 0.38);
+  label.position.set(0, 2.45, 0);
+  captain.add(label);
+  world.add(captain);
+  const interactable = { type: 'captain', label: 'Talk to Captain Mark', position: new THREE.Vector3(x, 1.05, z), radius: 3.1, group: captain };
+  interactables.push(interactable);
+  lakeCaptain = interactable;
+  return interactable;
+}
+
+function createLakeCarInterior() {
+  const interior = new THREE.Group();
+  box(interior, [2.2, 0.12, 0.72], 0x342e2a, [0, -0.48, -0.78]);
+  box(interior, [1.95, 0.09, 0.1], 0xd0a25f, [0, -0.37, -0.98]);
+  box(interior, [0.12, 1.35, 0.12], 0x342e2a, [-1.02, 0.12, -1.3]);
+  box(interior, [0.12, 1.35, 0.12], 0x342e2a, [1.02, 0.12, -1.3]);
+  box(interior, [2.15, 0.12, 0.12], 0x342e2a, [0, 0.76, -1.3]);
+  box(interior, [0.78, 0.07, 0.78], 0x253837, [0.48, -0.24, -0.92], { material: { transparent: true, opacity: 0.78 } });
+  torus(interior, 0.2, 0.035, 0x1c2422, [0.5, -0.18, -0.68], [Math.PI / 2, 0, 0], 8, 18);
+  const dashLabel = makeLabel('JENKINS LAKE TRANSIT', '#d8ef85', '#1d3027', 0.25);
+  dashLabel.position.set(0, -0.26, -1.05);
+  interior.add(dashLabel);
+  camera.add(interior);
+  return interior;
 }
 
 function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) {
@@ -2035,6 +2186,158 @@ function buildZoo() {
   addEnclosureInteractable('water-wing', 'Clean water wing', 0, -18.65, 'Clear the water wing so the aquatic exhibit stays healthy.');
 }
 
+function createJenkinsLakeRoad() {
+  for (let index = 0; index < JENKINS_LAKE_ROAD.length - 1; index += 1) {
+    const [fromX, fromZ] = JENKINS_LAKE_ROAD[index];
+    const [toX, toZ] = JENKINS_LAKE_ROAD[index + 1];
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+    const length = Math.hypot(dx, dz);
+    const angle = Math.atan2(dx, dz);
+    const centerX = (fromX + toX) / 2;
+    const centerZ = (fromZ + toZ) / 2;
+    box(world, [4.6, 0.06, length + 1.2], 0x9a774f, [centerX, 0.01, centerZ], { rotation: [0, angle, 0] });
+    box(world, [3.7, 0.025, length + 0.9], 0xb18a59, [centerX, 0.045, centerZ], { rotation: [0, angle, 0] });
+  }
+  const roadSign = makeLabel('JENKINS LAKE ROAD', '#d8ef85', '#30442f', 0.48);
+  roadSign.position.set(0, 2.8, 14.2);
+  world.add(roadSign);
+}
+
+function createJenkinsLakeForest() {
+  const treeSpots = [
+    [-8, 15], [8, 15], [-11, 7], [11, 7], [-10, -2], [10, -2],
+    [-12.5, -11], [12.5, -11], [-15, -30], [15, -30], [-17, -46], [17, -46],
+    [-20, -58], [20, -58], [-24, -55], [24, -55], [-22, -18], [22, -19]
+  ];
+  treeSpots.forEach(([x, z], index) => {
+    const create = index % 3 === 0 ? createBranchTree : createTree;
+    create(x, z, 0.82 + (index % 4) * 0.1, index % 2 ? 0x3f6d4b : 0x4b7950);
+  });
+  [[-6.2, 12], [6.8, 9], [-5.5, -4], [5.6, -7], [-20, -8], [20, -10], [-18, -36], [18, -37], [-23, -52], [23, -53]].forEach(([x, z], index) => {
+    createGroundFoliage(x, z, 0.72 + (index % 3) * 0.16, index % 2 ? 0x4e8054 : 0x5a8958);
+  });
+  [[-5.8, 11, 0.28], [6.2, 6, 0.34], [-20, -13, 0.38], [20, -14, 0.3], [-19, -40, 0.34], [19, -41, 0.3]].forEach(([x, z, scale], index) => addRock(x, 0.2, z, scale, index % 2 ? 0x718474 : 0x667b6e));
+}
+
+function createJenkinsLakeWater() {
+  const centerX = 0;
+  const centerZ = -58;
+  addMesh(world, new THREE.CircleGeometry(18, 56), mat(0x2f8291, { roughness: 0.2, transparent: true, opacity: 0.9 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
+  addMesh(world, new THREE.RingGeometry(18.05, 18.55, 56), mat(0x8da36f, { roughness: 1 }), [centerX, 0.07, centerZ], [-Math.PI / 2, 0, 0]);
+  addMesh(world, new THREE.CircleGeometry(18.9, 56), mat(0x71865e, { roughness: 1 }), [centerX, 0.025, centerZ], [-Math.PI / 2, 0, 0]);
+  const lakeLabel = makeLabel('JENKINS LAKE', '#8be0c3', '#183d3c', 0.78);
+  lakeLabel.position.set(0, 2.4, centerZ);
+  world.add(lakeLabel);
+  [[-8, -45], [7, -44], [-14, -53], [13, -52], [-4, -41], [4, -42]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.28 + (index % 2) * 0.12, 0x667b6e));
+}
+
+function buildJenkinsLake() {
+  setZonePalette('lake');
+  addGround(ZONES.lake.ground, 150);
+  createMountainBoundary('lake');
+  createJenkinsLakeForest();
+  createJenkinsLakeRoad();
+  createPath(0, -36, 2.8, 15, 0x9a774f);
+  createJenkinsLakeWater();
+  createLakeBarn(-10.5, -20.5);
+  createLakeShack(10.5, -22.2);
+  createLakeCabin(-10.5, -36.5);
+  lakeParkedCar = createCar();
+  lakeParkedCar.position.set(0, 0.25, -28.5);
+  lakeParkedCar.visible = false;
+  world.add(lakeParkedCar);
+  lakeCaptain = createLakeCaptain(4.7, -40.7);
+  const gateLabel = makeLabel('LAKE ACCESS · CAPTAIN MARK', '#f2b268', '#2f3d30', 0.42);
+  gateLabel.position.set(4.7, 2.9, -42.2);
+  world.add(gateLabel);
+  lakeGateCollider = addCollider(0, -43.5, 0.2, { type: 'rect', halfWidth: 24, halfDepth: 0.22, zone: 'lake' });
+  setLakeGateAccess(Boolean(save.jenkinsLakePass && JENKINS_LAKE_PLACEHOLDER_ACCESS));
+  lakeGateNotified = false;
+}
+
+function setLakeGateAccess(open) {
+  lakeGateOpen = Boolean(open);
+  if (lakeGateCollider) lakeGateCollider.enabled = !lakeGateOpen;
+  if (lakeCaptain?.group) lakeCaptain.group.userData.gateOpen = lakeGateOpen;
+}
+
+function startJenkinsLakeArrival() {
+  lakeArrival = { active: true, progress: 0, duration: 10.5 };
+  lakeCarInterior = createLakeCarInterior();
+  player.set(JENKINS_LAKE_ROAD[0][0], 1.72, JENKINS_LAKE_ROAD[0][1]);
+  setStatus('The car is following the winding road to Jenkins Lake.');
+  updateJenkinsLakeArrival(0);
+}
+
+function updateJenkinsLakeArrival(delta) {
+  if (!lakeArrival?.active) return false;
+  lakeArrival.progress = clamp(lakeArrival.progress + delta / lakeArrival.duration, 0, 1);
+  const scaled = lakeArrival.progress * (JENKINS_LAKE_ROAD.length - 1);
+  const index = Math.min(JENKINS_LAKE_ROAD.length - 2, Math.floor(scaled));
+  const blend = scaled - index;
+  const from = JENKINS_LAKE_ROAD[index];
+  const to = JENKINS_LAKE_ROAD[index + 1];
+  player.x = from[0] + (to[0] - from[0]) * blend;
+  player.z = from[1] + (to[1] - from[1]) * blend;
+  const nextX = to[0] - from[0];
+  const nextZ = to[1] - from[1];
+  yaw = Math.atan2(nextX, -nextZ);
+  camera.position.set(player.x, player.y, player.z);
+  if (lakeArrival.progress >= 1) {
+    lakeArrival.active = false;
+    lakeArrival = null;
+    if (lakeCarInterior) {
+      camera.remove(lakeCarInterior);
+      lakeCarInterior = null;
+    }
+    if (lakeParkedCar) lakeParkedCar.visible = true;
+    player.set(0, 1.72, -30.7);
+    interactables.push({ type: 'car', label: 'Drive back from Jenkins Lake', position: new THREE.Vector3(0, 1.1, -28.5), radius: 3.4 });
+    setStatus('The car is parked in the clearing. Captain Mark is ahead by the lake path.');
+    toast('You arrived at Jenkins Lake.', 'success');
+    restoreFieldMode();
+  }
+  return true;
+}
+
+function updateJenkinsLakeGate() {
+  if (currentZone !== 'lake' || lakeGateOpen || lakeGateNotified || !lakeCaptain) return;
+  if (player.z < -39.2) {
+    lakeGateNotified = true;
+    setStatus('Captain Mark blocks the lake path. Bring him one grilled fish and one glazed carrot.');
+  }
+}
+
+function talkToCaptainMark() {
+  if (currentZone !== 'lake') return;
+  if (lakeGateOpen) {
+    toast('Captain Mark nods. The lake path is open.', 'success');
+    setStatus('The lake is open for future fieldwork.');
+    return;
+  }
+  const hasFish = (save.cooked.grilledFish || 0) > 0;
+  const hasCarrots = (save.cooked.glazedCarrots || 0) > 0;
+  if (!hasFish || !hasCarrots) {
+    toast('Captain Mark is hungry for grilled fish and glazed carrots.', 'warning');
+    setStatus('Bring Captain Mark 1 grilled fish and 1 glazed carrot to pass the lake gate.');
+    return;
+  }
+  save.cooked.grilledFish -= 1;
+  save.cooked.glazedCarrots -= 1;
+  save.jenkinsLakePass = true;
+  saveGame();
+  if (JENKINS_LAKE_PLACEHOLDER_ACCESS) {
+    setLakeGateAccess(true);
+    toast('Captain Mark accepts the meal and lets you pass to Jenkins Lake.', 'success');
+    setStatus('The gate is open. The placeholder lake is ready for future fishing work.');
+  } else {
+    toast('Captain Mark accepts the meal, but the lake path is still closed for now.', 'warning');
+    setStatus('Your pass is recorded. An invisible barrier remains until the lake is attached.');
+  }
+  updateHUD();
+}
+
 function addEnclosureInteractable(id, label, x, z, message) {
   const marker = new THREE.Group();
   const ring = addMesh(marker, new THREE.TorusGeometry(0.34, 0.045, 6, 18), mat(0xf2b268, { emissive: 0x8a4f24, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 }), [0, 0, 0], [-Math.PI / 2, 0, 0]);
@@ -2378,6 +2681,10 @@ function resetWorld() {
   while (world.children.length) {
     world.remove(world.children[0]);
   }
+  if (lakeCarInterior) {
+    camera.remove(lakeCarInterior);
+    lakeCarInterior = null;
+  }
   interactables = [];
   hotspots = [];
   critters = [];
@@ -2398,6 +2705,12 @@ function resetWorld() {
   ducks = [];
   duckEggNodes = [];
   colliders = [];
+  lakeArrival = null;
+  lakeParkedCar = null;
+  lakeCaptain = null;
+  lakeGateCollider = null;
+  lakeGateOpen = false;
+  lakeGateNotified = false;
   storeRecordBoard = null;
   cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
@@ -2418,11 +2731,16 @@ function enterZone(zoneKey, announce = false) {
   if (zoneKey === 'store') buildStore();
   if (zoneKey === 'forest') buildForest();
   if (zoneKey === 'zoo') buildZoo();
+  if (zoneKey === 'lake') {
+    buildJenkinsLake();
+    startJenkinsLakeArrival();
+  }
   camera.position.copy(player);
   updateCameraRotation();
   save.lastZone = zoneKey;
   saveGame();
   updateHUD();
+  if (zoneKey === 'lake') restoreFieldMode();
   if (announce) toast(`Arrived at ${ZONES[zoneKey].label.toLowerCase()}.`, 'success');
 }
 
@@ -3175,6 +3493,10 @@ function constrainForestWaterBoundary() {
 
 function updateMovement(delta) {
   if (modalOpen || qteState) return;
+  if (currentZone === 'lake' && lakeArrival?.active) {
+    updateJenkinsLakeArrival(delta);
+    return;
+  }
   const forwardInput = (isKeyDown('KeyW', 'w') ? 1 : 0) - (isKeyDown('KeyS', 's') ? 1 : 0);
   const strafeInput = (isKeyDown('KeyD', 'd') ? 1 : 0) - (isKeyDown('KeyA', 'a') ? 1 : 0);
   moveDirection.set(strafeInput, 0, forwardInput);
@@ -3379,7 +3701,7 @@ function updateFishingCallout() {
   let tone = '';
   if (fishing.phase === 'charging') message = `HOLD TO CAST · ${Math.round(fishing.charge * 100)}%`;
   if (fishing.phase === 'waiting' && !fishing.castTarget) { message = 'REEL LINE · NOT IN A HOT SPOT'; tone = 'is-warning'; }
-  if (fishing.phase === 'waiting' && fishing.invalidCast) { message = `SWITCH TO ${formatName(fishing.castTarget.bait)} + ${formatName(fishing.castTarget.lure)}`; tone = 'is-warning'; }
+  if (fishing.phase === 'waiting' && fishing.invalidCast && fishing.castTarget) { message = `SWITCH TO ${formatName(fishing.castTarget.bait)} + ${formatName(fishing.castTarget.lure)}`; tone = 'is-warning'; }
   if (fishing.phase === 'waiting' && fishing.castTarget && !fishing.invalidCast) { message = 'WAIT · VIABLE HOT SPOT'; tone = 'is-ready'; }
   if (fishing.phase === 'bite') { message = 'BITE · CLICK SET HOOK NOW'; tone = 'is-bite'; }
   if (fishing.phase === 'hooking') { message = `SET HOOK · ${fishing.hookClicks} / ${fishing.hookTarget} CLICKS`; tone = 'is-bite'; }
@@ -3785,6 +4107,15 @@ function handleInteract() {
     buyShopDisplay(target);
     return;
   }
+  if (target?.type === 'captain') {
+    talkToCaptainMark();
+    return;
+  }
+  if (target?.type === 'closed-door') {
+    toast('That door is secured for now.', 'warning');
+    setStatus('Captain Mark has the keys, but these doors are not part of the current field route.');
+    return;
+  }
   if (target?.type === 'collection') {
     openCollection();
     return;
@@ -3972,6 +4303,7 @@ function animate() {
   updateEnclosureMarkers();
   updateHotspots(delta);
   updateZooAnimals(delta);
+  updateJenkinsLakeGate();
   updateAquarium();
   updatePollinatorGarden();
   updateBeehives();
