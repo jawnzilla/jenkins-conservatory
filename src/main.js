@@ -50,7 +50,7 @@ const ZONES = {
     accent: 0x8be0c3,
     fogNear: 27,
     fogFar: 94,
-    bounds: { minX: -44, maxX: 44, minZ: -134, maxZ: 34 }
+    bounds: { minX: -44, maxX: 44, minZ: -178, maxZ: 34 }
   }
 };
 
@@ -61,7 +61,7 @@ const JENKINS_LAKE_ROAD = [
 
 const JENKINS_LAKE_WATER = {
   centerX: 0,
-  centerZ: -106,
+  centerZ: -146,
   radiusX: 39,
   radiusZ: 27,
   playerRadiusX: 37.2,
@@ -333,6 +333,7 @@ let activeInventoryTab = 'kit';
 let pointerLocked = false;
 let fallbackFieldMode = false;
 let fallbackPointer = null;
+let fallbackPointerId = null;
 let yaw = 0;
 let pitch = -0.08;
 let elapsed = 0;
@@ -371,6 +372,7 @@ let lakeCaptain = null;
 let lakeGateCollider = null;
 let lakeGateOpen = false;
 let lakeGateNotified = false;
+let lakeCabinBoundaryNotified = false;
 let storeRecordBoard = null;
 let fishingVisuals = null;
 let toolAction = { name: '', startedAt: 0, duration: 0 };
@@ -671,7 +673,7 @@ function updateLooseNet(netCloth, time, swing) {
 
 function createSkybox() {
   const skyMaterial = new THREE.MeshBasicMaterial({ color: 0xb2c6b8, side: THREE.BackSide, fog: false, depthWrite: false });
-  skybox = new THREE.Mesh(new THREE.BoxGeometry(150, 150, 150), skyMaterial);
+  skybox = new THREE.Mesh(new THREE.BoxGeometry(420, 420, 420), skyMaterial);
   skybox.renderOrder = -10;
   scene.add(skybox);
 }
@@ -2256,12 +2258,12 @@ function createJenkinsLakeRoad() {
 function isJenkinsLakeClearPosition(x, z, allowMeadow = false) {
   const water = JENKINS_LAKE_WATER;
   const waterDistance = ((x - water.centerX) / (water.radiusX + 1.5)) ** 2 + ((z - water.centerZ) / (water.radiusZ + 1.5)) ** 2;
-  const onRoad = Math.abs(x) < 5.2 && z > -67 && z < 31;
-  const inMeadow = Math.abs(x) < 15.2 && z > -73 && z < -58;
+  const onRoad = Math.abs(x) < 3.5 && z > -67 && z < 31;
+  const inMeadow = Math.abs(x) < 15.2 && z > -120 && z < -78;
   const buildings = [
     [-18, -28, 18, 12],
     [17, -31, 12, 10],
-    [-18, -52, 18, 14]
+    [-9.5, -72, 14, 14]
   ];
   const inBuilding = buildings.some(([centerX, centerZ, width, depth]) => Math.abs(x - centerX) < width / 2 + 1.1 && Math.abs(z - centerZ) < depth / 2 + 1.1);
   return x > -41 && x < 41 && z > -131 && z < 31 && waterDistance >= 1 && !onRoad && !inBuilding && (!inMeadow || allowMeadow);
@@ -2278,10 +2280,10 @@ function createJenkinsLakeForest() {
   };
 
   // Dense staggered forest walls leave a clear road corridor and occasional pockets of grass.
-  for (let row = 0, z = 27; z > -130; row += 1, z -= 6.5) {
+  for (let row = 0, z = 27; z > -174; row += 1, z -= 6.5) {
     for (const side of [-1, 1]) {
-      for (let layer = 0; layer < 3; layer += 1) {
-        const x = side * (18.5 + layer * 6.7 + ((row + layer) % 2) * 1.25);
+      for (let layer = 0; layer < 6; layer += 1) {
+        const x = side * (4.05 + layer * 6.5 + ((row + layer) % 2) * 0.55);
         addForestTree(x, z + ((layer % 2) * 1.4), 0.78 + ((row + layer) % 4) * 0.1, row * 6 + layer);
       }
     }
@@ -2292,7 +2294,7 @@ function createJenkinsLakeForest() {
       addForestTree(x + ((row % 2) * 1.2), z, 0.72 + ((row + column) % 5) * 0.08, row * 11 + column);
     }
   }
-  for (let row = 0, z = -75; z > -128; row += 1, z -= 7.2) {
+  for (let row = 0, z = -122; z > -174; row += 1, z -= 7.2) {
     for (const side of [-1, 1]) {
       for (let layer = 0; layer < 2; layer += 1) {
         addForestTree(side * (22 + layer * 7.5 + (row % 2) * 1.1), z, 0.82 + ((row + layer) % 3) * 0.11, row * 5 + layer + 90);
@@ -2300,7 +2302,7 @@ function createJenkinsLakeForest() {
     }
   }
 
-  for (let row = 0, z = 24; z > -130; row += 1, z -= 5.2) {
+  for (let row = 0, z = 24; z > -174; row += 1, z -= 5.2) {
     for (let column = 0, x = -38; x <= 38; column += 1, x += 6.3) {
       if ((row + column) % 2 !== 0 || !isJenkinsLakeClearPosition(x, z)) continue;
       createGroundFoliage(x, z, 0.68 + ((row + column) % 4) * 0.13, (row + column) % 2 ? 0x4e8054 : 0x5a8958);
@@ -2308,7 +2310,7 @@ function createJenkinsLakeForest() {
   }
   for (let index = 0; index < 28; index += 1) {
     const x = -35 + (index * 17) % 70;
-    const z = 20 - ((index * 23) % 145);
+    const z = 20 - ((index * 23) % 188);
     if (isJenkinsLakeClearPosition(x, z)) {
       if (index % 2) addRock(x, 0.2, z, 0.24 + (index % 3) * 0.08, index % 3 ? 0x718474 : 0x667b6e);
       else createNatureStick(x, z, index);
@@ -2336,60 +2338,62 @@ function createJenkinsLakeWater() {
   const lakeLabel = makeLabel('JENKINS LAKE', '#8be0c3', '#183d3c', 0.88);
   lakeLabel.position.set(0, 2.4, centerZ);
   world.add(lakeLabel);
-  [[-25, -73], [23, -74], [-32, -92], [31, -94], [-20, -116], [20, -117]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
-  [[-14, -84], [14, -85], [-18, -101], [19, -106], [-10, -119], [11, -120]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
+  [[-25, -115], [23, -116], [-32, -132], [31, -134], [-20, -156], [20, -157]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
+  [[-14, -124], [14, -125], [-18, -141], [19, -146], [-10, -159], [11, -160]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
 }
 
 function createJenkinsLakeMeadow() {
-  const meadow = addMesh(world, new THREE.PlaneGeometry(28, 14), mat(0x708f5c, { roughness: 1 }), [0, -0.04, -65.5], [-Math.PI / 2, 0, 0]);
+  const meadow = addMesh(world, new THREE.PlaneGeometry(28, 40), mat(0x708f5c, { roughness: 1 }), [0, -0.04, -99], [-Math.PI / 2, 0, 0]);
   meadow.receiveShadow = true;
   const meadowLabel = makeLabel('LAKE MEADOW', '#d8ef85', '#30442f', 0.55);
-  meadowLabel.position.set(0, 1.65, -64.3);
+  meadowLabel.position.set(0, 1.65, -95.5);
   world.add(meadowLabel);
   const meadowTrees = [
-    [-14, -59.5], [14, -59.5], [-14.5, -65], [14.5, -65], [-14, -70], [14, -70],
-    [-10, -71.5], [-5, -72.2], [5, -72.2], [10, -71.5]
+    [-14, -81], [14, -81], [-14.5, -89], [14.5, -89], [-14, -98], [14, -98],
+    [-14.5, -107], [14.5, -107], [-14, -116], [14, -116],
+    [-10, -118.5], [-5, -119], [5, -119], [10, -118.5]
   ];
   meadowTrees.forEach(([x, z], index) => (index % 3 === 0 ? createBranchTree : createTree)(x, z, 0.86 + (index % 3) * 0.08, index % 2 ? 0x3f6d4b : 0x4b7950));
 }
 
 function buildJenkinsLake() {
   setZonePalette('lake');
-  addGround(ZONES.lake.ground, 190);
+  addGround(ZONES.lake.ground, 360);
   createMountainBoundary('lake');
   createJenkinsLakeForest();
   createJenkinsLakeRoad();
-  createPath(0, -67, 3.2, 12, 0x9a774f);
+  createPath(0, -91, 3.2, 58, 0x9a774f);
   createJenkinsLakeMeadow();
   createJenkinsLakeWater();
   createLakeBarn(-18, -28);
   createLakeShack(17, -31);
-  createLakeCabin(-18, -52);
+  createLakeCabin(-9.5, -72);
   lakeParkedCar = createCar();
   lakeParkedCar.position.set(0, 0.25, -63.5);
   lakeParkedCar.visible = false;
   world.add(lakeParkedCar);
-  lakeCaptain = createLakeCaptain(4.7, -73.5);
+  lakeCaptain = createLakeCaptain(3.6, -78);
   const gateLabel = makeLabel('LAKE ACCESS · CAPTAIN MARK', '#f2b268', '#2f3d30', 0.42);
-  gateLabel.position.set(4.7, 2.9, -75.1);
+  gateLabel.position.set(3.6, 2.9, -79.8);
   world.add(gateLabel);
-  lakeGateCollider = addCollider(0, -76, 0.2, { type: 'rect', halfWidth: 36, halfDepth: 0.22, zone: 'lake' });
+  lakeGateCollider = addCollider(0, -116, 0.2, { type: 'rect', halfWidth: 36, halfDepth: 0.22, zone: 'lake' });
   setLakeGateAccess(Boolean(save.jenkinsLakePass && JENKINS_LAKE_PLACEHOLDER_ACCESS));
   lakeGateNotified = false;
+  lakeCabinBoundaryNotified = false;
 
   const lakeCritters = [
     ['rabbit', [-25, 0.42, 9]], ['squirrel', [25, 0.42, 8]], ['rabbit', [-33, 0.42, -2]], ['squirrel', [32, 0.42, -8]],
     ['rabbit', [-27, 0.42, -16]], ['squirrel', [28, 0.42, -19]], ['fox', [-34, 0.48, -31]], ['frog', [31, 0.42, -35]],
     ['rabbit', [-28, 0.42, -42]], ['squirrel', [29, 0.42, -48]], ['rabbit', [-25, 0.42, -58]], ['squirrel', [24, 0.42, -60]],
     ['fox', [-27, 0.48, -82]], ['frog', [28, 0.42, -86]], ['rabbit', [-30, 0.42, -104]], ['squirrel', [29, 0.42, -111]],
-    ['owl', [16, 2.1, -22]], ['owl', [-17, 2.2, -49]], ['owl', [18, 2.3, -91]],
+    ['owl', [16, 2.1, -22]], ['owl', [-17, 2.2, -49]], ['owl', [18, 2.3, -127]],
     ['butterfly', [-21, 1.85, -11]], ['butterfly', [20, 2.1, -39]], ['bee', [-29, 2.6, -25]], ['bee', [27, 2.7, -56]],
-    ['dragonfly', [8, 2.2, -81]], ['dragonfly', [-10, 2.35, -93]]
+    ['dragonfly', [8, 2.2, -124]], ['dragonfly', [-10, 2.35, -135]]
   ];
   lakeCritters.forEach(([species, position]) => spawnCritter(species, position));
-  createDuck(-6.5, -91, 0);
-  createDuck(6.2, -98, 1);
-  createDuck(0.8, -108, 2);
+  createDuck(-6.5, -132, 0);
+  createDuck(6.2, -141, 1);
+  createDuck(0.8, -150, 2);
   createBugNode('caterpillar', [8.1, 0.05, -28], 0xd59c3a);
   createBugNode('worm', [-8.8, 0.05, -48], 0xb7775b);
 }
@@ -2440,10 +2444,23 @@ function updateJenkinsLakeArrival(delta) {
 }
 
 function updateJenkinsLakeGate() {
-  if (currentZone !== 'lake' || lakeGateOpen || lakeGateNotified || !lakeCaptain) return;
-  if (player.z < -70.2) {
+  if (currentZone !== 'lake' || lakeGateOpen || !lakeCaptain) return;
+  if (player.z > -68) lakeCabinBoundaryNotified = false;
+  if (!lakeCabinBoundaryNotified && player.z < -80.2) {
+    lakeCabinBoundaryNotified = true;
+    player.set(0, 1.72, -66.7);
+    camera.position.set(player.x, player.y, player.z);
+    yaw = 0;
+    pitch = -0.08;
+    updateCameraRotation();
+    const message = 'Captain Mark requires 1 grilled fish and 1 glazed carrot before you can access Jenkins Lake.';
+    toast(message, 'warning');
+    setStatus(message);
+    return;
+  }
+  if (!lakeGateNotified && player.z < -75.2) {
     lakeGateNotified = true;
-    setStatus('Captain Mark blocks the lake path. Bring him one grilled fish and one glazed carrot.');
+    setStatus('Captain Mark is ahead. Bring him 1 grilled fish and 1 glazed carrot to access the lake.');
   }
 }
 
@@ -2849,6 +2866,7 @@ function resetWorld() {
   lakeGateCollider = null;
   lakeGateOpen = false;
   lakeGateNotified = false;
+  lakeCabinBoundaryNotified = false;
   storeRecordBoard = null;
   cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
@@ -3947,12 +3965,17 @@ function setTool(tool) {
 function refreshFieldModeUI() {
   dom.lockDot.classList.toggle('is-live', pointerLocked);
   dom.lockLabel.textContent = pointerLocked ? 'FIELD MODE ACTIVE' : 'CLICK TO ENTER FIELD MODE';
+  document.body.classList.toggle('field-mode-active', pointerLocked);
+  document.body.classList.toggle('field-mode-fallback', pointerLocked && fallbackFieldMode);
+  document.body.style.cursor = pointerLocked && fallbackFieldMode ? 'none' : '';
+  dom.canvas.style.cursor = pointerLocked ? 'none' : 'crosshair';
   updateActionDock();
 }
 
 function activateFieldMode() {
   if (pointerLocked || modalOpen || qteState) return;
   fallbackPointer = null;
+  dom.canvas.focus({ preventScroll: true });
   try {
     const request = dom.canvas.requestPointerLock?.();
     if (request?.catch) request.catch(() => {});
@@ -3963,7 +3986,7 @@ function activateFieldMode() {
     if (!modalOpen && !qteState && document.pointerLockElement !== dom.canvas && !pointerLocked) {
       fallbackFieldMode = true;
       pointerLocked = true;
-      dom.canvas.focus();
+      dom.canvas.focus({ preventScroll: true });
       refreshFieldModeUI();
     }
   }, 120);
@@ -4019,6 +4042,10 @@ function releaseFieldModeForModal() {
   fallbackFieldMode = false;
   pointerLocked = false;
   fallbackPointer = null;
+  if (fallbackPointerId !== null) {
+    try { dom.canvas.releasePointerCapture?.(fallbackPointerId); } catch (error) { /* already released */ }
+    fallbackPointerId = null;
+  }
   document.exitPointerLock?.();
   refreshFieldModeUI();
 }
@@ -4521,15 +4548,24 @@ window.addEventListener('blur', () => {
   primaryHeld = false;
   actionHeld = false;
   fishing.reelHeld = false;
+  fallbackPointer = null;
 });
 
 dom.canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
   event.preventDefault();
+  if (!pointerLocked && event.pointerId !== undefined) {
+    fallbackPointerId = event.pointerId;
+    try { dom.canvas.setPointerCapture?.(event.pointerId); } catch (error) { /* pointer capture is optional */ }
+  }
   handlePrimaryDown();
 });
 window.addEventListener('pointerup', (event) => {
   if (event.button !== 0) return;
+  if (fallbackPointerId !== null) {
+    try { dom.canvas.releasePointerCapture?.(fallbackPointerId); } catch (error) { /* already released */ }
+    fallbackPointerId = null;
+  }
   handlePrimaryUp();
 });
 
@@ -4550,21 +4586,24 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (event) => {
-  if (!pointerLocked || modalOpen || qteState) return;
+  if (!pointerLocked || fallbackFieldMode || modalOpen || qteState) return;
   let movementX = event.movementX;
   let movementY = event.movementY;
-  if (fallbackFieldMode) {
-    if (!fallbackPointer) {
-      fallbackPointer = { x: event.clientX, y: event.clientY };
-      return;
-    }
-    movementX = event.clientX - fallbackPointer.x;
-    movementY = event.clientY - fallbackPointer.y;
-    fallbackPointer = { x: event.clientX, y: event.clientY };
-  }
   yaw -= movementX * 0.0021;
   pitch -= movementY * 0.0018;
   pitch = clamp(pitch, -1.32, 1.32);
+});
+
+document.addEventListener('pointermove', (event) => {
+  if (!pointerLocked || !fallbackFieldMode || modalOpen || qteState) return;
+  if (!fallbackPointer) {
+    fallbackPointer = { x: event.clientX, y: event.clientY };
+    return;
+  }
+  yaw -= (event.clientX - fallbackPointer.x) * 0.0021;
+  pitch -= (event.clientY - fallbackPointer.y) * 0.0018;
+  pitch = clamp(pitch, -1.32, 1.32);
+  fallbackPointer = { x: event.clientX, y: event.clientY };
 });
 
 dom.primaryAction.addEventListener('pointerdown', (event) => {

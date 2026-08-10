@@ -34,6 +34,11 @@ body {
   color: var(--ink);
 }
 
+body.field-mode-fallback,
+body.field-mode-fallback * {
+  cursor: none !important;
+}
+
 button {
   font: inherit;
 }
