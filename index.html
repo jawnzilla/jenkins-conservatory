@@ -58,8 +58,13 @@
         <section class="right-rail">
           <div class="panel equipment-card">
             <div class="card-heading">
-              <span class="eyebrow">FIELD KIT</span>
+              <span class="eyebrow">FIELD INVENTORY</span>
               <span id="save-status" class="save-status">SAVED</span>
+            </div>
+            <div id="inventory-tabs" class="inventory-tabs" role="tablist" aria-label="Field inventory tabs">
+              <button class="inventory-tab active" data-inventory-tab="kit" type="button" role="tab" aria-selected="true">FIELD KIT</button>
+              <button class="inventory-tab" data-inventory-tab="loot" type="button" role="tab" aria-selected="false">LOOT + FOOD</button>
+              <button class="inventory-tab" data-inventory-tab="animals" type="button" role="tab" aria-selected="false">SHOWCASE</button>
             </div>
             <div id="equipment-list" class="equipment-list"></div>
           </div>
@@ -86,6 +91,7 @@
           <button class="tool-button active" data-tool="rod" type="button" title="Fishing rod: match bait and lure, aim at a splash, then cast"><span class="tool-icon">⌁</span><span>ROD</span></button>
           <button class="tool-button" data-tool="net" type="button" title="Field net: catch revealed bugs and quiet ground animals"><span class="tool-icon">◇</span><span>NET</span></button>
           <button class="tool-button" data-tool="magnifier" type="button" title="Magnifying glass: inspect a bug trace, then switch to the net"><span class="tool-icon">⌕</span><span>GLASS</span></button>
+          <button class="tool-button" data-tool="food" type="button" title="Food: hold a carrot or fish to attract nearby animals"><span class="tool-icon">◉</span><span>FOOD</span></button>
         </section>
 
         <div id="toast-stack" class="toast-stack" aria-live="polite"></div>

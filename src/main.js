@@ -28,7 +28,7 @@ const ZONES = {
     fog: 0x91aa92,
     ground: 0x46684e,
     accent: 0x8be0c3,
-    bounds: { minX: -22, maxX: 22, minZ: -30, maxZ: 18 }
+    bounds: { minX: -28, maxX: 28, minZ: -40, maxZ: 20 }
   },
   zoo: {
     label: 'CONSERVATORY ZOO',
@@ -49,6 +49,12 @@ const FOREST_WATER = {
   playerRadius: 8.65,
   castRadius: 9.25
 };
+
+const FOOD_OPTIONS = [
+  { key: 'carrots', label: 'Carrot', icon: '🥕', note: 'Attracts rabbits and squirrels' },
+  { key: 'trout', label: 'Trout', icon: '≈', note: 'A fresh fish offering' },
+  { key: 'sunfish', label: 'Sunfish', icon: '◌', note: 'A fresh fish offering' }
+];
 
 const PRACTICE_POND = {
   centerX: -15.2,
@@ -107,6 +113,7 @@ const SHOP_ITEMS = [
   { key: 'nets', group: 'tool', label: 'Field net', note: 'For rabbits, squirrels, and flying bugs.', cost: 24, amount: 1 },
   { key: 'magnifiers', group: 'tool', label: 'Magnifying glass', note: 'Reveals hidden bug movement.', cost: 22, amount: 1 },
   { key: 'pans', group: 'tool', label: 'Camp cooking pan', note: 'Needed to cook at the cabin stove.', cost: 30, amount: 1 },
+  { key: 'waders', group: 'tool', label: 'Field waders', note: 'Walk twice as far into lake water.', cost: 38, amount: 1 },
   { key: 'flowerSeeds', group: 'seed', label: 'Flower seed packet', note: 'Plant in the pollinator field. Blooms in 5 minutes.', cost: 12, amount: 3 }
 ];
 
@@ -121,6 +128,7 @@ const DEFAULT_SAVE = {
     nets: 2,
     magnifiers: 1,
     pans: 0,
+    waders: 0,
     flowerSeeds: 2,
     carrotSeeds: 0,
   },
@@ -129,8 +137,8 @@ const DEFAULT_SAVE = {
   gardenFlowers: null,
   records: {},
   honey: 0,
-  ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0 },
-  cooked: { grilledFish: 0, glazedCarrots: 0 },
+  ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0, mushrooms: 0, morels: 0, treeMushrooms: 0, wildRice: 0, scallions: 0, berries: 0, duckEggs: 0 },
+  cooked: { grilledFish: 0, glazedCarrots: 0, risotto: 0, sunfishSalad: 0, troutEggsBenedict: 0 },
   meals: 0,
   lastZone: 'forest'
 };
@@ -146,6 +154,7 @@ const dom = {
   promptKey: document.querySelector('#prompt-key'),
   promptText: document.querySelector('#prompt-text'),
   equipmentList: document.querySelector('#equipment-list'),
+  inventoryTabs: document.querySelector('#inventory-tabs'),
   saveStatus: document.querySelector('#save-status'),
   noiseValue: document.querySelector('#noise-value'),
   noiseMeter: document.querySelector('#noise-meter'),
@@ -239,6 +248,8 @@ let currentZone = save.lastZone && ZONES[save.lastZone] ? save.lastZone : 'fores
 let activeTool = 'rod';
 let selectedBait = 'worms';
 let selectedLure = 'spinner';
+let selectedFood = 'carrots';
+let activeInventoryTab = 'kit';
 let pointerLocked = false;
 let fallbackFieldMode = false;
 let fallbackPointer = null;
@@ -267,9 +278,11 @@ let beehives = [];
 let spiderWebs = [];
 let gardenPlots = [];
 let natureLoot = [];
+let natureResourceNodes = [];
 let aquariumSmudges = [];
 let carrotNodes = [];
 let ducks = [];
+let duckEggNodes = [];
 let colliders = [];
 let storeRecordBoard = null;
 let fishingVisuals = null;
@@ -483,6 +496,17 @@ function createHeldToolModel(tool) {
     torus(root, 0.3, 0.055, 0xc9ad68, [0.29, 0.62, 0], [0, 0, 0], 8, 24);
     addMesh(root, new THREE.CircleGeometry(0.25, 20), mat(0xbde9e3, { transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide, emissive: 0x3a7770, emissiveIntensity: 0.24 }), [0.29, 0.62, -0.02]);
     sphere(root, 0.035, 0xf4edc9, [0.19, 0.76, -0.08], { material: { emissive: 0xffffff, emissiveIntensity: 0.8 } });
+  }
+
+  if (tool === 'food') {
+    if (selectedFood === 'carrots') {
+      cone(root, 0.12, 0.55, 0xe27b3d, [0, 0.08, 0], { segments: 7, rotation: [0, 0, 0.1] });
+      for (const x of [-0.08, 0, 0.08]) cylinder(root, 0.014, 0.025, 0.26, 0x5f9655, [x, 0.42, 0], { segments: 5, rotation: [0, 0, (x * 3) || 0.15] });
+    } else {
+      const fish = createAnimalModel(selectedFood, 0.42);
+      fish.position.set(0, 0.1, 0);
+      root.add(fish);
+    }
   }
 
   root.traverse((object) => {
@@ -816,6 +840,7 @@ function createWildCarrot(x, z, index = 0) {
   world.add(carrot);
   const entry = { type: 'carrot', label: 'Pull up wild carrot (click)', position: new THREE.Vector3(x, 0.42, z), radius: 2.25, group: carrot, marker, pulls: 0, harvested: false, index };
   carrotNodes.push(entry);
+  natureResourceNodes.push(entry);
   interactables.push(entry);
   return entry;
 }
@@ -837,6 +862,103 @@ function pullWildCarrot(node) {
   updateHUD();
   toast('Wild carrot pulled: +1 carrot and +1 carrot seed.', 'success');
   setStatus('The carrot bed will return after a rest at the field cabin.');
+}
+
+function registerNatureResource(entry) {
+  natureResourceNodes.push(entry);
+  interactables.push(entry);
+  return entry;
+}
+
+function createGroundMushroom(x, z, index = 0, morel = false) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const stemColor = morel ? 0xb18455 : 0xe3d8b1;
+  cylinder(group, morel ? 0.07 : 0.055, morel ? 0.1 : 0.075, 0.34, stemColor, [0, 0.17, 0], { segments: 7 });
+  if (morel) {
+    cone(group, 0.24, 0.36, 0x8f633f, [0, 0.45, 0], { segments: 8 });
+    for (let bump = 0; bump < 5; bump += 1) sphere(group, 0.035, 0x6f4935, [Math.cos(bump) * 0.12, 0.44 + (bump % 2) * 0.08, Math.sin(bump) * 0.12]);
+  } else {
+    sphere(group, 0.22, index % 2 ? 0xc96c4c : 0xd87969, [0, 0.4, 0], { scale: [1.22, 0.48, 1.22], widthSegments: 8, heightSegments: 5 });
+    sphere(group, 0.035, 0xf4e4be, [-0.08, 0.46, -0.1]);
+  }
+  const marker = makeLabel(morel ? 'MOREL' : 'MUSHROOM', '#f2b268', '#30442f', 0.23);
+  marker.position.set(0, 0.82, 0);
+  group.add(marker);
+  world.add(group);
+  return registerNatureResource({ type: 'nature-resource', resourceKey: morel ? 'morels' : 'mushrooms', label: morel ? 'Loot rare morel mushroom' : 'Loot ground mushroom', position: new THREE.Vector3(x, 0.5, z), radius: 2.1, group, marker, used: false, index });
+}
+
+function createTreeMushroom(x, z, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const side = index % 2 ? -1 : 1;
+  for (let mushroom = 0; mushroom < 2; mushroom += 1) {
+    const y = 1.12 + mushroom * 0.32;
+    cylinder(group, 0.035, 0.06, 0.2, 0xd6bf8c, [side * 0.34, y, 0], { segments: 6, rotation: [0, 0, side * 0.42] });
+    sphere(group, 0.14, mushroom ? 0xa87756 : 0x98714e, [side * 0.34, y + 0.13, 0], { scale: [1.25, 0.42, 0.75], widthSegments: 7, heightSegments: 4 });
+  }
+  const marker = makeLabel('TREE MUSHROOM', '#f2b268', '#30442f', 0.2);
+  marker.position.set(side * 0.36, 1.95, 0);
+  group.add(marker);
+  world.add(group);
+  return registerNatureResource({ type: 'nature-resource', resourceKey: 'treeMushrooms', label: 'Loot tree-side mushroom', position: new THREE.Vector3(x, 1.35, z), radius: 2.2, group, marker, used: false, index });
+}
+
+function createWildScallion(x, z, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  for (let leaf = 0; leaf < 4; leaf += 1) {
+    const blade = cylinder(group, 0.018, 0.035, 0.74 + (leaf % 2) * 0.14, leaf % 2 ? 0x5d9456 : 0x77a760, [Math.cos(leaf * 1.7) * 0.08, 0.37, Math.sin(leaf * 1.7) * 0.08], { segments: 5 });
+    blade.rotation.set(Math.sin(leaf * 1.7) * 0.42, 0, -Math.cos(leaf * 1.7) * 0.42);
+  }
+  sphere(group, 0.09, 0xe9ddbd, [0, 0.08, 0], { scale: [0.82, 0.78, 0.82] });
+  const marker = makeLabel('SCALLION', '#d8ef85', '#30442f', 0.2);
+  marker.position.set(0, 1.02, 0);
+  group.add(marker);
+  world.add(group);
+  return registerNatureResource({ type: 'nature-resource', resourceKey: 'scallions', label: 'Pick wild scallion', position: new THREE.Vector3(x, 0.45, z), radius: 2.0, group, marker, used: false, index });
+}
+
+function createBerryBush(x, z, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  for (let bush = 0; bush < 4; bush += 1) sphere(group, 0.3, index % 2 ? 0x477952 : 0x527f50, [(bush - 1.5) * 0.22, 0.35 + (bush % 2) * 0.12, (bush % 2) * 0.16], { scale: [1, 0.85, 0.9] });
+  for (let berry = 0; berry < 6; berry += 1) sphere(group, 0.055, berry % 2 ? 0x5b2851 : 0x7c2f43, [(berry - 2.5) * 0.13, 0.42 + (berry % 3) * 0.1, (berry % 2 ? -1 : 1) * 0.2]);
+  const marker = makeLabel('BERRIES', '#f2b268', '#30442f', 0.2);
+  marker.position.set(0, 1.02, 0);
+  group.add(marker);
+  world.add(group);
+  return registerNatureResource({ type: 'nature-resource', resourceKey: 'berries', label: 'Pick wild berries', position: new THREE.Vector3(x, 0.5, z), radius: 2.1, group, marker, used: false, index });
+}
+
+function createWildRicePlant(x, z, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0.08, z);
+  for (let reed = 0; reed < 5; reed += 1) {
+    const height = 0.75 + (reed % 3) * 0.16;
+    const stalk = cylinder(group, 0.018, 0.032, height, reed % 2 ? 0x6fa06a : 0x84ae69, [(reed - 2) * 0.06, height * 0.5, Math.sin(reed) * 0.06], { segments: 5 });
+    stalk.rotation.set(Math.sin(reed) * 0.16, 0, (reed - 2) * 0.05);
+    sphere(group, 0.04, 0xd3bb78, [(reed - 2) * 0.06, height + 0.08, Math.sin(reed) * 0.06], { scale: [0.65, 1.8, 0.65] });
+  }
+  const marker = makeLabel('WILD RICE', '#d8ef85', '#30442f', 0.2);
+  marker.position.set(0, 1.3, 0);
+  group.add(marker);
+  world.add(group);
+  return registerNatureResource({ type: 'nature-resource', resourceKey: 'wildRice', label: 'Loot wild rice plant', position: new THREE.Vector3(x, 0.45, z), radius: 2.25, group, marker, used: false, index });
+}
+
+function lootNatureResource(resource) {
+  if (!resource || resource.used) return;
+  resource.used = true;
+  resource.group.visible = false;
+  resource.marker.visible = false;
+  save.ingredients[resource.resourceKey] = (save.ingredients[resource.resourceKey] || 0) + 1;
+  saveGame();
+  updateHUD();
+  const label = resource.label.replace(/^Loot |^Pick |^Pick up /i, '');
+  toast(`${label} collected.`, 'success');
+  setStatus('The field item has been added to the looted plants tab.');
 }
 
 function plantFlowerSeed(plot = null) {
@@ -1299,6 +1421,32 @@ function createPracticePond() {
   createHotspot(centerX + 1.35, centerZ + 0.9, 'sunfish', 'feather', 'grubs');
 }
 
+function createDuckEgg(x, z, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0.08, z);
+  sphere(group, 0.12, 0xf1e4c5, [0, 0.12, 0], { scale: [0.78, 1.18, 0.78], widthSegments: 8, heightSegments: 6 });
+  const marker = makeLabel('EGG', '#f2b268', '#30442f', 0.2);
+  marker.position.set(0, 0.48, 0);
+  group.add(marker);
+  world.add(group);
+  const entry = registerNatureResource({ type: 'nature-resource', resourceKey: 'duckEggs', label: 'Loot duck egg', position: new THREE.Vector3(x, 0.28, z), radius: 1.8, group, marker, used: false, index });
+  duckEggNodes.push(entry);
+  return entry;
+}
+
+function createPracticeDucks() {
+  const duckCount = Math.min(3, save.caught.duck || 0);
+  for (let index = 0; index < duckCount; index += 1) {
+    const angle = index / Math.max(1, duckCount) * Math.PI * 2;
+    const group = createAnimalModel('duck', 0.72);
+    const x = PRACTICE_POND.centerX + Math.cos(angle) * 1.7;
+    const z = PRACTICE_POND.centerZ + Math.sin(angle) * 1.35;
+    group.position.set(x, 0.28, z);
+    world.add(group);
+    zooAnimals.push({ group, type: 'duck', center: group.position.clone(), phase: index * 1.8, radiusX: 1.35, radiusZ: 1.0, speed: 0.2, nextEggAt: elapsed + 10 + index * 7 });
+  }
+}
+
 function createStorekeeper() {
   const npc = new THREE.Group();
   npc.position.set(0, 1.05, -6.45);
@@ -1324,8 +1472,16 @@ function createShopDisplay(item, x, z, row = 0, rotation = 0) {
   box(display, [1.72, 0.12, 0.72], 0xc29a62, [0, 0.48, 0.12]);
   box(display, [1.72, 0.1, 0.72], 0x334f3d, [0, 0.56, 0.1]);
   if (item.group === 'tool') {
-    cylinder(display, 0.06, 0.08, 0.9, item.key === 'nets' ? 0x80634b : 0x76533f, [0, 1.15, 0], { rotation: [0.1, 0, 0.18], segments: 8 });
-    torus(display, item.key === 'nets' ? 0.3 : 0.22, 0.035, 0xd1b77e, [0, 1.62, 0], [0, 0, 0], 8, 18);
+    if (item.key === 'waders') {
+      cylinder(display, 0.18, 0.22, 0.76, 0x4d6b69, [-0.22, 1.02, 0], { segments: 8 });
+      cylinder(display, 0.18, 0.22, 0.76, 0x4d6b69, [0.22, 1.02, 0], { segments: 8 });
+      box(display, [0.34, 0.14, 0.4], 0x2d493e, [-0.22, 0.62, 0.02]);
+      box(display, [0.34, 0.14, 0.4], 0x2d493e, [0.22, 0.62, 0.02]);
+      box(display, [0.76, 0.12, 0.12], 0xd1b77e, [0, 1.38, 0]);
+    } else {
+      cylinder(display, 0.06, 0.08, 0.9, item.key === 'nets' ? 0x80634b : 0x76533f, [0, 1.15, 0], { rotation: [0.1, 0, 0.18], segments: 8 });
+      torus(display, item.key === 'nets' ? 0.3 : 0.22, 0.035, 0xd1b77e, [0, 1.62, 0], [0, 0, 0], 8, 18);
+    }
   } else if (item.group === 'bait') {
     for (let index = 0; index < 3; index += 1) sphere(display, 0.12, item.key === 'worms' ? 0xb7775b : 0x6c9b56, [-0.28 + index * 0.28, 0.95, 0], { scale: [1, 0.65, 1.2] });
   } else if (item.group === 'lure') {
@@ -1405,7 +1561,7 @@ function buildStore() {
   const sideSpots = [
     [-8.62, -1.5, Math.PI / 2, 0], [-8.62, -4.55, Math.PI / 2, 0],
     [8.62, -1.5, -Math.PI / 2, 0], [8.62, -4.55, -Math.PI / 2, 0],
-    [8.62, -6.7, -Math.PI / 2, 1]
+    [-8.62, -6.7, Math.PI / 2, 1], [8.62, -6.7, -Math.PI / 2, 1]
   ];
   SHOP_ITEMS.slice(3).forEach((item, index) => {
     const [x, z, rotation, row] = sideSpots[index];
@@ -1446,7 +1602,9 @@ function buildForest() {
     [-12, -29, 0.9], [11, -27, 0.95], [-15, -7, 0.84], [15, -7, 0.88],
     [-21, 8, 0.86], [21, 8, 0.9], [-13, -12, 0.92], [13, -12, 0.95],
     [-13, -21, 0.9], [13, -21, 0.96], [-9, -29, 0.86], [8, -29, 0.9],
-    [-6, 6, 0.78], [6, 7, 0.82], [-19, -4, 0.88], [19, -4, 0.86]
+    [-6, 6, 0.78], [6, 7, 0.82], [-19, -4, 0.88], [19, -4, 0.86],
+    [-26, -34, 1.05], [25, -32, 1.12], [-27, -10, 0.96], [27, -13, 1.02],
+    [-25, 7, 0.9], [25, 8, 0.94], [-12, -37, 0.92], [12, -37, 0.98]
   ];
   treeSpots.forEach(([x, z, scale], index) => (index % 4 === 0 ? createBranchTree : createTree)(x, z, scale, index % 2 ? 0x315a41 : 0x3f6b47));
   createBeehiveOnTree(null, -16, -15, 'wild-hive-west', true, 3.35);
@@ -1457,7 +1615,21 @@ function buildForest() {
   createWildFlowerNode(-7.6, -4.7, 0xe889b0, 0);
   createWildFlowerNode(5.7, -8.4, 0xf1c84b, 1);
   createWildFlowerNode(10.9, -6.8, 0xb58ce0, 2);
-  [[-17.8, -5.6], [-13.8, -21.8], [15.6, -8.5], [17.2, -24.6], [-9.4, 2.1], [9.4, 2.2]].forEach(([x, z], index) => createWildCarrot(x, z, index));
+  [[-24, -34], [25, -31], [26, 7]].forEach(([x, z], index) => {
+    if (isGrassNaturePosition('forest', x, z)) createWildCarrot(x, z, index);
+  });
+  [[-25, -25], [24, -24], [26, 14]].forEach(([x, z], index) => {
+    if (isGrassNaturePosition('forest', x, z)) createGroundMushroom(x, z, index);
+  });
+  if (isGrassNaturePosition('forest', -26, -37)) createGroundMushroom(-26, -37, 0, true);
+  [[-21, -19], [21, -21], [-18, -29], [18, -29]].forEach(([x, z], index) => createTreeMushroom(x, z, index));
+  [[-25, -16], [25, -17], [-22, 7], [22, 8], [-4, -31], [6, -35]].forEach(([x, z], index) => {
+    if (isGrassNaturePosition('forest', x, z)) createWildScallion(x, z, index);
+  });
+  [[-26, -8], [26, -10], [-24, 2], [24, 3], [-12, -35], [12, -36], [-25, -38], [25, -38]].forEach(([x, z], index) => {
+    if (isGrassNaturePosition('forest', x, z)) createBerryBush(x, z, index);
+  });
+  [[-8.1, -17.7], [8.05, -16.5], [2.5, -8.55], [-4.3, -25.0], [6.3, -23.2]].forEach(([x, z], index) => createWildRicePlant(x, z, index));
   createBugNode('caterpillar', [7.1, 0.05, -8.5], 0xd59c3a);
   createBugNode('worm', [-13.1, 0.05, -3.2], 0xb7775b);
   addRock(-7, 0.4, -6, 1.4, 0x667b6e);
@@ -1560,9 +1732,9 @@ function createNatureStick(x, z, index = 0) {
 function createNatureScatter(zoneKey) {
   const layouts = {
     forest: {
-      foliage: [[-4, -4], [3, -4.8], [-6, -10], [5, -6], [-15, -9], [15, -10], [-18, -20], [18, -22], [-8, -26], [8, -27], [-19, 5], [19, 6], [-20, -6], [20, -6], [-20, -14], [20, -14], [-18, -27], [18, -27], [-12, 7], [12, 7], [-5, -28], [5, -28]],
-      rocks: [[-4.5, -4.2, 0.35], [4.8, -5.4, 0.28], [-17.5, -8, 0.42], [16.5, -9, 0.32], [-8.2, -26.4, 0.26], [8.4, -27.2, 0.3], [-20, -14, 0.24], [20, -14, 0.27]],
-      sticks: [[-2.8, -3.6], [4.3, -8.1], [-14.8, -11.1], [13.9, -18.3], [-7.6, -23.8], [10.8, -25.4], [18.6, 1.2], [-19, -6.5], [19, -15.5], [-11.5, 7.2]]
+      foliage: [[-4, -4], [3, -4.8], [-6, -10], [5, -6], [-15, -9], [15, -10], [-18, -20], [18, -22], [-8, -26], [8, -27], [-19, 5], [19, 6], [-20, -6], [20, -6], [-20, -14], [20, -14], [-18, -27], [18, -27], [-12, 7], [12, 7], [-5, -28], [5, -28], [-24, -35], [24, -36], [-26, -4], [26, -5], [-24, 12], [24, 13], [-14, -36], [14, -36], [-5, -37], [5, -38]],
+      rocks: [[-4.5, -4.2, 0.35], [4.8, -5.4, 0.28], [-17.5, -8, 0.42], [16.5, -9, 0.32], [-8.2, -26.4, 0.26], [8.4, -27.2, 0.3], [-20, -14, 0.24], [20, -14, 0.27], [-25, -29, 0.3], [25, -27, 0.34], [-24, 11, 0.24], [24, 12, 0.27]],
+      sticks: [[-2.8, -3.6], [4.3, -8.1], [-14.8, -11.1], [13.9, -18.3], [-7.6, -23.8], [10.8, -25.4], [18.6, 1.2], [-19, -6.5], [19, -15.5], [-11.5, 7.2], [-26, -20], [26, -22], [-18, -35], [18, -36], [-3, -38], [4, -39]]
     },
     zoo: {
       foliage: [[-12.1, -12.7], [-10.2, -12.1], [-7.2, -12.5], [-12.4, -9.3], [-10.1, -7.9], [-6.8, -8.4], [6.5, -12.6], [8.5, -12.0], [11.4, -12.5], [6.3, -9.3], [9.4, -7.8], [11.8, -9.5]],
@@ -1702,8 +1874,9 @@ function updateDucks(delta) {
     const group = duck.group;
     const distance = distanceTo(group.position);
     if (duck.state === 'float') {
-      const nextX = duck.home.x + Math.cos(elapsed * 0.22 + duck.phase) * 1.05;
-      const nextZ = duck.home.z + Math.sin(elapsed * 0.22 + duck.phase) * 0.78;
+      const holdingFish = activeTool === 'food' && (selectedFood === 'trout' || selectedFood === 'sunfish') && distance < 9;
+      const nextX = holdingFish ? clamp(player.x, FOREST_WATER.centerX - 7.4, FOREST_WATER.centerX + 7.4) : duck.home.x + Math.cos(elapsed * 0.22 + duck.phase) * 1.05;
+      const nextZ = holdingFish ? clamp(player.z, FOREST_WATER.centerZ - 7.4, FOREST_WATER.centerZ + 7.4) : duck.home.z + Math.sin(elapsed * 0.22 + duck.phase) * 0.78;
       const dx = nextX - group.position.x;
       const dz = nextZ - group.position.z;
       group.position.x += dx * delta * 1.45;
@@ -1792,6 +1965,7 @@ function buildZoo() {
 
   createAquarium();
   createPracticePond();
+  createPracticeDucks();
   createShowcaseGarden();
   createShowcaseCabin(13.8, 4.2);
   createRearShowcaseGreenSpace();
@@ -2171,9 +2345,11 @@ function resetWorld() {
   spiderWebs = [];
   gardenPlots = [];
   natureLoot = [];
+  natureResourceNodes = [];
   aquariumSmudges = [];
   carrotNodes = [];
   ducks = [];
+  duckEggNodes = [];
   colliders = [];
   storeRecordBoard = null;
   cleaningState = null;
@@ -2519,6 +2695,14 @@ function useNet() {
   triggerToolAction('net-swing', 0.42);
   const critter = getNetCritterTarget();
   if (!critter) {
+    const duck = getNetDuckTarget();
+    if (duck) {
+      const distance = distanceTo(duck.group.position);
+      if (duck.state !== 'flee' && distance <= 5.5 && currentNoise < 0.7) {
+        catchDuck(duck);
+        return;
+      }
+    }
     toast('No clear net target. Sneak close and line up the animal.', 'warning');
     return;
   }
@@ -2534,6 +2718,18 @@ function useNet() {
     return;
   }
   catchCritter(critter);
+}
+
+function catchDuck(duck) {
+  duck.state = 'captured';
+  spookRisk = clamp(spookRisk + 0.2, 0, 1);
+  save.caught.duck = (save.caught.duck || 0) + 1;
+  save.coins += 15;
+  world.remove(duck.group);
+  saveGame();
+  updateHUD();
+  toast('Mallard duck captured. It will settle by the practice pond.', 'success');
+  setStatus('The duck is now part of the showcase flock and may lay lootable eggs.');
 }
 
 function catchCritter(critter) {
@@ -2729,6 +2925,11 @@ function getNetCritterTarget() {
   return getAimTarget(candidates, 8.5, 0.75);
 }
 
+function getNetDuckTarget() {
+  if (currentZone !== 'forest') return null;
+  return getAimTarget(ducks.filter((duck) => duck.state === 'float'), 7.5, 0.72);
+}
+
 function getAimBug(revealedOnly = false) {
   return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && ['worm', 'caterpillar', 'spider'].includes(bug.species) && (!revealedOnly || bug.revealed)), 7.5, 0.62);
 }
@@ -2779,8 +2980,16 @@ function updateCritters(delta) {
     critter.stateTime += delta;
     const distance = distanceTo(animal.position);
     if (critter.state === 'idle') {
+      const attracting = activeTool === 'food' && (selectedFood === 'carrots') && (critter.species === 'rabbit' || critter.species === 'squirrel') && distance < 9;
       const threat = distance < 5.2 && currentNoise > 0.34 && !(activeTool === 'net' && distance < 2.6 && currentNoise < 0.56);
-      if (threat) {
+      if (attracting) {
+        tempVector.subVectors(player, animal).setY(0).normalize();
+        critter.direction = Math.atan2(tempVector.x, tempVector.z);
+        animal.position.x += tempVector.x * delta * 0.42;
+        animal.position.z += tempVector.z * delta * 0.42;
+        keepGroundAnimalOnLand(animal, critter);
+        animal.position.y = 0.42 + Math.sin(elapsed * 2.4 + critter.home.x) * 0.035;
+      } else if (threat) {
         scareCritter(critter);
       } else {
         steerCritterFromEdge(critter, delta);
@@ -2875,6 +3084,14 @@ function updateZooAnimals(delta) {
         fin.mesh.rotation.x = fin.baseRotation.x + Math.sin(elapsed * 5.5 + exhibit.phase + index) * 0.045;
         fin.mesh.rotation.z = fin.baseRotation.z + Math.cos(elapsed * 4.8 + exhibit.phase + index) * 0.035;
       });
+    } else if (exhibit.type === 'duck') {
+      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.2 + exhibit.phase) * 0.035;
+      exhibit.group.rotation.y = Math.atan2(deltaX, deltaZ) + Math.PI;
+      if (elapsed >= exhibit.nextEggAt) {
+        createDuckEgg(exhibit.group.position.x + 0.32, exhibit.group.position.z + 0.18, exhibit.phase);
+        exhibit.nextEggAt = elapsed + 18 + Math.random() * 16;
+        toast('A showcase duck laid an egg by the practice pond.', 'success');
+      }
     } else if (exhibit.type === 'ground') {
       exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045;
       exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
@@ -2895,12 +3112,13 @@ function constrainForestWaterBoundary() {
   const distance = Math.hypot(offsetX, offsetZ);
   const onDockCorridor = Math.abs(offsetX) <= FOREST_DOCK.halfWidth && player.z <= FOREST_DOCK.shoreZ + 0.7;
   if (onDockCorridor) return;
-  if (distance >= FOREST_WATER.playerRadius) return;
+  const allowedRadius = FOREST_WATER.waterRadius - ((save.supplies.waders || 0) > 0 ? 2.7 : 1.35);
+  if (distance >= allowedRadius) return;
   if (distance < 0.001) {
     player.x = FOREST_WATER.centerX;
-    player.z = FOREST_WATER.centerZ + FOREST_WATER.playerRadius;
+    player.z = FOREST_WATER.centerZ + allowedRadius;
   } else {
-    const scale = FOREST_WATER.playerRadius / distance;
+    const scale = allowedRadius / distance;
     player.x = FOREST_WATER.centerX + offsetX * scale;
     player.z = FOREST_WATER.centerZ + offsetZ * scale;
   }
@@ -3006,24 +3224,67 @@ function updateCrosshair() {
   dom.crosshair.classList.toggle('is-targeted', targeted);
 }
 
-function updateHUD() {
-  dom.zoneLabel.textContent = ZONES[currentZone].label;
-  dom.coinLabel.textContent = `${save.coins}¢`;
+function renderInventoryPanel() {
+  const ingredients = save.ingredients || DEFAULT_SAVE.ingredients;
+  const cooked = save.cooked || DEFAULT_SAVE.cooked;
+  if (activeInventoryTab === 'loot') {
+    return `
+      <div class="equipment-item"><strong>CARROTS</strong><em>${ingredients.carrots || 0}</em></div>
+      <div class="equipment-item"><strong>MUSHROOMS</strong><em>${ingredients.mushrooms || 0}</em></div>
+      <div class="equipment-item"><strong>MORELS</strong><em>${ingredients.morels || 0}</em></div>
+      <div class="equipment-item"><strong>TREE MUSHROOMS</strong><em>${ingredients.treeMushrooms || 0}</em></div>
+      <div class="equipment-item"><strong>WILD RICE</strong><em>${ingredients.wildRice || 0}</em></div>
+      <div class="equipment-item"><strong>SCALLIONS</strong><em>${ingredients.scallions || 0}</em></div>
+      <div class="equipment-item"><strong>BERRIES</strong><em>${ingredients.berries || 0}</em></div>
+      <div class="equipment-item"><strong>DUCK EGGS</strong><em>${ingredients.duckEggs || 0}</em></div>
+      <div class="equipment-item"><strong>HONEY</strong><em>${save.honey || 0}</em></div>
+      <div class="equipment-item"><strong>PICKED FLOWERS</strong><em>${ingredients.flowers || 0}</em></div>
+      <div class="equipment-item"><strong>GRILLED FISH</strong><em>${cooked.grilledFish || 0}</em></div>
+      <div class="equipment-item"><strong>GLAZED CARROTS</strong><em>${cooked.glazedCarrots || 0}</em></div>
+      <div class="equipment-item"><strong>MUSHROOM RISOTTO</strong><em>${cooked.risotto || 0}</em></div>
+      <div class="equipment-item"><strong>SUNFISH SALAD</strong><em>${cooked.sunfishSalad || 0}</em></div>
+      <div class="equipment-item"><strong>TROUT BENEDICT</strong><em>${cooked.troutEggsBenedict || 0}</em></div>
+    `;
+  }
+  if (activeInventoryTab === 'animals') {
+    const animals = Object.entries(save.caught || {}).filter(([key, count]) => count > 0 && SPECIES[key]);
+    if (!animals.length) return '<div class="inventory-empty">Catch an animal and it will appear here at the showcase.</div>';
+    return `${animals.map(([key, count]) => {
+      const record = SPECIES[key].type === 'fish' && save.records?.[key] ? ` · record ${save.records[key].weight}lb` : '';
+      return `<div class="equipment-item"><strong>${SPECIES[key].label}<small>${SPECIES[key].note}${record}</small></strong><em>${count}</em></div>`;
+    }).join('')}`;
+  }
   const baitLabel = formatName(selectedBait);
   const lureLabel = formatName(selectedLure);
-  dom.equipmentList.innerHTML = `
+  const heldFood = getAvailableFoods().find((food) => food.key === selectedFood);
+  return `
     <div class="equipment-item"><strong>BAIT <small>${baitLabel}</small></strong><em>${save.supplies[selectedBait] || 0}</em></div>
     <div class="equipment-item"><strong>LURE <small>${lureLabel}</small></strong><em>REUSABLE</em></div>
     <div class="equipment-item"><strong>NETS</strong><em>${save.supplies.nets || 0}</em></div>
     <div class="equipment-item"><strong>GLASSES</strong><em>${save.supplies.magnifiers || 0}</em></div>
+    <div class="equipment-item"><strong>WADERS</strong><em>${save.supplies.waders || 0}</em></div>
+    <div class="equipment-item"><strong>PANS</strong><em>${save.supplies.pans || 0}</em></div>
     <div class="equipment-item"><strong>SEEDS</strong><em>${save.supplies.flowerSeeds || 0}</em></div>
-    <div class="equipment-item"><strong>CARROTS</strong><em>${save.ingredients.carrots || 0}</em></div>
-    <div class="equipment-item"><strong>HONEY</strong><em>${save.honey || 0}</em></div>
-    <div class="equipment-item"><strong>PAN</strong><em>${save.supplies.pans || 0}</em></div>
-    <div class="equipment-item"><strong>COOKED</strong><em>${(save.cooked.grilledFish || 0) + (save.cooked.glazedCarrots || 0)}</em></div>
-    <div class="equipment-item"><strong>FIELD NOTES</strong><em>${Object.values(save.caught).reduce((sum, count) => sum + count, 0)}</em></div>
-    <div class="equipment-item equipment-help"><span>B / L</span><span>cycle kit</span></div>
+    <div class="equipment-item"><strong>HELD FOOD <small>${heldFood ? heldFood.label : 'none available'}</small></strong><em>${heldFood ? ingredients[heldFood.key] || 0 : 0}</em></div>
+    <div class="equipment-item equipment-help"><span>B / L / F</span><span>cycle bait, lure, food</span></div>
   `;
+}
+
+function setInventoryTab(tab) {
+  if (!['kit', 'loot', 'animals'].includes(tab)) return;
+  activeInventoryTab = tab;
+  updateHUD();
+}
+
+function updateHUD() {
+  dom.zoneLabel.textContent = ZONES[currentZone].label;
+  dom.coinLabel.textContent = `${save.coins}¢`;
+  dom.equipmentList.innerHTML = renderInventoryPanel();
+  dom.inventoryTabs?.querySelectorAll('[data-inventory-tab]').forEach((button) => {
+    const active = button.dataset.inventoryTab === activeInventoryTab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
   dom.noiseValue.textContent = currentNoise > 0.55 ? 'HIGH' : currentNoise > 0.25 ? 'MEDIUM' : 'LOW';
   dom.noiseValue.style.color = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
   dom.noiseMeter.style.width = `${Math.max(4, currentNoise * 100)}%`;
@@ -3146,7 +3407,7 @@ function toast(message, tone = 'success') {
 }
 
 function setTool(tool) {
-  if (!['rod', 'net', 'magnifier'].includes(tool)) return;
+  if (!['rod', 'net', 'magnifier', 'food'].includes(tool)) return;
   if (tool === 'net' && (save.supplies.nets || 0) <= 0) {
     toast('You need a field net. Visit the supply store.', 'warning');
     return;
@@ -3155,11 +3416,18 @@ function setTool(tool) {
     toast('You need a magnifying glass. Visit the supply store.', 'warning');
     return;
   }
+  if (tool === 'food' && !getAvailableFoods().length) {
+    toast('You do not have any carrots or fish to hold yet.', 'warning');
+    return;
+  }
+  if (tool === 'food' && !getAvailableFoods().some((food) => food.key === selectedFood)) {
+    selectedFood = getAvailableFoods()[0].key;
+  }
   activeTool = tool;
   createHeldToolModel(tool);
   document.querySelectorAll('.tool-button').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
   updateHUD();
-  setStatus(tool === 'rod' ? 'Aim for water, then hold to preview the landing ring.' : tool === 'net' ? 'Sneak close. A fast swing is only useful at short range.' : 'Hold the lens on a subtle pulse at the plant branch to inspect it.');
+  setStatus(tool === 'rod' ? 'Aim for water, then hold to preview the landing ring.' : tool === 'net' ? 'Sneak close. A fast swing is only useful at short range.' : tool === 'magnifier' ? 'Hold the lens on a subtle pulse at the plant branch to inspect it.' : `${formatName(selectedFood)} is held out. Nearby animals may be drawn closer.`);
 }
 
 function refreshFieldModeUI() {
@@ -3208,6 +3476,23 @@ function cycleLure() {
   selectedLure = list[(index + 1) % list.length].key;
   updateHUD();
   toast(`Lure selected: ${formatName(selectedLure)}.`, 'success');
+}
+
+function getAvailableFoods() {
+  return FOOD_OPTIONS.filter((food) => (save.ingredients[food.key] || 0) > 0);
+}
+
+function cycleFood() {
+  const available = getAvailableFoods();
+  if (!available.length) {
+    toast('No carrots or fish are available to hold.', 'warning');
+    return;
+  }
+  const index = Math.max(0, available.findIndex((food) => food.key === selectedFood));
+  selectedFood = available[(index + 1) % available.length].key;
+  if (activeTool === 'food') createHeldToolModel('food');
+  updateHUD();
+  toast(`Food held: ${formatName(selectedFood)}.`, 'success');
 }
 
 function openModal(element) {
@@ -3305,7 +3590,7 @@ function buyShopDisplay(display) {
 function inspectFridge() {
   const ingredients = save.ingredients || DEFAULT_SAVE.ingredients;
   const cooked = save.cooked || DEFAULT_SAVE.cooked;
-  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish · carrots ${ingredients.carrots || 0} · honey ${save.honey || 0} · picked flowers ${ingredients.flowers || 0} · grilled fish ${cooked.grilledFish || 0} · glazed carrots ${cooked.glazedCarrots || 0}`;
+  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish · carrots ${ingredients.carrots || 0} · mushrooms ${(ingredients.mushrooms || 0) + (ingredients.morels || 0) + (ingredients.treeMushrooms || 0)} · rice ${ingredients.wildRice || 0} · scallions ${ingredients.scallions || 0} · berries ${ingredients.berries || 0} · duck eggs ${ingredients.duckEggs || 0} · honey ${save.honey || 0} · flowers ${ingredients.flowers || 0} · cooked ${Object.values(cooked).reduce((sum, count) => sum + (count || 0), 0)}`;
   toast(`Fridge inventory — ${inventory}`, 'success');
   setStatus(inventory);
 }
@@ -3317,22 +3602,49 @@ function cookAtStove() {
     return;
   }
   const ingredients = save.ingredients;
-  const fish = (ingredients.trout || 0) > 0 ? 'trout' : (ingredients.sunfish || 0) > 0 ? 'sunfish' : null;
-  if (!fish || (ingredients.carrots || 0) <= 0 || (save.honey || 0) <= 0) {
-    toast('Need 1 fish, 1 carrot, and 1 honey to cook both recipes.', 'warning');
-    setStatus('The stove needs one fish, one carrot, one honey, and a pan.');
+  const cooked = save.cooked;
+  let recipe = null;
+  if ((ingredients.trout || 0) > 0 && (ingredients.duckEggs || 0) > 0) {
+    ingredients.trout -= 1;
+    ingredients.duckEggs -= 1;
+    cooked.troutEggsBenedict = (cooked.troutEggsBenedict || 0) + 1;
+    recipe = 'Trout eggs benedict';
+  } else if ((ingredients.sunfish || 0) > 0 && (ingredients.scallions || 0) > 0 && (ingredients.berries || 0) > 0) {
+    ingredients.sunfish -= 1;
+    ingredients.scallions -= 1;
+    ingredients.berries -= 1;
+    cooked.sunfishSalad = (cooked.sunfishSalad || 0) + 1;
+    recipe = 'Sunfish salad';
+  } else {
+    const mushroomKey = ['mushrooms', 'morels', 'treeMushrooms'].find((key) => (ingredients[key] || 0) > 0);
+    if (mushroomKey && (ingredients.wildRice || 0) > 0) {
+      ingredients[mushroomKey] -= 1;
+      ingredients.wildRice -= 1;
+      cooked.risotto = (cooked.risotto || 0) + 1;
+      recipe = 'Wild rice mushroom risotto';
+    }
+  }
+  if (!recipe) {
+    const fish = (ingredients.trout || 0) > 0 ? 'trout' : (ingredients.sunfish || 0) > 0 ? 'sunfish' : null;
+    if (fish && (ingredients.carrots || 0) > 0 && (save.honey || 0) > 0) {
+      ingredients[fish] -= 1;
+      ingredients.carrots -= 1;
+      save.honey -= 1;
+      cooked.grilledFish = (cooked.grilledFish || 0) + 1;
+      cooked.glazedCarrots = (cooked.glazedCarrots || 0) + 1;
+      recipe = 'Grilled fish and glazed carrots';
+    }
+  }
+  if (!recipe) {
+    toast('No complete recipe is ready. Check the looted plants and food tab.', 'warning');
+    setStatus('Recipes: rice + any mushroom; sunfish + scallion + berries; trout + duck egg; or fish + carrot + honey.');
     return;
   }
-  ingredients[fish] -= 1;
-  ingredients.carrots -= 1;
-  save.honey -= 1;
-  save.cooked.grilledFish = (save.cooked.grilledFish || 0) + 1;
-  save.cooked.glazedCarrots = (save.cooked.glazedCarrots || 0) + 1;
-  save.meals = (save.meals || 0) + 2;
+  save.meals = (save.meals || 0) + 1;
   saveGame();
   updateHUD();
-  toast('Grilled fish and glazed carrots added to the inventory.', 'success');
-  setStatus('Two prepared items are stored for a future consumption system.');
+  toast(`${recipe} added to the inventory.`, 'success');
+  setStatus(`${recipe} is stored for a future consumption system.`);
 }
 
 function sleepAtCabin() {
@@ -3353,6 +3665,13 @@ function sleepAtCabin() {
     node.group.position.y = 0;
     node.group.visible = true;
     node.marker.visible = true;
+  }
+  for (const node of natureResourceNodes) {
+    if (node.type !== 'carrot') {
+      node.used = false;
+      node.group.visible = true;
+      node.marker.visible = true;
+    }
   }
   for (const bug of bugNodes) {
     bug.cooldown = 0;
@@ -3401,6 +3720,10 @@ function handleInteract() {
   }
   if (target?.type === 'carrot') {
     pullWildCarrot(target);
+    return;
+  }
+  if (target?.type === 'nature-resource') {
+    lootNatureResource(target);
     return;
   }
   if (target?.type === 'seed-plot') {
@@ -3609,8 +3932,10 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Digit1') setTool('rod');
   if (event.code === 'Digit2') setTool('net');
   if (event.code === 'Digit3') setTool('magnifier');
+  if (event.code === 'Digit4') setTool('food');
   if (event.code === 'KeyB') cycleBait();
   if (event.code === 'KeyL') cycleLure();
+  if (event.code === 'KeyF') cycleFood();
   if (event.code === 'KeyR' && fishing.phase === 'reeling') fishing.reelHeld = true;
 });
 
@@ -3713,6 +4038,11 @@ dom.tipsEnabled.addEventListener('change', () => {
 dom.equipmentDock.addEventListener('click', (event) => {
   const button = event.target.closest('[data-tool]');
   if (button) setTool(button.dataset.tool);
+});
+
+dom.inventoryTabs?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-inventory-tab]');
+  if (button) setInventoryTab(button.dataset.inventoryTab);
 });
 
 dom.travelOptions.addEventListener('click', (event) => {

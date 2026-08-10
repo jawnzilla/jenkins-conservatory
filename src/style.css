@@ -334,6 +334,40 @@ h2 {
   margin-top: 12px;
 }
 
+.inventory-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 11px;
+}
+
+.inventory-tab {
+  min-width: 0;
+  padding: 6px 4px;
+  border: 1px solid rgba(239, 241, 224, 0.12);
+  background: rgba(239, 241, 224, 0.045);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.inventory-tab:hover,
+.inventory-tab.active {
+  border-color: rgba(216, 239, 133, 0.55);
+  background: rgba(95, 118, 56, 0.42);
+  color: var(--lime);
+}
+
+.inventory-empty {
+  padding: 11px 2px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .equipment-item {
   justify-content: space-between;
   gap: 8px;
