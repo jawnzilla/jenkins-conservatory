@@ -56,6 +56,51 @@ const FOOD_OPTIONS = [
   { key: 'sunfish', label: 'Sunfish', icon: '◌', note: 'A fresh fish offering' }
 ];
 
+const COOKING_RECIPES = [
+  {
+    key: 'grilled-fish-glazed-carrots',
+    label: 'Grilled fish + glazed carrots',
+    note: 'A simple field supper with any fish.',
+    ingredients: [
+      { anyOf: ['trout', 'sunfish'], label: 'Any fish', amount: 1 },
+      { key: 'carrots', label: 'Carrot', amount: 1 },
+      { key: 'honey', label: 'Honey', amount: 1 }
+    ],
+    outputs: [{ key: 'grilledFish', amount: 1 }, { key: 'glazedCarrots', amount: 1 }]
+  },
+  {
+    key: 'wild-rice-mushroom-risotto',
+    label: 'Wild rice mushroom risotto',
+    note: 'Any mushroom works, including tree mushrooms and morels.',
+    ingredients: [
+      { key: 'wildRice', label: 'Wild rice', amount: 1 },
+      { anyOf: ['mushrooms', 'morels', 'treeMushrooms'], label: 'Any mushroom', amount: 1 }
+    ],
+    outputs: [{ key: 'risotto', amount: 1 }]
+  },
+  {
+    key: 'sunfish-salad',
+    label: 'Sunfish salad',
+    note: 'Fresh sunfish with wild greens and berries.',
+    ingredients: [
+      { key: 'sunfish', label: 'Sunfish', amount: 1 },
+      { key: 'scallions', label: 'Wild scallion', amount: 1 },
+      { key: 'berries', label: 'Berries', amount: 1 }
+    ],
+    outputs: [{ key: 'sunfishSalad', amount: 1 }]
+  },
+  {
+    key: 'trout-eggs-benedict',
+    label: 'Trout eggs benedict',
+    note: 'Trout topped with a showcase duck egg.',
+    ingredients: [
+      { key: 'trout', label: 'Trout', amount: 1 },
+      { key: 'duckEggs', label: 'Duck egg', amount: 1 }
+    ],
+    outputs: [{ key: 'troutEggsBenedict', amount: 1 }]
+  }
+];
+
 const PRACTICE_POND = {
   centerX: -15.2,
   centerZ: -20.8,
@@ -177,6 +222,8 @@ const dom = {
   shopModal: document.querySelector('#shop-modal'),
   shopItems: document.querySelector('#shop-items'),
   shopRecord: document.querySelector('#shop-record'),
+  stoveModal: document.querySelector('#stove-modal'),
+  stoveRecipes: document.querySelector('#stove-recipes'),
   qteModal: document.querySelector('#qte-modal'),
   qteCursor: document.querySelector('.qte-cursor'),
   qteAction: document.querySelector('#qte-action'),
@@ -2360,7 +2407,7 @@ function resetWorld() {
 
 function enterZone(zoneKey, announce = false) {
   if (!ZONES[zoneKey]) return;
-  closeAllModals();
+  closeAllModals(false);
   resetWorld();
   currentZone = zoneKey;
   spookRisk = 0.02;
@@ -2830,7 +2877,7 @@ function startBugObservation() {
   dom.inspectionState.textContent = 'Open the capture jar before handling the bug.';
   dom.qteAction.classList.add('is-hidden');
   dom.qteModal.classList.remove('is-hidden');
-  document.exitPointerLock?.();
+  releaseFieldModeForModal();
   setStatus('Movement paused for close observation.');
 }
 
@@ -2855,6 +2902,7 @@ function completeBugCapture(bug) {
   qteState = null;
   modalOpen = false;
   dom.qteModal.classList.add('is-hidden');
+  restoreFieldMode();
   bug.cooldown = 10;
   bug.revealed = false;
   bug.bugModel.visible = false;
@@ -3498,7 +3546,19 @@ function cycleFood() {
 function openModal(element) {
   modalOpen = true;
   element.classList.remove('is-hidden');
+  releaseFieldModeForModal();
+}
+
+function releaseFieldModeForModal() {
+  fallbackFieldMode = false;
+  pointerLocked = false;
+  fallbackPointer = null;
   document.exitPointerLock?.();
+  refreshFieldModeUI();
+}
+
+function restoreFieldMode() {
+  if (!modalOpen && !qteState) activateFieldMode();
 }
 
 function closeModal(element) {
@@ -3509,14 +3569,16 @@ function closeModal(element) {
     cleaningState = null;
     dom.cleaningModal.classList.remove('is-aquarium');
   }
+  restoreFieldMode();
 }
 
-function closeAllModals() {
-  [dom.travelModal, dom.shopModal, dom.qteModal, dom.cleaningModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
+function closeAllModals(restore = true) {
+  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
   modalOpen = false;
   qteState = null;
   cleaningState = null;
   dom.cleaningModal.classList.remove('is-aquarium');
+  if (restore) restoreFieldMode();
 }
 
 function openTravel() {
@@ -3595,56 +3657,77 @@ function inspectFridge() {
   setStatus(inventory);
 }
 
+function getRecipeIngredientCount(ingredient) {
+  if (ingredient.anyOf) return ingredient.anyOf.reduce((total, key) => total + (key === 'honey' ? save.honey || 0 : save.ingredients[key] || 0), 0);
+  return ingredient.key === 'honey' ? save.honey || 0 : save.ingredients[ingredient.key] || 0;
+}
+
+function getRecipeStatus(recipe) {
+  const progress = recipe.ingredients.reduce((total, ingredient) => total + Math.min(1, getRecipeIngredientCount(ingredient) / ingredient.amount), 0);
+  const complete = recipe.ingredients.every((ingredient) => getRecipeIngredientCount(ingredient) >= ingredient.amount);
+  return { complete, partial: !complete && progress > 0, progress };
+}
+
+function formatRecipeIngredient(ingredient) {
+  const owned = getRecipeIngredientCount(ingredient);
+  const label = ingredient.anyOf ? ingredient.label : ingredient.label;
+  return `${label} ${Math.min(owned, ingredient.amount)}/${ingredient.amount}`;
+}
+
+function chooseRecipeIngredient(ingredient) {
+  if (!ingredient.anyOf) return ingredient.key;
+  return ingredient.anyOf.find((key) => (key === 'honey' ? save.honey || 0 : save.ingredients[key] || 0) >= ingredient.amount) || ingredient.anyOf[0];
+}
+
+function consumeRecipeIngredient(ingredient) {
+  const key = chooseRecipeIngredient(ingredient);
+  if (key === 'honey') save.honey -= ingredient.amount;
+  else save.ingredients[key] -= ingredient.amount;
+}
+
+function openStoveMenu() {
+  const hasPan = (save.supplies.pans || 0) > 0;
+  dom.stoveRecipes.innerHTML = COOKING_RECIPES.map((recipe) => {
+    const status = getRecipeStatus(recipe);
+    const statusLabel = !hasPan ? 'NEED PAN' : status.complete ? 'READY' : status.partial ? 'PARTIAL' : 'MISSING';
+    const disabled = !hasPan || !status.complete ? 'disabled' : '';
+    const stateClass = status.complete ? 'is-complete' : status.partial ? 'is-partial' : '';
+    return `<button class="recipe-option ${stateClass}" data-cook-recipe="${recipe.key}" type="button" ${disabled}>
+      <span class="recipe-copy"><span class="recipe-name">${recipe.label}</span><span class="recipe-note">${recipe.note}</span><span class="recipe-requirements">${recipe.ingredients.map(formatRecipeIngredient).join(' · ')}</span></span>
+      <span class="recipe-status">${statusLabel}</span>
+    </button>`;
+  }).join('');
+  openModal(dom.stoveModal);
+}
+
 function cookAtStove() {
+  openStoveMenu();
+}
+
+function cookRecipe(recipeKey) {
+  const recipe = COOKING_RECIPES.find((candidate) => candidate.key === recipeKey);
+  if (!recipe) return;
+  const status = getRecipeStatus(recipe);
   if ((save.supplies.pans || 0) <= 0) {
     toast('The stove needs a camp cooking pan. Buy one at the field store.', 'warning');
     setStatus('A pan is required before the cabin stove can be used.');
     return;
   }
-  const ingredients = save.ingredients;
-  const cooked = save.cooked;
-  let recipe = null;
-  if ((ingredients.trout || 0) > 0 && (ingredients.duckEggs || 0) > 0) {
-    ingredients.trout -= 1;
-    ingredients.duckEggs -= 1;
-    cooked.troutEggsBenedict = (cooked.troutEggsBenedict || 0) + 1;
-    recipe = 'Trout eggs benedict';
-  } else if ((ingredients.sunfish || 0) > 0 && (ingredients.scallions || 0) > 0 && (ingredients.berries || 0) > 0) {
-    ingredients.sunfish -= 1;
-    ingredients.scallions -= 1;
-    ingredients.berries -= 1;
-    cooked.sunfishSalad = (cooked.sunfishSalad || 0) + 1;
-    recipe = 'Sunfish salad';
-  } else {
-    const mushroomKey = ['mushrooms', 'morels', 'treeMushrooms'].find((key) => (ingredients[key] || 0) > 0);
-    if (mushroomKey && (ingredients.wildRice || 0) > 0) {
-      ingredients[mushroomKey] -= 1;
-      ingredients.wildRice -= 1;
-      cooked.risotto = (cooked.risotto || 0) + 1;
-      recipe = 'Wild rice mushroom risotto';
-    }
-  }
-  if (!recipe) {
-    const fish = (ingredients.trout || 0) > 0 ? 'trout' : (ingredients.sunfish || 0) > 0 ? 'sunfish' : null;
-    if (fish && (ingredients.carrots || 0) > 0 && (save.honey || 0) > 0) {
-      ingredients[fish] -= 1;
-      ingredients.carrots -= 1;
-      save.honey -= 1;
-      cooked.grilledFish = (cooked.grilledFish || 0) + 1;
-      cooked.glazedCarrots = (cooked.glazedCarrots || 0) + 1;
-      recipe = 'Grilled fish and glazed carrots';
-    }
-  }
-  if (!recipe) {
-    toast('No complete recipe is ready. Check the looted plants and food tab.', 'warning');
-    setStatus('Recipes: rice + any mushroom; sunfish + scallion + berries; trout + duck egg; or fish + carrot + honey.');
+  if (!status.complete) {
+    toast('That recipe still needs ingredients.', 'warning');
+    setStatus(`${recipe.label} needs ${recipe.ingredients.map(formatRecipeIngredient).join(', ')}.`);
     return;
   }
-  save.meals = (save.meals || 0) + 1;
+  recipe.ingredients.forEach(consumeRecipeIngredient);
+  recipe.outputs.forEach((output) => {
+    save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
+  });
+  save.meals = (save.meals || 0) + recipe.outputs.reduce((total, output) => total + output.amount, 0);
   saveGame();
   updateHUD();
-  toast(`${recipe} added to the inventory.`, 'success');
-  setStatus(`${recipe} is stored for a future consumption system.`);
+  closeModal(dom.stoveModal);
+  toast(`${recipe.label} added to the inventory.`, 'success');
+  setStatus(`${recipe.label} is stored for a future consumption system.`);
 }
 
 function sleepAtCabin() {
@@ -4055,6 +4138,12 @@ dom.shopItems.addEventListener('click', (event) => {
   const button = event.target.closest('[data-buy-item]');
   if (!button || button.disabled) return;
   buyItem(button.dataset.buyItem, button.dataset.buyGroup);
+});
+
+dom.stoveRecipes.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-cook-recipe]');
+  if (!button || button.disabled) return;
+  cookRecipe(button.dataset.cookRecipe);
 });
 
 document.querySelectorAll('[data-close-modal]').forEach((button) => {

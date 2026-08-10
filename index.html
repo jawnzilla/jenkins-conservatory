@@ -138,6 +138,21 @@
         </div>
       </section>
 
+      <section id="stove-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="stove-title">
+        <div class="modal-card panel stove-modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">CABIN STOVE</p>
+              <h2 id="stove-title">Choose a recipe</h2>
+            </div>
+            <button class="icon-button" data-close-modal="stove-modal" type="button" aria-label="Close recipe menu">×</button>
+          </div>
+          <p class="stove-copy">Recipes update as ingredients are collected. Green means ready, yellow means partly stocked.</p>
+          <div id="stove-recipes" class="stove-recipes"></div>
+          <p class="modal-footnote">A camp cooking pan is required to prepare any recipe. Ingredients are consumed when you choose a recipe.</p>
+        </div>
+      </section>
+
       <section id="qte-modal" class="modal-shell qte-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="qte-title">
         <div class="qte-card inspection-card panel">
           <p class="eyebrow">FIELD OBSERVATION</p>

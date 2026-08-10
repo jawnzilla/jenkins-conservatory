@@ -805,6 +805,90 @@ h2 {
   cursor: default;
 }
 
+.stove-modal-card {
+  width: min(620px, 100%);
+}
+
+.stove-copy {
+  margin: -8px 0 18px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.stove-recipes {
+  display: grid;
+  gap: 9px;
+}
+
+.recipe-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid rgba(239, 241, 224, 0.14);
+  background: rgba(14, 28, 22, 0.72);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recipe-option:hover {
+  border-color: rgba(216, 239, 133, 0.55);
+}
+
+.recipe-option.is-complete {
+  border-color: rgba(137, 224, 199, 0.72);
+  background: rgba(42, 101, 77, 0.42);
+}
+
+.recipe-option.is-partial {
+  border-color: rgba(255, 182, 107, 0.68);
+  background: rgba(112, 70, 39, 0.34);
+}
+
+.recipe-option[disabled] {
+  cursor: default;
+}
+
+.recipe-option[disabled]:hover {
+  border-color: rgba(239, 241, 224, 0.14);
+}
+
+.recipe-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.recipe-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.recipe-note,
+.recipe-requirements {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.recipe-requirements {
+  color: rgba(244, 242, 233, 0.78);
+}
+
+.recipe-status {
+  align-self: center;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.recipe-option.is-complete .recipe-status { color: var(--aqua); }
+.recipe-option.is-partial .recipe-status { color: var(--orange); }
+
 .qte-shell {
   background: rgba(5, 12, 9, 0.62);
 }
