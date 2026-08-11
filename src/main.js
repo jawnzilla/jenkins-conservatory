@@ -49,8 +49,8 @@ const ZONES = {
     ground: 0x506b54,
     accent: 0x8be0c3,
     fogNear: 32,
-    fogFar: 148,
-    bounds: { minX: -74, maxX: 74, minZ: -198, maxZ: 34 }
+    fogFar: 180,
+    bounds: { minX: -92, maxX: 92, minZ: -198, maxZ: 34 }
   }
 };
 
@@ -62,13 +62,15 @@ const JENKINS_LAKE_ROAD = [
 const JENKINS_LAKE_WATER = {
   centerX: 0,
   centerZ: -153,
-  radiusX: 61,
+  radiusX: 76,
   radiusZ: 34,
-  playerRadiusX: 59.2,
+  playerRadiusX: 74.2,
   playerRadiusZ: 32.2,
-  castRadiusX: 58.2,
+  castRadiusX: 73.2,
   castRadiusZ: 31.2
 };
+
+const JENKINS_LAKE_BOAT_SPAWN = { x: 7.5, z: -149 };
 
 const JENKINS_LAKE_GRASS_COMPOUNDS = [
   { centerX: -34, centerZ: -96, width: 24, depth: 38, label: 'WEST CABIN LAWN' },
@@ -104,7 +106,9 @@ const FOREST_WATER = {
 const FOOD_OPTIONS = [
   { key: 'carrots', label: 'Carrot', icon: '🥕', note: 'Attracts rabbits and squirrels' },
   { key: 'trout', label: 'Trout', icon: '≈', note: 'A fresh fish offering' },
-  { key: 'sunfish', label: 'Sunfish', icon: '◌', note: 'A fresh fish offering' }
+  { key: 'sunfish', label: 'Sunfish', icon: '◌', note: 'A fresh fish offering' },
+  { key: 'bass', label: 'Bass', icon: '◒', note: 'A fresh fish offering' },
+  { key: 'crappie', label: 'Crappie', icon: '◍', note: 'A fresh fish offering' }
 ];
 
 const COOKING_RECIPES = [
@@ -113,7 +117,7 @@ const COOKING_RECIPES = [
     label: 'Grilled fish + glazed carrots',
     note: 'A simple field supper with any fish.',
     ingredients: [
-      { anyOf: ['trout', 'sunfish'], label: 'Any fish', amount: 1 },
+      { anyOf: ['trout', 'sunfish', 'bass', 'crappie'], label: 'Any fish', amount: 1 },
       { key: 'carrots', label: 'Carrot', amount: 1 },
       { key: 'honey', label: 'Honey', amount: 1 }
     ],
@@ -174,6 +178,8 @@ const POLLINATOR_PLOTS = [
 const SPECIES = {
   trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms' },
   sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs' },
+  bass: { label: 'Largemouth bass', type: 'fish', sigil: '◒', color: 0x688c5a, note: 'Spinner + worms · lily pads' },
+  crappie: { label: 'Black crappie', type: 'fish', sigil: '◍', color: 0x8994a3, note: 'Spinner + worms · deep lake' },
   rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◒', color: 0xe6d7bf, note: 'Sneak + net' },
   squirrel: { label: 'Red squirrel', type: 'ground', sigil: '◓', color: 0xb56843, note: 'Sneak + net' },
   fox: { label: 'Red fox', type: 'ground', sigil: '◇', color: 0xc96c3e, note: 'Sneak + net' },
@@ -233,7 +239,7 @@ const DEFAULT_SAVE = {
   gardenFlowers: null,
   records: {},
   honey: 0,
-  ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0, mushrooms: 0, morels: 0, treeMushrooms: 0, wildRice: 0, scallions: 0, berries: 0, duckEggs: 0 },
+  ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0, bass: 0, crappie: 0, mushrooms: 0, morels: 0, treeMushrooms: 0, wildRice: 0, scallions: 0, berries: 0, duckEggs: 0 },
   cooked: { grilledFish: 0, glazedCarrots: 0, risotto: 0, sunfishSalad: 0, troutEggsBenedict: 0 },
   meals: 0,
   jenkinsLakePass: false,
@@ -390,6 +396,8 @@ let lakeArrival = null;
 let lakeCarInterior = null;
 let lakeParkedCar = null;
 let lakeCaptain = null;
+let lakeBoat = null;
+let lakeBoatPilot = null;
 let lakeGateCollider = null;
 let lakeGateOpen = false;
 let lakeGateNotified = false;
@@ -541,7 +549,8 @@ function rebuildDebugCollisionVisuals() {
     const kind = isRect ? 'RECT' : 'CIRCLE';
     const dimensions = isRect ? `${collider.halfWidth.toFixed(1)}x${collider.halfDepth.toFixed(1)}` : `${collider.radius.toFixed(1)}r`;
     const state = collider.enabled === false ? ' OFF' : '';
-    const label = makeLabel(`C${collider.id ?? index} ${kind} ${dimensions} @${collider.x.toFixed(0)},${collider.z.toFixed(0)}${state}`, collider.enabled === false ? '#c5cbc8' : isRect ? '#ff9aa3' : '#ffe08a', '#202a26', 0.24);
+    const name = collider.debugLabel ? `${collider.debugLabel} ` : '';
+    const label = makeLabel(`${name}C${collider.id ?? index} ${kind} ${dimensions} @${collider.x.toFixed(0)},${collider.z.toFixed(0)}${state}`, collider.enabled === false ? '#c5cbc8' : isRect ? '#ff9aa3' : '#ffe08a', '#202a26', 0.24);
     label.material.depthTest = false;
     label.position.set(collider.x, height + 0.42, collider.z);
     label.renderOrder = 21;
@@ -739,7 +748,7 @@ function updateLooseNet(netCloth, time, swing) {
 
 function createSkybox() {
   const skyMaterial = new THREE.MeshBasicMaterial({ color: 0xb2c6b8, side: THREE.BackSide, fog: false, depthWrite: false });
-  skybox = new THREE.Mesh(new THREE.BoxGeometry(420, 420, 420), skyMaterial);
+  skybox = new THREE.Mesh(new THREE.BoxGeometry(560, 560, 560), skyMaterial);
   skybox.renderOrder = -10;
   scene.add(skybox);
 }
@@ -753,7 +762,7 @@ function triggerToolAction(name, duration = 0.45) {
 }
 
 function updateHeldTool() {
-  heldToolGroup.visible = !(currentZone === 'lake' && lakeArrival?.active);
+  heldToolGroup.visible = !(currentZone === 'lake' && lakeArrival?.active) && !lakeBoatPilot?.active;
   const root = heldToolGroup.userData.root;
   const basePosition = heldToolGroup.userData.basePosition;
   const baseRotation = heldToolGroup.userData.baseRotation;
@@ -999,6 +1008,9 @@ function createLakeDock(dock, index = 0) {
   const group = new THREE.Group();
   const length = dock.shoreZ - dock.endZ;
   const centerZ = (dock.shoreZ + dock.endZ) / 2;
+  // A short timber ramp bridges the grass bank and the raised deck.
+  box(group, [dock.width + 0.42, 0.12, 2.55], 0x75563d, [0, 0.06, 1.12]);
+  box(group, [dock.width + 0.22, 0.2, 2.25], 0x9b754f, [0, 0.16, 1.02], { rotation: [-0.18, 0, 0] });
   box(group, [dock.width, 0.28, length], 0xc9ceca, [0, 0.31, centerZ - dock.shoreZ]);
   box(group, [dock.width + 0.18, 0.1, length + 0.16], 0x7f8984, [0, 0.48, centerZ - dock.shoreZ]);
   for (let z = dock.shoreZ - 0.35; z > dock.endZ; z -= 0.72) {
@@ -1011,6 +1023,16 @@ function createLakeDock(dock, index = 0) {
   }
   group.position.set(dock.x, 0, dock.shoreZ);
   world.add(group);
+  const edgeOffset = dock.width / 2 + 0.18;
+  addCollider(dock.x - edgeOffset, centerZ, 0.16, {
+    type: 'rect', halfWidth: 0.16, halfDepth: length / 2 + 0.24, zone: 'lake', debugLabel: `dock-${index + 1}-left`
+  });
+  addCollider(dock.x + edgeOffset, centerZ, 0.16, {
+    type: 'rect', halfWidth: 0.16, halfDepth: length / 2 + 0.24, zone: 'lake', debugLabel: `dock-${index + 1}-right`
+  });
+  addCollider(dock.x, dock.endZ - 0.2, 0.12, {
+    type: 'rect', halfWidth: dock.width / 2 + 0.12, halfDepth: 0.12, zone: 'lake', debugLabel: `dock-${index + 1}-water-end`
+  });
   const label = makeLabel(index === 1 ? 'MAIN DOCK' : 'DOCK', '#d8ef85', '#30442f', 0.34);
   label.position.set(dock.x, 1.35, dock.shoreZ - 0.7);
   world.add(label);
@@ -1020,7 +1042,9 @@ function createLakeDock(dock, index = 0) {
 function createLakeLilyPad(x, z, scale = 1, index = 0) {
   const pad = new THREE.Group();
   pad.position.set(x, 0.19, z);
-  sphere(pad, 0.42, index % 2 ? 0x168e68 : 0x1b9a70, [0, 0, 0], { scale: [scale * 1.2, 0.08, scale], widthSegments: 10, heightSegments: 5 });
+  const padColor = index % 2 ? 0x168e68 : 0x1b9a70;
+  sphere(pad, 0.48, padColor, [0, 0, 0], { scale: [scale * 1.3, 0.22, scale * 1.08], widthSegments: 10, heightSegments: 6 });
+  sphere(pad, 0.28, new THREE.Color(padColor).offsetHSL(0.01, 0, 0.05), [0.18 * scale, 0.07, -0.08 * scale], { scale: [scale * 0.95, 0.13, scale * 0.7], widthSegments: 9, heightSegments: 5 });
   const flower = index % 3 === 0 ? sphere(pad, 0.075, 0xf4e7ab, [0.08 * scale, 0.075, -0.04 * scale], { scale: [1.25, 0.55, 1.25] }) : null;
   pad.rotation.y = index * 0.8;
   world.add(pad);
@@ -1030,14 +1054,135 @@ function createLakeLilyPad(x, z, scale = 1, index = 0) {
 function createLakeBoat(x, z) {
   const boat = new THREE.Group();
   boat.position.set(x, 0.33, z);
-  addMesh(boat, new THREE.CylinderGeometry(0.92, 0.74, 0.18, 4), mat(0xd2d5d0, { metalness: 0.25, roughness: 0.55 }), [0, 0, 0], [0, Math.PI / 4, 0]);
-  box(boat, [0.12, 0.18, 1.15], 0x707a75, [0, 0.13, 0]);
-  box(boat, [0.82, 0.08, 0.1], 0x8b938d, [0, 0.24, 0]);
+  addMesh(boat, new THREE.CylinderGeometry(0.98, 0.76, 0.2, 4), mat(0xd2d5d0, { metalness: 0.25, roughness: 0.55 }), [0, 0, 0], [0, Math.PI / 4, 0]);
+  box(boat, [0.16, 0.2, 1.24], 0x707a75, [0, 0.14, 0]);
+  box(boat, [0.88, 0.08, 0.1], 0x8b938d, [0, 0.25, 0]);
+  box(boat, [0.62, 0.08, 0.2], 0x594839, [0, 0.32, 0.2]);
   const label = makeLabel('BOAT', '#d8ef85', '#30442f', 0.3);
   label.position.set(0, 1.0, 0);
   boat.add(label);
   world.add(boat);
-  return boat;
+  const interactable = {
+    type: 'lake-boat',
+    label: 'Pilot boat · E',
+    position: new THREE.Vector3(x, 1.0, z),
+    radius: 3.2,
+    group: boat,
+    spawn: { x, z },
+    heading: getLakeBoatHeading(x, z)
+  };
+  interactables.push(interactable);
+  return interactable;
+}
+
+function getLakeBoatHeading(x, z) {
+  return Math.atan2(JENKINS_LAKE_WATER.centerX - x, -(JENKINS_LAKE_WATER.centerZ - z));
+}
+
+function isLakeBoatInSafeWater(x, z) {
+  const water = JENKINS_LAKE_WATER;
+  const radiusX = water.radiusX - 3.4;
+  const radiusZ = water.radiusZ - 3.4;
+  const dx = (x - water.centerX) / radiusX;
+  const dz = (z - water.centerZ) / radiusZ;
+  return dx * dx + dz * dz < 1;
+}
+
+function getNearestLakeDock(x, z) {
+  return JENKINS_LAKE_DOCKS.reduce((nearest, dock) => {
+    const distance = Math.hypot(x - dock.x, z - dock.shoreZ);
+    return !nearest || distance < nearest.distance ? { dock, distance } : nearest;
+  }, null)?.dock || JENKINS_LAKE_DOCKS[1];
+}
+
+function cycleLakeBoatSpeed(direction) {
+  if (!lakeBoatPilot?.active) return;
+  const speeds = [
+    { label: 'REVERSE', value: -1.15 },
+    { label: 'NEUTRAL', value: 0 },
+    { label: 'TROLLING SPEED', value: 0.28 },
+    { label: 'LOW SPEED', value: 0.7 },
+    { label: 'HIGH SPEED', value: 1.3 }
+  ];
+  lakeBoatPilot.speedIndex = clamp(lakeBoatPilot.speedIndex + direction, 0, speeds.length - 1);
+  const current = speeds[lakeBoatPilot.speedIndex];
+  lakeBoatPilot.speed = current.value;
+  setStatus(`BOAT: ${current.label} · W/S changes speed · A/D steers · E exits`);
+  toast(`Boat speed: ${current.label}.`, 'success');
+}
+
+function respawnLakeBoat(message = 'The boat grounded out. It has returned to the dock in neutral.') {
+  if (!lakeBoat?.group) return;
+  const boat = lakeBoat.group;
+  const spawn = JENKINS_LAKE_BOAT_SPAWN;
+  const heading = getLakeBoatHeading(spawn.x, spawn.z);
+  boat.position.set(spawn.x, 0.33, spawn.z);
+  boat.rotation.y = heading + Math.PI / 4;
+  lakeBoat.position.set(spawn.x, 1.0, spawn.z);
+  lakeBoat.heading = heading;
+  lakeBoatPilot = null;
+  player.set(JENKINS_LAKE_DOCKS[1].x, 1.72, JENKINS_LAKE_DOCKS[1].shoreZ + 1.7);
+  jumpOffset = 0;
+  grounded = true;
+  yaw = 0;
+  pitch = -0.08;
+  camera.position.set(player.x, player.y, player.z);
+  updateCameraRotation();
+  updateHeldTool();
+  toast(message, 'warning');
+  setStatus('Boat reset to neutral. Walk down the main dock and press E to pilot it again.');
+}
+
+function enterLakeBoat(entry) {
+  if (currentZone !== 'lake' || !entry?.group || lakeBoatPilot?.active) return;
+  const heading = entry.heading ?? getLakeBoatHeading(entry.group.position.x, entry.group.position.z);
+  lakeBoatPilot = { active: true, entry, heading, speedIndex: 1, speed: 0 };
+  entry.group.rotation.y = heading + Math.PI / 4;
+  player.set(entry.group.position.x, 1.72, entry.group.position.z);
+  yaw = heading;
+  pitch = -0.08;
+  camera.position.set(player.x, player.y, player.z);
+  updateCameraRotation();
+  updateHeldTool();
+  toast('You are at the helm. W/S changes speed; A/D steers.', 'success');
+  setStatus('BOAT: NEUTRAL · W/S changes speed · A/D steers · E exits');
+}
+
+function exitLakeBoat() {
+  if (!lakeBoatPilot?.active) return;
+  const boat = lakeBoatPilot.entry.group;
+  const dock = getNearestLakeDock(boat.position.x, boat.position.z);
+  lakeBoatPilot = null;
+  player.set(dock.x, 1.72, dock.shoreZ + 1.7);
+  jumpOffset = 0;
+  grounded = true;
+  yaw = 0;
+  pitch = -0.08;
+  camera.position.set(player.x, player.y, player.z);
+  updateCameraRotation();
+  updateHeldTool();
+  setStatus('You stepped back onto the dock. Press E by the boat to pilot it again.');
+}
+
+function updateLakeBoatMovement(delta) {
+  if (!lakeBoatPilot?.active || !lakeBoatPilot.entry?.group) return;
+  const boat = lakeBoatPilot.entry.group;
+  const steering = (isKeyDown('KeyD', 'd') ? 1 : 0) - (isKeyDown('KeyA', 'a') ? 1 : 0);
+  lakeBoatPilot.heading += steering * delta * 0.9;
+  const speed = lakeBoatPilot.speed || 0;
+  const nextX = boat.position.x + Math.sin(lakeBoatPilot.heading) * speed * delta;
+  const nextZ = boat.position.z - Math.cos(lakeBoatPilot.heading) * speed * delta;
+  if (speed !== 0 && !isLakeBoatInSafeWater(nextX, nextZ)) {
+    respawnLakeBoat('The boat touched the shoreline and was reset before it could get stuck.');
+    return;
+  }
+  boat.position.x = nextX;
+  boat.position.z = nextZ;
+  boat.rotation.y = lakeBoatPilot.heading + Math.PI / 4;
+  lakeBoatPilot.entry.position.set(nextX, 1.0, nextZ);
+  lakeBoatPilot.entry.heading = lakeBoatPilot.heading;
+  player.set(nextX, 1.72, nextZ);
+  camera.position.set(player.x, player.y, player.z);
 }
 
 function createLakeCaptain(x, z) {
@@ -1759,6 +1904,8 @@ function createPondDock() {
   const group = new THREE.Group();
   const length = FOREST_DOCK.shoreZ - FOREST_DOCK.endZ;
   const centerZ = (FOREST_DOCK.shoreZ + FOREST_DOCK.endZ) / 2;
+  box(group, [4.15, 0.12, 2.55], 0x75563d, [0, 0.06, 1.12]);
+  box(group, [3.95, 0.2, 2.25], 0x9b754f, [0, 0.16, 1.02], { rotation: [-0.18, 0, 0] });
   box(group, [3.7, 0.34, length], 0x8b694a, [0, 0.34, centerZ]);
   for (let z = FOREST_DOCK.shoreZ - 0.25; z > FOREST_DOCK.endZ; z -= 0.62) {
     box(group, [3.46, 0.065, 0.13], 0xc29a62, [0, 0.55, z]);
@@ -1770,6 +1917,10 @@ function createPondDock() {
     box(group, [0.1, 0.1, length - 0.22], 0xb58a5b, [x, 1.08, centerZ]);
   }
   world.add(group);
+  const edgeOffset = FOREST_DOCK.halfWidth + 0.18;
+  addCollider(-edgeOffset, centerZ, 0.16, { type: 'rect', halfWidth: 0.16, halfDepth: length / 2 + 0.24, zone: 'forest', debugLabel: 'practice-dock-left' });
+  addCollider(edgeOffset, centerZ, 0.16, { type: 'rect', halfWidth: 0.16, halfDepth: length / 2 + 0.24, zone: 'forest', debugLabel: 'practice-dock-right' });
+  addCollider(0, FOREST_DOCK.endZ - 0.2, 0.12, { type: 'rect', halfWidth: FOREST_DOCK.halfWidth + 0.12, halfDepth: 0.12, zone: 'forest', debugLabel: 'practice-dock-water-end' });
   const label = makeLabel('POND DOCK', '#d8ef85', '#1e3428', 0.58);
   label.position.set(0, 1.65, FOREST_DOCK.shoreZ - 0.55);
   world.add(label);
@@ -2465,7 +2616,7 @@ function createJenkinsLakeForest() {
     }
   }
   for (let row = 0, z = 22; z > -68; row += 1, z -= 8.2) {
-    for (let column = 0, x = -67; x <= 67; column += 1, x += 7.6) {
+    for (let column = 0, x = -82; x <= 82; column += 1, x += 7.6) {
       if (Math.abs(x) < 8 || (row + column) % 3 === 1) continue;
       addForestTree(x + ((row % 2) * 1.2), z, 0.72 + ((row + column) % 5) * 0.08, row * 11 + column);
     }
@@ -2479,18 +2630,18 @@ function createJenkinsLakeForest() {
   }
   for (let row = 0, z = 24; z > -194; row += 1, z -= 7.1) {
     for (const side of [-1, 1]) {
-      addForestTree(side * (61.5 + (row % 2) * 1.2), z, 0.88 + (row % 3) * 0.08, 150 + row * 2 + (side > 0 ? 1 : 0));
+      addForestTree(side * (82 + (row % 2) * 1.2), z, 0.88 + (row % 3) * 0.08, 150 + row * 2 + (side > 0 ? 1 : 0));
     }
   }
 
   for (let row = 0, z = 24; z > -194; row += 1, z -= 5.2) {
-    for (let column = 0, x = -68; x <= 68; column += 1, x += 6.3) {
+    for (let column = 0, x = -86; x <= 86; column += 1, x += 6.3) {
       if ((row + column) % 2 !== 0 || !isJenkinsLakeClearPosition(x, z)) continue;
       createGroundFoliage(x, z, 0.68 + ((row + column) % 4) * 0.13, (row + column) % 2 ? 0x4e8054 : 0x5a8958);
     }
   }
   for (let index = 0; index < 56; index += 1) {
-    const x = -68 + (index * 17) % 136;
+    const x = -86 + (index * 17) % 172;
     const z = 22 - ((index * 23) % 214);
     if (isJenkinsLakeClearPosition(x, z)) {
       if (index % 2) addRock(x, 0.2, z, 0.24 + (index % 3) * 0.08, index % 3 ? 0x718474 : 0x667b6e);
@@ -2528,11 +2679,15 @@ function createJenkinsLakeWater() {
   const lakeLabel = makeLabel('JENKINS LAKE', '#8be0c3', '#183d3c', 0.88);
   lakeLabel.position.set(0, 2.4, centerZ);
   world.add(lakeLabel);
-  [[-54, -130], [-39, -119], [-18, -121], [18, -121], [41, -127], [56, -144], [-48, -173], [-16, -184], [20, -185], [49, -173]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
-  [[-45, -135], [-28, -126], [-10, -139], [12, -128], [31, -143], [45, -157], [-34, -164], [-7, -174], [22, -169], [49, -151]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
-  [[-47, -142, 0.9], [-40, -153, 0.72], [-12, -149, 0.82], [7, -158, 0.7], [29, -132, 0.86], [37, -165, 0.75], [53, -157, 0.64], [-24, -177, 0.9]].forEach(([x, z, scale], index) => createLakeLilyPad(x, z, scale, index));
+  [[-68, -137], [-50, -124], [-27, -121], [2, -119], [31, -122], [55, -129], [69, -144], [-65, -169], [-42, -180], [-14, -186], [17, -187], [45, -180], [66, -169]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
+  [[-52, -137], [-24, -128], [9, -137], [39, -132], [58, -151], [-47, -163], [-13, -174], [24, -169], [51, -171]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
+  // Bass hold tight to the thicker lily-pad patches and take worms. Crappies suspend
+  // in the open middle of the lake and also take worms.
+  [[-61, -143], [-44, -161], [38, -140], [58, -161]].forEach(([x, z], index) => createHotspot(x, z, 'bass', 'spinner', 'worms'));
+  [[-9, -151], [8, -158], [2, -166]].forEach(([x, z]) => createHotspot(x, z, 'crappie', 'spinner', 'worms'));
+  [[-67, -143, 1.05], [-56, -151, 0.82], [-46, -161, 1.18], [-34, -132, 0.9], [-19, -124, 0.74], [-7, -140, 0.94], [11, -128, 0.82], [26, -137, 1.14], [39, -140, 0.92], [52, -133, 0.8], [65, -148, 1.02], [61, -164, 0.88], [47, -172, 1.16], [31, -179, 0.78], [13, -183, 1.02], [-7, -178, 0.86], [-24, -181, 1.1], [-42, -174, 0.84], [-56, -166, 1.08], [-69, -157, 0.78]].forEach(([x, z, scale], index) => createLakeLilyPad(x, z, scale, index));
   JENKINS_LAKE_DOCKS.forEach((dock, index) => createLakeDock(dock, index));
-  createLakeBoat(29.2, -136.5);
+  lakeBoat = createLakeBoat(JENKINS_LAKE_BOAT_SPAWN.x, JENKINS_LAKE_BOAT_SPAWN.z);
 }
 
 function isLakeGrassCompoundPosition(x, z, padding = 0) {
@@ -2627,7 +2782,7 @@ function buildJenkinsLake() {
   const gateLabel = makeLabel('LAKE ACCESS · CAPTAIN MARK', '#f2b268', '#2f3d30', 0.42);
   gateLabel.position.set(3.6, 2.9, -79.8);
   world.add(gateLabel);
-  lakeGateCollider = addCollider(0, -117.2, 0.2, { type: 'rect', halfWidth: 58.5, halfDepth: 0.22, zone: 'lake' });
+  lakeGateCollider = addCollider(0, -117.2, 0.2, { type: 'rect', halfWidth: 73.5, halfDepth: 0.22, zone: 'lake', debugLabel: 'captain-mark-lake-gate' });
   setLakeGateAccess(Boolean(save.jenkinsLakePass && JENKINS_LAKE_PLACEHOLDER_ACCESS));
   lakeGateNotified = false;
   lakeCabinBoundaryNotified = false;
@@ -3008,10 +3163,10 @@ function createAnimalModel(species, scale = 1) {
     const rightWing = sphere(group, 0.28, 0x3f5d46, [0.34, 0.42, 0], { scale: [0.65, 0.32, 1.12], rotation: [0, 0, 0.3] });
     group.userData.wings = [leftWing, rightWing];
     group.userData.wingSpeed = 10;
-  } else if (species === 'trout' || species === 'sunfish') {
+  } else if (details.type === 'fish') {
     const bodyColor = details.color;
-    const bellyColor = species === 'trout' ? 0xf0c18e : 0xb8d9d0;
-    const accentColor = species === 'trout' ? 0x8d4d3e : 0x315f7a;
+    const bellyColor = species === 'trout' ? 0xf0c18e : species === 'bass' ? 0xb5c98c : species === 'crappie' ? 0xd8d2bf : 0xb8d9d0;
+    const accentColor = species === 'trout' ? 0x8d4d3e : species === 'bass' ? 0x355d3c : species === 'crappie' ? 0x50586b : 0x315f7a;
     const body = sphere(group, 0.48, bodyColor, [0, 0, 0], { scale: [1.62, 0.7, 0.66], widthSegments: 16, heightSegments: 10, material: { flatShading: false, roughness: 0.48 } });
     sphere(group, 0.34, bellyColor, [0.18, -0.16, 0], { scale: [1.2, 0.46, 0.7], widthSegments: 12, heightSegments: 8, material: { flatShading: false, roughness: 0.56 } });
     const tail = cone(group, 0.36, 0.7, bodyColor, [-1.02, 0, 0], { rotation: [0, 0, -Math.PI / 2], segments: 6 });
@@ -3114,6 +3269,8 @@ function resetWorld() {
   lakeArrival = null;
   lakeParkedCar = null;
   lakeCaptain = null;
+  lakeBoat = null;
+  lakeBoatPilot = null;
   lakeGateCollider = null;
   lakeGateOpen = false;
   lakeGateNotified = false;
@@ -3305,7 +3462,7 @@ function setHook() {
     }
     fishing.phase = 'hooking';
     fishing.hookClicks = 1;
-    fishing.hookTarget = Math.round(clamp(4 + fishing.fishWeight * 2.15, 5, 14));
+    fishing.hookTarget = Math.round(clamp(4 + fishing.fishWeight * 2.15, 5, 18));
     fishing.hookStartedAt = elapsed;
     triggerToolAction('rod-hook', 0.32);
     setStatus(`Set the hook: click ${fishing.hookTarget} times over 2 seconds.`);
@@ -3398,8 +3555,14 @@ function updateFishing(delta) {
   if (fishing.phase === 'waiting' && fishing.castTarget && elapsed >= fishing.biteAt) {
     fishing.phase = 'bite';
     fishing.fishSpecies = fishing.castTarget.fishSpecies;
-    fishing.fishSize = 7.5 + Math.random() * (fishing.fishSpecies === 'trout' ? 13.5 : 8.5);
-    fishing.fishWeight = fishing.fishSpecies === 'trout' ? 0.7 + Math.random() * 4.3 : 0.25 + Math.random() * 1.8;
+    const fishProfile = {
+      trout: { size: 13.5, weightBase: 0.7, weightRange: 4.3 },
+      sunfish: { size: 8.5, weightBase: 0.25, weightRange: 1.8 },
+      bass: { size: 18, weightBase: 1.1, weightRange: 8.5 },
+      crappie: { size: 12, weightBase: 0.35, weightRange: 2.7 }
+    }[fishing.fishSpecies] || { size: 8.5, weightBase: 0.25, weightRange: 1.8 };
+    fishing.fishSize = 7.5 + Math.random() * fishProfile.size;
+    fishing.fishWeight = fishProfile.weightBase + Math.random() * fishProfile.weightRange;
     fishing.biteDeadline = elapsed + 1.3;
     if (!fishing.practice && !fishing.baitConsumed && fishing.castBait) {
       save.supplies[fishing.castBait] = Math.max(0, save.supplies[fishing.castBait] - 1);
@@ -3913,10 +4076,26 @@ function constrainNatureWaterBoundary() {
   if (fishing.phase === 'idle') setStatus('The shoreline drops off here. Stay on the bank and follow the marked shore path.');
 }
 
+function getDockSurfaceHeight(x, z) {
+  const docks = currentZone === 'lake' ? JENKINS_LAKE_DOCKS : currentZone === 'forest' ? [{ x: 0, shoreZ: FOREST_DOCK.shoreZ, endZ: FOREST_DOCK.endZ, width: FOREST_DOCK.halfWidth * 2 }] : [];
+  for (const dock of docks) {
+    if (Math.abs(x - dock.x) > dock.width / 2 + 0.12 || z < dock.endZ - 0.35 || z > dock.shoreZ + 1.5) continue;
+    if (z > dock.shoreZ) {
+      return 0.48 * clamp((dock.shoreZ + 1.5 - z) / 1.5, 0, 1);
+    }
+    return 0.48;
+  }
+  return 0;
+}
+
 function updateMovement(delta) {
   if (modalOpen || qteState) return;
   if (currentZone === 'lake' && lakeArrival?.active) {
     updateJenkinsLakeArrival(delta);
+    return;
+  }
+  if (lakeBoatPilot?.active) {
+    updateLakeBoatMovement(delta);
     return;
   }
   const forwardInput = (isKeyDown('KeyW', 'w') ? 1 : 0) - (isKeyDown('KeyS', 's') ? 1 : 0);
@@ -3940,6 +4119,7 @@ function updateMovement(delta) {
   player.x = clamp(player.x, bounds.minX, bounds.maxX);
   player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
   constrainNatureWaterBoundary();
+  player.y = 1.72 + getDockSurfaceHeight(player.x, player.z);
   if (!grounded || jumpOffset > 0) {
     jumpVelocity -= GRAVITY * delta;
     jumpOffset += jumpVelocity * delta;
@@ -3973,6 +4153,13 @@ function isKeyDown(...values) {
 function updatePrompt() {
   if (modalOpen || qteState) {
     dom.promptCard.classList.add('is-hidden');
+    return;
+  }
+  if (lakeBoatPilot?.active) {
+    dom.promptKey.textContent = 'E';
+    dom.promptText.textContent = 'Exit boat';
+    dom.promptCard.classList.remove('is-hidden');
+    lastPromptKey = 'lake:exit-boat';
     return;
   }
   const target = getInteractionTarget();
@@ -4117,8 +4304,8 @@ function updateFishingTips() {
 
 function updateFishingCallout() {
   const visible = ['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState;
-  dom.fishingCallout.classList.toggle('is-hidden', !visible);
-  if (!visible) return;
+  dom.fishingCallout.classList.toggle('is-hidden', !visible || lakeBoatPilot?.active);
+  if (!visible || lakeBoatPilot?.active) return;
   let message = 'AIM FOR A WATER HOT SPOT';
   let tone = '';
   if (fishing.phase === 'charging') message = `HOLD TO CAST · ${Math.round(fishing.charge * 100)}%`;
@@ -4143,6 +4330,12 @@ function updateActionDock() {
     return;
   }
   dom.actionDock.classList.remove('is-hidden');
+  if (lakeBoatPilot?.active) {
+    dom.reelAction.classList.add('is-hidden');
+    dom.primaryAction.classList.remove('is-hidden');
+    dom.primaryAction.textContent = 'EXIT BOAT · E';
+    return;
+  }
   if (fishing.phase === 'waiting') {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
@@ -4405,7 +4598,7 @@ function buyShopDisplay(display) {
 function inspectFridge() {
   const ingredients = save.ingredients || DEFAULT_SAVE.ingredients;
   const cooked = save.cooked || DEFAULT_SAVE.cooked;
-  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish · carrots ${ingredients.carrots || 0} · mushrooms ${(ingredients.mushrooms || 0) + (ingredients.morels || 0) + (ingredients.treeMushrooms || 0)} · rice ${ingredients.wildRice || 0} · scallions ${ingredients.scallions || 0} · berries ${ingredients.berries || 0} · duck eggs ${ingredients.duckEggs || 0} · honey ${save.honey || 0} · flowers ${ingredients.flowers || 0} · cooked ${Object.values(cooked).reduce((sum, count) => sum + (count || 0), 0)}`;
+  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish / ${ingredients.bass || 0} bass / ${ingredients.crappie || 0} crappie · carrots ${ingredients.carrots || 0} · mushrooms ${(ingredients.mushrooms || 0) + (ingredients.morels || 0) + (ingredients.treeMushrooms || 0)} · rice ${ingredients.wildRice || 0} · scallions ${ingredients.scallions || 0} · berries ${ingredients.berries || 0} · duck eggs ${ingredients.duckEggs || 0} · honey ${save.honey || 0} · flowers ${ingredients.flowers || 0} · cooked ${Object.values(cooked).reduce((sum, count) => sum + (count || 0), 0)}`;
   toast(`Fridge inventory — ${inventory}`, 'success');
   setStatus(inventory);
 }
@@ -4525,6 +4718,10 @@ function sleepAtCabin() {
 }
 
 function handleInteract() {
+  if (lakeBoatPilot?.active) {
+    exitLakeBoat();
+    return;
+  }
   const target = getInteractionTarget();
   if (target?.type === 'car') {
     openTravel();
@@ -4540,6 +4737,10 @@ function handleInteract() {
   }
   if (target?.type === 'captain') {
     talkToCaptainMark();
+    return;
+  }
+  if (target?.type === 'lake-boat') {
+    enterLakeBoat(target);
     return;
   }
   if (target?.type === 'closed-door') {
@@ -4639,6 +4840,10 @@ function handlePrimaryUp() {
 }
 
 function handleActionDown() {
+  if (lakeBoatPilot?.active) {
+    exitLakeBoat();
+    return;
+  }
   if (fishing.phase === 'reeling') {
     actionHeld = true;
     fishing.reelHeld = true;
@@ -4771,7 +4976,9 @@ window.addEventListener('keydown', (event) => {
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd', 'Space', ' '].includes(event.code) || ['w', 'a', 's', 'd', ' '].includes(normalizedKey)) {
     event.preventDefault();
   }
-  if (event.code === 'Space' && !event.repeat && !modalOpen && !qteState && grounded) {
+  if (lakeBoatPilot?.active && !event.repeat && event.code === 'KeyW') cycleLakeBoatSpeed(1);
+  if (lakeBoatPilot?.active && !event.repeat && event.code === 'KeyS') cycleLakeBoatSpeed(-1);
+  if (event.code === 'Space' && !event.repeat && !modalOpen && !qteState && grounded && !lakeBoatPilot?.active) {
     jumpVelocity = JUMP_VELOCITY;
     grounded = false;
     setStatus('Jumping. Keep moving to clear rocks, roots, and shop displays.');
