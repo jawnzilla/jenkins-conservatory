@@ -70,7 +70,9 @@ const JENKINS_LAKE_WATER = {
   castRadiusZ: 31.2
 };
 
-const JENKINS_LAKE_BOAT_SPAWN = { x: 7.5, z: -149 };
+// Keep the boat just beyond the main dock so it is reachable on foot, with its
+// forward axis aimed down the open-water channel.
+const JENKINS_LAKE_BOAT_SPAWN = { x: 0, z: -136 };
 
 const JENKINS_LAKE_GRASS_COMPOUNDS = [
   { centerX: -34, centerZ: -96, width: 24, depth: 38, label: 'WEST CABIN LAWN' },
@@ -1081,18 +1083,20 @@ function getLakeBoatHeading(x, z) {
 
 function isLakeBoatInSafeWater(x, z) {
   const water = JENKINS_LAKE_WATER;
-  const radiusX = water.radiusX - 3.4;
-  const radiusZ = water.radiusZ - 3.4;
+  const radiusX = water.radiusX - 2;
+  const radiusZ = water.radiusZ - 2;
   const dx = (x - water.centerX) / radiusX;
   const dz = (z - water.centerZ) / radiusZ;
   return dx * dx + dz * dz < 1;
 }
 
-function getNearestLakeDock(x, z) {
-  return JENKINS_LAKE_DOCKS.reduce((nearest, dock) => {
-    const distance = Math.hypot(x - dock.x, z - dock.shoreZ);
-    return !nearest || distance < nearest.distance ? { dock, distance } : nearest;
-  }, null)?.dock || JENKINS_LAKE_DOCKS[1];
+function canStandInLakeWater(x, z) {
+  const water = JENKINS_LAKE_WATER;
+  const radiusX = water.playerRadiusX - ((save.supplies.waders || 0) > 0 ? 2.7 : 1.35);
+  const radiusZ = water.playerRadiusZ - ((save.supplies.waders || 0) > 0 ? 2.7 : 1.35);
+  const dx = (x - water.centerX) / radiusX;
+  const dz = (z - water.centerZ) / radiusZ;
+  return dx * dx + dz * dz >= 1;
 }
 
 function cycleLakeBoatSpeed(direction) {
@@ -1117,7 +1121,7 @@ function respawnLakeBoat(message = 'The boat grounded out. It has returned to th
   const spawn = JENKINS_LAKE_BOAT_SPAWN;
   const heading = getLakeBoatHeading(spawn.x, spawn.z);
   boat.position.set(spawn.x, 0.33, spawn.z);
-  boat.rotation.y = heading + Math.PI / 4;
+  boat.rotation.y = heading;
   lakeBoat.position.set(spawn.x, 1.0, spawn.z);
   lakeBoat.heading = heading;
   lakeBoatPilot = null;
@@ -1137,7 +1141,7 @@ function enterLakeBoat(entry) {
   if (currentZone !== 'lake' || !entry?.group || lakeBoatPilot?.active) return;
   const heading = entry.heading ?? getLakeBoatHeading(entry.group.position.x, entry.group.position.z);
   lakeBoatPilot = { active: true, entry, heading, speedIndex: 1, speed: 0 };
-  entry.group.rotation.y = heading + Math.PI / 4;
+  entry.group.rotation.y = heading;
   player.set(entry.group.position.x, 1.72, entry.group.position.z);
   yaw = heading;
   pitch = -0.08;
@@ -1151,9 +1155,14 @@ function enterLakeBoat(entry) {
 function exitLakeBoat() {
   if (!lakeBoatPilot?.active) return;
   const boat = lakeBoatPilot.entry.group;
-  const dock = getNearestLakeDock(boat.position.x, boat.position.z);
+  if (!canStandInLakeWater(boat.position.x, boat.position.z)) {
+    respawnLakeBoat('The water is too deep to stand in. The boat and player returned to the main dock.');
+    return;
+  }
+  const exitX = boat.position.x;
+  const exitZ = boat.position.z;
   lakeBoatPilot = null;
-  player.set(dock.x, 1.72, dock.shoreZ + 1.7);
+  player.set(exitX, 1.72, exitZ);
   jumpOffset = 0;
   grounded = true;
   yaw = 0;
@@ -1161,7 +1170,7 @@ function exitLakeBoat() {
   camera.position.set(player.x, player.y, player.z);
   updateCameraRotation();
   updateHeldTool();
-  setStatus('You stepped back onto the dock. Press E by the boat to pilot it again.');
+  setStatus('You stepped out in the shallows. Press E by the boat to pilot it again.');
 }
 
 function updateLakeBoatMovement(delta) {
@@ -1178,7 +1187,7 @@ function updateLakeBoatMovement(delta) {
   }
   boat.position.x = nextX;
   boat.position.z = nextZ;
-  boat.rotation.y = lakeBoatPilot.heading + Math.PI / 4;
+  boat.rotation.y = lakeBoatPilot.heading;
   lakeBoatPilot.entry.position.set(nextX, 1.0, nextZ);
   lakeBoatPilot.entry.heading = lakeBoatPilot.heading;
   player.set(nextX, 1.72, nextZ);
