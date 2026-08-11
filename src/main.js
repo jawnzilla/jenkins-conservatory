@@ -2613,7 +2613,6 @@ function updateJenkinsLakeArrival(delta) {
     interactables.push({ type: 'car', label: 'Drive back from Jenkins Lake', position: new THREE.Vector3(0, 1.1, -63.5), radius: 3.4 });
     setStatus('The car is parked in the clearing. Captain Mark is ahead by the lake path.');
     toast('You arrived at Jenkins Lake.', 'success');
-    restoreFieldMode();
   }
   return true;
 }
@@ -3071,7 +3070,9 @@ function enterZone(zoneKey, announce = false) {
   save.lastZone = zoneKey;
   saveGame();
   updateHUD();
-  if (zoneKey === 'lake') restoreFieldMode();
+  // A fresh page load cannot request pointer lock without a trusted gesture.
+  // Travel buttons are trusted gestures, so only that path restores field mode here.
+  if (zoneKey === 'lake' && announce) restoreFieldMode();
   if (announce) toast(`Arrived at ${ZONES[zoneKey].label.toLowerCase()}.`, 'success');
 }
 
