@@ -313,9 +313,26 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 160);
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 260);
 camera.rotation.order = 'YXZ';
 let skybox = null;
+let skyCloudLayer = null;
+let skyCloudMaterial = null;
+const SKY_CYCLE_SECONDS = 8 * 60;
+const SKY_PHASE_OFFSET = 0.06;
+const SKY_STOPS = [
+  { at: 0.00, top: 0x071326, horizon: 0x23324d, lower: 0x0c1b27, daylight: 0.08 },
+  { at: 0.10, top: 0x53658e, horizon: 0xe6a17f, lower: 0x6c5e58, daylight: 0.34 },
+  { at: 0.23, top: 0x74abc5, horizon: 0xf1dbb1, lower: 0x89a76d, daylight: 0.92 },
+  { at: 0.50, top: 0x4e98bf, horizon: 0xd1ebe0, lower: 0x7c9c69, daylight: 1 },
+  { at: 0.68, top: 0x414d75, horizon: 0xe2986d, lower: 0x625149, daylight: 0.55 },
+  { at: 0.82, top: 0x0b1530, horizon: 0x303951, lower: 0x111c2b, daylight: 0.08 }
+];
+const skyUniforms = {
+  topColor: { value: new THREE.Color(0x53658e) },
+  horizonColor: { value: new THREE.Color(0xe6a17f) },
+  lowerColor: { value: new THREE.Color(0x6c5e58) }
+};
 const heldToolGroup = new THREE.Group();
 heldToolGroup.name = 'held-tool';
 heldToolGroup.frustumCulled = false;
@@ -749,10 +766,119 @@ function updateLooseNet(netCloth, time, swing) {
 }
 
 function createSkybox() {
-  const skyMaterial = new THREE.MeshBasicMaterial({ color: 0xb2c6b8, side: THREE.BackSide, fog: false, depthWrite: false });
-  skybox = new THREE.Mesh(new THREE.BoxGeometry(560, 560, 560), skyMaterial);
+  const skyMaterial = new THREE.ShaderMaterial({
+    uniforms: skyUniforms,
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 topColor;
+      uniform vec3 horizonColor;
+      uniform vec3 lowerColor;
+      varying vec3 vWorldPosition;
+      void main() {
+        float elevation = normalize(vWorldPosition - cameraPosition).y;
+        float horizonBlend = smoothstep(-0.7, 0.18, elevation);
+        vec3 lowerHorizon = mix(lowerColor, horizonColor, horizonBlend);
+        vec3 skyColor = mix(lowerHorizon, topColor, smoothstep(0.06, 0.9, elevation));
+        gl_FragColor = vec4(skyColor, 1.0);
+      }
+    `,
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false
+  });
+  skybox = new THREE.Mesh(new THREE.SphereGeometry(180, 48, 24), skyMaterial);
   skybox.renderOrder = -10;
   scene.add(skybox);
+  createLowClouds();
+}
+
+function createLowClouds() {
+  skyCloudLayer = new THREE.Group();
+  skyCloudLayer.name = 'low-cloud-layer';
+  skyCloudMaterial = new THREE.MeshBasicMaterial({ color: 0xf2eee3, transparent: true, opacity: 0.58, depthWrite: false, fog: false });
+  const cloudLayouts = [
+    [-72, 9.5, -36, 1.15, 0.18, 0.018],
+    [-28, 12.5, -122, 1.55, 1.4, 0.012],
+    [18, 10.4, -62, 1.05, 2.7, 0.016],
+    [66, 13.2, -154, 1.35, 3.8, 0.01],
+    [84, 9.2, -12, 0.9, 5.2, 0.02],
+    [-82, 14.2, -188, 1.25, 4.4, 0.014]
+  ];
+  cloudLayouts.forEach(([x, y, z, scale, phase, speed]) => {
+    const cloud = new THREE.Group();
+    cloud.position.set(x, y, z);
+    cloud.scale.setScalar(scale);
+    cloud.userData.cloudMotion = { baseX: x, baseZ: z, phase, speed };
+    [[-1.2, 0, 0.05, 1.05], [0, 0.18, 0, 1.35], [1.3, 0.02, 0.08, 0.9], [2.25, -0.06, 0.02, 0.65]].forEach(([px, py, pz, puffScale]) => {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(1.15 * puffScale, 12, 8), skyCloudMaterial);
+      puff.position.set(px, py, pz);
+      puff.scale.set(1.35, 0.38, 0.78);
+      cloud.add(puff);
+    });
+    skyCloudLayer.add(cloud);
+  });
+  scene.add(skyCloudLayer);
+}
+
+function getSkyCycleSample() {
+  const phase = (elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1;
+  let before = SKY_STOPS[SKY_STOPS.length - 1];
+  let after = SKY_STOPS[0];
+  let span = 1 - before.at;
+  let distance = phase - before.at;
+  for (let index = 0; index < SKY_STOPS.length - 1; index += 1) {
+    if (phase >= SKY_STOPS[index].at && phase < SKY_STOPS[index + 1].at) {
+      before = SKY_STOPS[index];
+      after = SKY_STOPS[index + 1];
+      span = after.at - before.at;
+      distance = phase - before.at;
+      break;
+    }
+  }
+  if (phase < SKY_STOPS[0].at) {
+    before = SKY_STOPS[SKY_STOPS.length - 1];
+    after = SKY_STOPS[0];
+    span = 1 - before.at + after.at;
+    distance = phase + 1 - before.at;
+  }
+  return { before, after, blend: clamp(distance / span, 0, 1) };
+}
+
+function updateSkyCycle() {
+  if (!skybox) return;
+  const { before, after, blend } = getSkyCycleSample();
+  const topColor = new THREE.Color(before.top).lerp(new THREE.Color(after.top), blend);
+  const horizonColor = new THREE.Color(before.horizon).lerp(new THREE.Color(after.horizon), blend);
+  const lowerColor = new THREE.Color(before.lower).lerp(new THREE.Color(after.lower), blend);
+  skyUniforms.topColor.value.copy(topColor);
+  skyUniforms.horizonColor.value.copy(horizonColor);
+  skyUniforms.lowerColor.value.copy(lowerColor);
+  const daylight = THREE.MathUtils.lerp(before.daylight, after.daylight, blend);
+  skybox.position.set(camera.position.x, camera.position.y, camera.position.z);
+  if (skyCloudLayer) {
+    skyCloudLayer.position.set(camera.position.x, 0, camera.position.z);
+    for (const cloud of skyCloudLayer.children) {
+      const motion = cloud.userData.cloudMotion;
+      const drift = (elapsed * motion.speed + motion.phase) % 240;
+      cloud.position.x = ((motion.baseX + drift + 120) % 240) - 120;
+      cloud.position.z = motion.baseZ + Math.sin(elapsed * 0.006 + motion.phase) * 2.2;
+    }
+  }
+  if (skyCloudMaterial) {
+    skyCloudMaterial.color.copy(new THREE.Color(0x777d93).lerp(new THREE.Color(0xf4f0e2), daylight));
+    skyCloudMaterial.opacity = 0.16 + daylight * 0.46;
+  }
+  sunLight.intensity = (currentZone === 'forest' ? 3.45 : 3.05) * (0.18 + daylight * 0.82);
+  sunLight.color.copy(new THREE.Color(0xb4bce0).lerp(new THREE.Color(0xffedc3), daylight));
+  hemiLight.intensity = 0.62 + daylight * 1.58;
 }
 
 function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
@@ -812,8 +938,7 @@ function updateHeldTool() {
 
 function setZonePalette(zoneKey) {
   const zone = ZONES[zoneKey];
-  scene.background = new THREE.Color(zone.background);
-  if (skybox) skybox.material.color.set(zoneKey === 'forest' ? 0x9ab9c3 : zoneKey === 'zoo' ? 0xb2c6b8 : zoneKey === 'lake' ? 0xa4b7b0 : 0xb8bd9d);
+  scene.background = new THREE.Color(0x0b1721);
   scene.fog = new THREE.Fog(zone.fog, zone.fogNear || 34, zone.fogFar || 100);
   hemiLight.color.set(zoneKey === 'forest' ? 0xd6efcb : 0xe9efcf);
   hemiLight.groundColor.set(zoneKey === 'zoo' ? 0x2f4034 : 0x20352a);
@@ -4937,6 +5062,7 @@ function animate() {
   elapsed += delta;
   updateCameraRotation();
   updateMovement(delta);
+  updateSkyCycle();
   updateHeldTool();
   updateFishing(delta);
   updateCastPreview();
