@@ -48,9 +48,9 @@ const ZONES = {
     fog: 0x8da19a,
     ground: 0x506b54,
     accent: 0x8be0c3,
-    fogNear: 27,
-    fogFar: 94,
-    bounds: { minX: -44, maxX: 44, minZ: -178, maxZ: 34 }
+    fogNear: 32,
+    fogFar: 148,
+    bounds: { minX: -74, maxX: 74, minZ: -198, maxZ: 34 }
   }
 };
 
@@ -61,14 +61,26 @@ const JENKINS_LAKE_ROAD = [
 
 const JENKINS_LAKE_WATER = {
   centerX: 0,
-  centerZ: -146,
-  radiusX: 39,
-  radiusZ: 27,
-  playerRadiusX: 37.2,
-  playerRadiusZ: 25.2,
-  castRadiusX: 36.2,
-  castRadiusZ: 24.2
+  centerZ: -153,
+  radiusX: 61,
+  radiusZ: 34,
+  playerRadiusX: 59.2,
+  playerRadiusZ: 32.2,
+  castRadiusX: 58.2,
+  castRadiusZ: 31.2
 };
+
+const JENKINS_LAKE_GRASS_COMPOUNDS = [
+  { centerX: -34, centerZ: -96, width: 24, depth: 38, label: 'WEST CABIN LAWN' },
+  { centerX: 0, centerZ: -99, width: 28, depth: 40, label: 'LAKE MEADOW' },
+  { centerX: 35, centerZ: -98, width: 29, depth: 44, label: 'EAST MEADOW' }
+];
+
+const JENKINS_LAKE_DOCKS = [
+  { x: -33, shoreZ: -121.7, endZ: -134.5, width: 3.2 },
+  { x: 0, shoreZ: -120.7, endZ: -133.8, width: 3.4 },
+  { x: 29, shoreZ: -123.2, endZ: -136.2, width: 3.2 }
+];
 
 const FOREST_WATER = {
   centerX: 0,
@@ -885,6 +897,93 @@ function createLakeShack(x, z) {
   addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
   addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
   return group;
+}
+
+function createLakeGarage(x, z, label = 'GARAGE · CLOSED') {
+  const width = 8.5;
+  const depth = 7.2;
+  const height = 3.2;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  box(group, [width, 0.16, depth], 0x624735, [0, 0.08, 0]);
+  box(group, [0.22, height, depth], 0x7f5b43, [-width / 2, height / 2, 0]);
+  box(group, [0.22, height, depth], 0x7f5b43, [width / 2, height / 2, 0]);
+  box(group, [width, height, 0.22], 0x7f5b43, [0, height / 2, -depth / 2]);
+  box(group, [width, height, 0.22], 0x7f5b43, [0, height / 2, depth / 2]);
+  box(group, [width + 0.35, 0.28, depth + 0.35], 0x465849, [0, height + 0.16, 0], { rotation: [0.02, 0, -0.035] });
+  addClosedDoor(group, 0, 1.62, depth / 2 + 0.08, 5.2, 2.65, 0x4b3d32);
+  const sign = makeLabel(label, '#d8ef85', '#30442f', 0.38);
+  sign.position.set(0, height + 0.58, depth / 2 + 0.1);
+  group.add(sign);
+  world.add(group);
+  addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: 'lake' });
+  addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: 'lake' });
+  addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
+  addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: 'lake' });
+  interactables.push({ type: 'closed-door', label: 'The garage door is locked', position: new THREE.Vector3(x, 1.5, z + depth / 2 + 0.25), radius: 2.4 });
+  return group;
+}
+
+function createLakeGrassCompound(compound) {
+  const { centerX, centerZ, width, depth, label } = compound;
+  const meadow = addMesh(world, new THREE.PlaneGeometry(width, depth), mat(0x718f5a, { roughness: 1 }), [centerX, -0.045, centerZ], [-Math.PI / 2, 0, 0]);
+  meadow.receiveShadow = true;
+  const borderColor = 0x4b8d58;
+  box(world, [width, 0.08, 0.22], borderColor, [centerX, 0.015, centerZ - depth / 2]);
+  box(world, [width, 0.08, 0.22], borderColor, [centerX, 0.015, centerZ + depth / 2]);
+  box(world, [0.22, 0.08, depth], borderColor, [centerX - width / 2, 0.015, centerZ]);
+  box(world, [0.22, 0.08, depth], borderColor, [centerX + width / 2, 0.015, centerZ]);
+  if (label) {
+    const sign = makeLabel(label, '#d8ef85', '#30442f', label === 'LAKE MEADOW' ? 0.52 : 0.38);
+    sign.position.set(centerX, 1.55, centerZ - depth / 2 + 2.1);
+    world.add(sign);
+  }
+  return meadow;
+}
+
+function createLakeDock(dock, index = 0) {
+  const group = new THREE.Group();
+  const length = dock.shoreZ - dock.endZ;
+  const centerZ = (dock.shoreZ + dock.endZ) / 2;
+  box(group, [dock.width, 0.28, length], 0xc9ceca, [0, 0.31, centerZ - dock.shoreZ]);
+  box(group, [dock.width + 0.18, 0.1, length + 0.16], 0x7f8984, [0, 0.48, centerZ - dock.shoreZ]);
+  for (let z = dock.shoreZ - 0.35; z > dock.endZ; z -= 0.72) {
+    box(group, [dock.width - 0.22, 0.055, 0.12], 0xf0f1e8, [0, 0.5, z - dock.shoreZ]);
+  }
+  for (const x of [-dock.width / 2 + 0.18, dock.width / 2 - 0.18]) {
+    for (const z of [dock.shoreZ + 0.05, dock.endZ - 0.05]) {
+      cylinder(group, 0.11, 0.14, 1.2, 0x69756f, [x, 0.38, z - dock.shoreZ], { segments: 7 });
+    }
+  }
+  group.position.set(dock.x, 0, dock.shoreZ);
+  world.add(group);
+  const label = makeLabel(index === 1 ? 'MAIN DOCK' : 'DOCK', '#d8ef85', '#30442f', 0.34);
+  label.position.set(dock.x, 1.35, dock.shoreZ - 0.7);
+  world.add(label);
+  return group;
+}
+
+function createLakeLilyPad(x, z, scale = 1, index = 0) {
+  const pad = new THREE.Group();
+  pad.position.set(x, 0.19, z);
+  sphere(pad, 0.42, index % 2 ? 0x168e68 : 0x1b9a70, [0, 0, 0], { scale: [scale * 1.2, 0.08, scale], widthSegments: 10, heightSegments: 5 });
+  const flower = index % 3 === 0 ? sphere(pad, 0.075, 0xf4e7ab, [0.08 * scale, 0.075, -0.04 * scale], { scale: [1.25, 0.55, 1.25] }) : null;
+  pad.rotation.y = index * 0.8;
+  world.add(pad);
+  return { pad, flower };
+}
+
+function createLakeBoat(x, z) {
+  const boat = new THREE.Group();
+  boat.position.set(x, 0.33, z);
+  addMesh(boat, new THREE.CylinderGeometry(0.92, 0.74, 0.18, 4), mat(0xd2d5d0, { metalness: 0.25, roughness: 0.55 }), [0, 0, 0], [0, Math.PI / 4, 0]);
+  box(boat, [0.12, 0.18, 1.15], 0x707a75, [0, 0.13, 0]);
+  box(boat, [0.82, 0.08, 0.1], 0x8b938d, [0, 0.24, 0]);
+  const label = makeLabel('BOAT', '#d8ef85', '#30442f', 0.3);
+  label.position.set(0, 1.0, 0);
+  boat.add(label);
+  world.add(boat);
+  return boat;
 }
 
 function createLakeCaptain(x, z) {
@@ -2260,13 +2359,21 @@ function isJenkinsLakeClearPosition(x, z, allowMeadow = false) {
   const waterDistance = ((x - water.centerX) / (water.radiusX + 1.5)) ** 2 + ((z - water.centerZ) / (water.radiusZ + 1.5)) ** 2;
   const onRoad = Math.abs(x) < 3.5 && z > -67 && z < 31;
   const inMeadow = Math.abs(x) < 15.2 && z > -120 && z < -78;
+  const rightOfShackBarrier = x > 25.5 && z > -44 && z < -18;
   const buildings = [
     [-18, -28, 18, 12],
     [17, -31, 12, 10],
-    [-9.5, -72, 14, 14]
+    [-9.5, -72, 14, 14],
+    [-34, -96, 14, 12],
+    [-25, -108, 8.5, 7.2],
+    [35, -92, 14, 12],
+    [29, -108, 8.5, 7.2],
+    [45, -105, 9, 8]
   ];
   const inBuilding = buildings.some(([centerX, centerZ, width, depth]) => Math.abs(x - centerX) < width / 2 + 1.1 && Math.abs(z - centerZ) < depth / 2 + 1.1);
-  return x > -41 && x < 41 && z > -131 && z < 31 && waterDistance >= 1 && !onRoad && !inBuilding && (!inMeadow || allowMeadow);
+  const bounds = ZONES.lake.bounds;
+  return x > bounds.minX + 2.5 && x < bounds.maxX - 2.5 && z > bounds.minZ + 2.5 && z < bounds.maxZ - 2.5
+    && waterDistance >= 1 && !onRoad && !inBuilding && !rightOfShackBarrier && (!inMeadow || allowMeadow);
 }
 
 function createJenkinsLakeForest() {
@@ -2280,51 +2387,66 @@ function createJenkinsLakeForest() {
   };
 
   // Dense staggered forest walls leave a clear road corridor and occasional pockets of grass.
-  for (let row = 0, z = 27; z > -174; row += 1, z -= 6.5) {
+  for (let row = 0, z = 27; z > -194; row += 1, z -= 6.5) {
     for (const side of [-1, 1]) {
-      for (let layer = 0; layer < 6; layer += 1) {
+      for (let layer = 0; layer < 8; layer += 1) {
         const x = side * (4.05 + layer * 6.5 + ((row + layer) % 2) * 0.55);
         addForestTree(x, z + ((layer % 2) * 1.4), 0.78 + ((row + layer) % 4) * 0.1, row * 6 + layer);
       }
     }
   }
-  for (let row = 0, z = 22; z > -58; row += 1, z -= 8.2) {
-    for (let column = 0, x = -37; x <= 37; column += 1, x += 7.6) {
+  for (let row = 0, z = 22; z > -68; row += 1, z -= 8.2) {
+    for (let column = 0, x = -67; x <= 67; column += 1, x += 7.6) {
       if (Math.abs(x) < 8 || (row + column) % 3 === 1) continue;
       addForestTree(x + ((row % 2) * 1.2), z, 0.72 + ((row + column) % 5) * 0.08, row * 11 + column);
     }
   }
-  for (let row = 0, z = -122; z > -174; row += 1, z -= 7.2) {
+  for (let row = 0, z = -118; z > -194; row += 1, z -= 7.2) {
     for (const side of [-1, 1]) {
-      for (let layer = 0; layer < 2; layer += 1) {
+      for (let layer = 0; layer < 3; layer += 1) {
         addForestTree(side * (22 + layer * 7.5 + (row % 2) * 1.1), z, 0.82 + ((row + layer) % 3) * 0.11, row * 5 + layer + 90);
       }
     }
   }
+  for (let row = 0, z = 24; z > -194; row += 1, z -= 7.1) {
+    for (const side of [-1, 1]) {
+      addForestTree(side * (61.5 + (row % 2) * 1.2), z, 0.88 + (row % 3) * 0.08, 150 + row * 2 + (side > 0 ? 1 : 0));
+    }
+  }
 
-  for (let row = 0, z = 24; z > -174; row += 1, z -= 5.2) {
-    for (let column = 0, x = -38; x <= 38; column += 1, x += 6.3) {
+  for (let row = 0, z = 24; z > -194; row += 1, z -= 5.2) {
+    for (let column = 0, x = -68; x <= 68; column += 1, x += 6.3) {
       if ((row + column) % 2 !== 0 || !isJenkinsLakeClearPosition(x, z)) continue;
       createGroundFoliage(x, z, 0.68 + ((row + column) % 4) * 0.13, (row + column) % 2 ? 0x4e8054 : 0x5a8958);
     }
   }
-  for (let index = 0; index < 28; index += 1) {
-    const x = -35 + (index * 17) % 70;
-    const z = 20 - ((index * 23) % 188);
+  for (let index = 0; index < 56; index += 1) {
+    const x = -68 + (index * 17) % 136;
+    const z = 22 - ((index * 23) % 214);
     if (isJenkinsLakeClearPosition(x, z)) {
       if (index % 2) addRock(x, 0.2, z, 0.24 + (index % 3) * 0.08, index % 3 ? 0x718474 : 0x667b6e);
       else createNatureStick(x, z, index);
     }
   }
 
-  const hiveSpots = [[-31, 18], [30, 8], [-32, -14], [31, -24], [-30, -45], [29, -53], [-25, -83], [25, -87]];
+  const hiveSpots = [[-31, 18], [30, 8], [-32, -14], [23.8, -24], [-30, -45], [29, -53], [-25, -83], [25, -87], [-57, -174], [56, -179]];
   hiveSpots.forEach(([x, z], index) => {
     const tree = addForestTree(x, z, 0.96 + (index % 3) * 0.1, 200 + index);
     if (tree) createBeehiveOnTree(tree, x, z, `lake-wild-hive-${index}`, true, 2.8 + (index % 2) * 0.35);
   });
-  [[-29, 10, 3.2], [28, -4, 3.4], [-31, -34, 3.1], [30, -47, 3.5], [-23, -81, 3.1], [24, -90, 3.3]].forEach(([x, z, y]) => {
+  [[-29, 10, 3.2], [28, -4, 3.4], [-31, -34, 3.1], [30, -47, 3.5], [-23, -81, 3.1], [24, -90, 3.3], [-55, -171, 3.1], [54, -182, 3.3]].forEach(([x, z, y]) => {
     if (isJenkinsLakeClearPosition(x, z)) createSpiderWeb(x, z, y, 'lake');
   });
+
+  // The field shack sits against a short local mountain wall. A couple trees remain visible,
+  // but the player cannot thread through the forest behind it.
+  [[23.8, -23], [24.2, -38]].forEach(([x, z], index) => createBranchTree(x, z, 0.82 + index * 0.08, 0x3f6d4b, 0x604733));
+  for (let index = 0; index < 6; index += 1) {
+    const z = -44 + index * 5.2;
+    const mountain = addMesh(world, new THREE.DodecahedronGeometry(1.28 + (index % 2) * 0.18, 1), mat(index % 2 ? 0x4a5b4d : 0x596c5a), [27.5, 1.55 + (index % 3) * 0.25, z], [0.1, index * 0.4, 0.08], [1.2, 1.35, 1.05]);
+    mountain.userData.edgeMountain = true;
+  }
+  addCollider(27.5, -28.5, 0.65, { type: 'rect', halfWidth: 0.65, halfDepth: 15.8, zone: 'lake' });
 }
 
 function createJenkinsLakeWater() {
@@ -2338,27 +2460,75 @@ function createJenkinsLakeWater() {
   const lakeLabel = makeLabel('JENKINS LAKE', '#8be0c3', '#183d3c', 0.88);
   lakeLabel.position.set(0, 2.4, centerZ);
   world.add(lakeLabel);
-  [[-25, -115], [23, -116], [-32, -132], [31, -134], [-20, -156], [20, -157]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
-  [[-14, -124], [14, -125], [-18, -141], [19, -146], [-10, -159], [11, -160]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
+  [[-54, -130], [-39, -119], [-18, -121], [18, -121], [41, -127], [56, -144], [-48, -173], [-16, -184], [20, -185], [49, -173]].forEach(([x, z], index) => addRock(x, 0.24, z, 0.3 + (index % 2) * 0.12, 0x667b6e));
+  [[-45, -135], [-28, -126], [-10, -139], [12, -128], [31, -143], [45, -157], [-34, -164], [-7, -174], [22, -169], [49, -151]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
+  [[-47, -142, 0.9], [-40, -153, 0.72], [-12, -149, 0.82], [7, -158, 0.7], [29, -132, 0.86], [37, -165, 0.75], [53, -157, 0.64], [-24, -177, 0.9]].forEach(([x, z, scale], index) => createLakeLilyPad(x, z, scale, index));
+  JENKINS_LAKE_DOCKS.forEach((dock, index) => createLakeDock(dock, index));
+  createLakeBoat(29.2, -136.5);
+}
+
+function isLakeGrassCompoundPosition(x, z, padding = 0) {
+  return JENKINS_LAKE_GRASS_COMPOUNDS.some(({ centerX, centerZ, width, depth }) => (
+    Math.abs(x - centerX) <= width / 2 - padding && Math.abs(z - centerZ) <= depth / 2 - padding
+  ));
 }
 
 function createJenkinsLakeMeadow() {
-  const meadow = addMesh(world, new THREE.PlaneGeometry(28, 40), mat(0x708f5c, { roughness: 1 }), [0, -0.04, -99], [-Math.PI / 2, 0, 0]);
-  meadow.receiveShadow = true;
-  const meadowLabel = makeLabel('LAKE MEADOW', '#d8ef85', '#30442f', 0.55);
-  meadowLabel.position.set(0, 1.65, -95.5);
-  world.add(meadowLabel);
+  JENKINS_LAKE_GRASS_COMPOUNDS.forEach((compound) => createLakeGrassCompound(compound));
   const meadowTrees = [
-    [-14, -81], [14, -81], [-14.5, -89], [14.5, -89], [-14, -98], [14, -98],
-    [-14.5, -107], [14.5, -107], [-14, -116], [14, -116],
-    [-10, -118.5], [-5, -119], [5, -119], [10, -118.5]
+    [-47, -79], [-21, -79], [-47, -91], [-21, -111],
+    [-14, -81], [14, -81], [-14.5, -89], [14.5, -89], [-14, -108], [14, -108],
+    [21, -79], [49, -79], [21, -111], [49, -111],
+    [-45, -115], [-37, -118], [-29, -117], [25, -117], [35, -119], [45, -116]
   ];
   meadowTrees.forEach(([x, z], index) => (index % 3 === 0 ? createBranchTree : createTree)(x, z, 0.86 + (index % 3) * 0.08, index % 2 ? 0x3f6d4b : 0x4b7950));
+
+  const meadowFoliage = [
+    [-41, -86], [-35, -82], [-28, -89], [-43, -101], [-33, -103], [-26, -97],
+    [-8, -86], [-3, -91], [4, -87], [9, -103], [-7, -110], [7, -113],
+    [25, -85], [32, -82], [42, -87], [23, -100], [31, -105], [41, -101], [46, -109]
+  ];
+  meadowFoliage.forEach(([x, z], index) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.1)) createGroundFoliage(x, z, 0.66 + (index % 3) * 0.15, index % 2 ? 0x548454 : 0x68945a);
+  });
+
+  const meadowRocks = [[-42, -94, 0.24], [-28, -106, 0.3], [-5, -101, 0.22], [8, -94, 0.26], [26, -93, 0.25], [44, -96, 0.3]];
+  meadowRocks.forEach(([x, z, scale], index) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.2)) addRock(x, 0.18, z, scale, index % 2 ? 0x718474 : 0x667b6e);
+  });
+
+  const meadowSticks = [[-38, -87], [-29, -100], [-4, -106], [10, -86], [28, -108], [43, -89]];
+  meadowSticks.forEach(([x, z], index) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.1)) createNatureStick(x, z, 40 + index);
+  });
+
+  [[-39, -98, 0], [-30, -84, 1], [-5, -98, 2], [6, -107, 3], [28, -90, 4], [39, -103, 5], [45, -87, 6]].forEach(([x, z, index]) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.5)) createWildFlowerNode(x, z, [0xe889b0, 0xf1c84b, 0xb58ce0][index % 3], 100 + index);
+  });
+  [[-43, -106], [-22, -92], [2, -84], [10, -100], [24, -103], [42, -94]].forEach(([x, z], index) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.5)) createWildCarrot(x, z, 30 + index);
+  });
+  [[-35, -108], [-27, -87], [-11, -105], [4, -91], [34, -108], [45, -100]].forEach(([x, z], index) => {
+    if (isLakeGrassCompoundPosition(x, z, 1.5)) createGroundMushroom(x, z, 30 + index, false);
+  });
+  createGroundMushroom(-34, -101, 38, true);
+  [[-41, -92], [11, -89], [37, -90]].forEach(([x, z], index) => createWildScallion(x, z, 30 + index));
+  [[-26, -101], [3, -104], [43, -106]].forEach(([x, z], index) => createBerryBush(x, z, 30 + index));
+  [[-40, -116], [-33, -119], [-26, -116], [25, -119], [34, -121], [43, -117]].forEach(([x, z], index) => createWildRicePlant(x, z, 30 + index));
+
+  const meadowCritters = [
+    ['rabbit', [-39, 0.42, -88]], ['squirrel', [-28, 0.42, -104]], ['fox', [-41, 0.48, -107]],
+    ['rabbit', [-5, 0.42, -89]], ['squirrel', [8, 0.42, -105]], ['frog', [11, 0.42, -113]],
+    ['rabbit', [26, 0.42, -88]], ['squirrel', [42, 0.42, -103]], ['fox', [45, 0.48, -84]],
+    ['butterfly', [-30, 1.85, -96]], ['bee', [4, 2.5, -96]], ['butterfly', [34, 1.9, -99]],
+    ['dragonfly', [19, 2.2, -126]]
+  ];
+  meadowCritters.forEach(([species, position]) => spawnCritter(species, position));
 }
 
 function buildJenkinsLake() {
   setZonePalette('lake');
-  addGround(ZONES.lake.ground, 360);
+  addGround(ZONES.lake.ground, 440);
   createMountainBoundary('lake');
   createJenkinsLakeForest();
   createJenkinsLakeRoad();
@@ -2368,6 +2538,11 @@ function buildJenkinsLake() {
   createLakeBarn(-18, -28);
   createLakeShack(17, -31);
   createLakeCabin(-9.5, -72);
+  createLakeCabin(-34, -96);
+  createLakeGarage(-25, -108, 'WEST GARAGE · CLOSED');
+  createLakeCabin(35, -92);
+  createLakeGarage(29, -108, 'EAST GARAGE · CLOSED');
+  createLakeShack(45, -105);
   lakeParkedCar = createCar();
   lakeParkedCar.position.set(0, 0.25, -63.5);
   lakeParkedCar.visible = false;
@@ -2376,7 +2551,7 @@ function buildJenkinsLake() {
   const gateLabel = makeLabel('LAKE ACCESS · CAPTAIN MARK', '#f2b268', '#2f3d30', 0.42);
   gateLabel.position.set(3.6, 2.9, -79.8);
   world.add(gateLabel);
-  lakeGateCollider = addCollider(0, -116, 0.2, { type: 'rect', halfWidth: 36, halfDepth: 0.22, zone: 'lake' });
+  lakeGateCollider = addCollider(0, -117.2, 0.2, { type: 'rect', halfWidth: 58.5, halfDepth: 0.22, zone: 'lake' });
   setLakeGateAccess(Boolean(save.jenkinsLakePass && JENKINS_LAKE_PLACEHOLDER_ACCESS));
   lakeGateNotified = false;
   lakeCabinBoundaryNotified = false;
@@ -3636,7 +3811,13 @@ function constrainNatureWaterBoundary() {
   const water = getNatureWater();
   const offsetX = player.x - water.centerX;
   const offsetZ = player.z - water.centerZ;
-  const onDockCorridor = currentZone === 'forest' && Math.abs(offsetX) <= FOREST_DOCK.halfWidth && player.z <= FOREST_DOCK.shoreZ + 0.7;
+  const onForestDock = currentZone === 'forest' && Math.abs(offsetX) <= FOREST_DOCK.halfWidth && player.z <= FOREST_DOCK.shoreZ + 0.7;
+  const onLakeDock = currentZone === 'lake' && JENKINS_LAKE_DOCKS.some((dock) => (
+    Math.abs(player.x - dock.x) <= dock.width / 2 + 0.8
+      && player.z <= dock.shoreZ + 0.7
+      && player.z >= dock.endZ - 0.7
+  ));
+  const onDockCorridor = onForestDock || onLakeDock;
   if (onDockCorridor) return;
   const radiusX = (water.playerRadiusX || water.playerRadius || water.waterRadius) - ((save.supplies.waders || 0) > 0 ? 2.7 : 1.35);
   const radiusZ = (water.playerRadiusZ || water.playerRadius || water.waterRadius) - ((save.supplies.waders || 0) > 0 ? 2.7 : 1.35);
