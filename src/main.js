@@ -2683,7 +2683,7 @@ function createJenkinsLakeWater() {
   [[-52, -137], [-24, -128], [9, -137], [39, -132], [58, -151], [-47, -163], [-13, -174], [24, -169], [51, -171]].forEach(([x, z], index) => createHotspot(x, z, index % 2 ? 'sunfish' : 'trout', index % 2 ? 'feather' : 'spinner', index % 2 ? 'grubs' : 'worms'));
   // Bass hold tight to the thicker lily-pad patches and take worms. Crappies suspend
   // in the open middle of the lake and also take worms.
-  [[-61, -143], [-44, -161], [38, -140], [58, -161]].forEach(([x, z], index) => createHotspot(x, z, 'bass', 'spinner', 'worms'));
+  [[-67, -143], [-46, -161], [39, -140], [61, -164]].forEach(([x, z]) => createHotspot(x, z, 'bass', 'spinner', 'worms'));
   [[-9, -151], [8, -158], [2, -166]].forEach(([x, z]) => createHotspot(x, z, 'crappie', 'spinner', 'worms'));
   [[-67, -143, 1.05], [-56, -151, 0.82], [-46, -161, 1.18], [-34, -132, 0.9], [-19, -124, 0.74], [-7, -140, 0.94], [11, -128, 0.82], [26, -137, 1.14], [39, -140, 0.92], [52, -133, 0.8], [65, -148, 1.02], [61, -164, 0.88], [47, -172, 1.16], [31, -179, 0.78], [13, -183, 1.02], [-7, -178, 0.86], [-24, -181, 1.1], [-42, -174, 0.84], [-56, -166, 1.08], [-69, -157, 0.78]].forEach(([x, z, scale], index) => createLakeLilyPad(x, z, scale, index));
   JENKINS_LAKE_DOCKS.forEach((dock, index) => createLakeDock(dock, index));
