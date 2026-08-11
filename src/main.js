@@ -384,6 +384,8 @@ let carrotNodes = [];
 let ducks = [];
 let duckEggNodes = [];
 let colliders = [];
+let debugCollisionVisible = false;
+let debugCollisionGroup = null;
 let lakeArrival = null;
 let lakeCarInterior = null;
 let lakeParkedCar = null;
@@ -497,9 +499,54 @@ function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0
 }
 
 function addCollider(x, z, radius, options = {}) {
-  const collider = { x, z, radius, enabled: true, ...options };
+  const collider = { id: colliders.length, x, z, radius, enabled: true, ...options };
   colliders.push(collider);
   return collider;
+}
+
+function clearDebugCollisionVisuals() {
+  if (debugCollisionGroup) world.remove(debugCollisionGroup);
+  debugCollisionGroup = null;
+}
+
+function rebuildDebugCollisionVisuals() {
+  clearDebugCollisionVisuals();
+  if (!debugCollisionVisible) return;
+  debugCollisionGroup = new THREE.Group();
+  debugCollisionGroup.name = 'debug-collision-visuals';
+  debugCollisionGroup.renderOrder = 20;
+  world.add(debugCollisionGroup);
+
+  colliders.forEach((collider, index) => {
+    const isRect = collider.type === 'rect';
+    const width = isRect ? collider.halfWidth * 2 : collider.radius * 2;
+    const depth = isRect ? collider.halfDepth * 2 : collider.radius * 2;
+    const height = isRect ? 2.4 : 1.8;
+    const material = new THREE.MeshBasicMaterial({
+      color: collider.enabled === false ? 0x8b9290 : isRect ? 0xff4f62 : 0xffc34f,
+      wireframe: true,
+      transparent: true,
+      opacity: collider.enabled === false ? 0.2 : 0.88,
+      depthTest: false,
+      depthWrite: false
+    });
+    const geometry = isRect
+      ? new THREE.BoxGeometry(Math.max(0.08, width), height, Math.max(0.08, depth))
+      : new THREE.CylinderGeometry(Math.max(0.08, collider.radius), Math.max(0.08, collider.radius), height, 20);
+    const shape = new THREE.Mesh(geometry, material);
+    shape.position.set(collider.x, height / 2, collider.z);
+    shape.userData.colliderId = collider.id ?? index;
+    debugCollisionGroup.add(shape);
+
+    const kind = isRect ? 'RECT' : 'CIRCLE';
+    const dimensions = isRect ? `${collider.halfWidth.toFixed(1)}x${collider.halfDepth.toFixed(1)}` : `${collider.radius.toFixed(1)}r`;
+    const state = collider.enabled === false ? ' OFF' : '';
+    const label = makeLabel(`C${collider.id ?? index} ${kind} ${dimensions} @${collider.x.toFixed(0)},${collider.z.toFixed(0)}${state}`, collider.enabled === false ? '#c5cbc8' : isRect ? '#ff9aa3' : '#ffe08a', '#202a26', 0.24);
+    label.material.depthTest = false;
+    label.position.set(collider.x, height + 0.42, collider.z);
+    label.renderOrder = 21;
+    debugCollisionGroup.add(label);
+  });
 }
 
 function resolveWorldCollisions() {
@@ -3036,6 +3083,7 @@ function createAnimalModel(species, scale = 1) {
 }
 
 function resetWorld() {
+  clearDebugCollisionVisuals();
   while (world.children.length) {
     world.remove(world.children[0]);
   }
@@ -3094,6 +3142,7 @@ function enterZone(zoneKey, announce = false) {
     buildJenkinsLake();
     startJenkinsLakeArrival();
   }
+  if (debugCollisionVisible) rebuildDebugCollisionVisuals();
   camera.position.copy(player);
   updateCameraRotation();
   save.lastZone = zoneKey;
@@ -4708,6 +4757,17 @@ window.addEventListener('resize', () => {
 
 window.addEventListener('keydown', (event) => {
   const normalizedKey = rememberKey(event, true);
+  if (event.code === 'F3' && !event.repeat) {
+    event.preventDefault();
+    debugCollisionVisible = !debugCollisionVisible;
+    rebuildDebugCollisionVisuals();
+    const message = debugCollisionVisible
+      ? `Collision debug ON: ${colliders.length} colliders labeled. Red = rectangles, gold = circles. Press F3 to hide.`
+      : 'Collision debug OFF.';
+    toast(message, debugCollisionVisible ? 'success' : 'info');
+    setStatus(message);
+    return;
+  }
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'w', 'a', 's', 'd', 'Space', ' '].includes(event.code) || ['w', 'a', 's', 'd', ' '].includes(normalizedKey)) {
     event.preventDefault();
   }
