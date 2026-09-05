@@ -1373,12 +1373,82 @@ function updateLakeBoatMovement(delta) {
 function createLakeCaptain(x, z) {
   const captain = new THREE.Group();
   captain.position.set(x, 0, z);
-  sphere(captain, 0.3, 0xb98262, [0, 1.5, 0]);
-  cylinder(captain, 0.42, 0.5, 1.15, 0x455f69, [0, 0.82, 0], { segments: 8 });
-  box(captain, [0.62, 0.08, 0.44], 0xc29a62, [0, 1.82, 0]);
-  cylinder(captain, 0.16, 0.2, 0.16, 0x374a4c, [0, 1.97, 0], { segments: 8 });
-  cylinder(captain, 0.07, 0.07, 0.78, 0xb98262, [-0.5, 0.8, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
-  cylinder(captain, 0.07, 0.07, 0.78, 0xb98262, [0.5, 0.8, 0], { rotation: [0, 0, -Math.PI / 2], segments: 7 });
+  const navy = 0x293f58;
+  const trim = 0x426079;
+  const skin = 0xc99475;
+  const grey = 0xa9aaa1;
+  const cream = 0xeee4cd;
+  const brass = 0xcda65b;
+  // All joints meet endpoint-to-endpoint; the captain looks toward local +Z.
+  const limb = (from, to, radius, color, endRadius = radius) => {
+    const a = new THREE.Vector3(...from);
+    const b = new THREE.Vector3(...to);
+    const mesh = cylinder(captain, endRadius, radius, a.distanceTo(b), color, a.clone().add(b).multiplyScalar(0.5).toArray());
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
+    return mesh;
+  };
+  for (const side of [-1, 1]) {
+    const footX = side * 0.155;
+    // Broad soles sit on y=0; forward toes and boot shafts overlap the trousers.
+    box(captain, [0.235, 0.065, 0.39], 0x252c30, [footX, 0.0325, 0.065]);
+    sphere(captain, 0.14, 0x394047, [footX, 0.135, 0.085], { scale: [0.82, 0.66, 1.28] });
+    cylinder(captain, 0.089, 0.098, 0.24, 0x394047, [footX, 0.21, 0]);
+    limb([footX, 0.29, 0], [side * 0.13, 0.85, 0], 0.099, 0x56616a, 0.12);
+    box(captain, [0.025, 0.36, 0.013], 0x69737b, [footX, 0.53, 0.098]);
+  }
+  sphere(captain, 0.25, 0x56616a, [0, 0.8, 0], { scale: [1.05, 0.66, 0.75] });
+  cylinder(captain, 0.31, 0.265, 0.62, navy, [0, 1.09, 0], { scale: [1, 1, 0.68], segments: 10 });
+  box(captain, [0.37, 0.045, 0.025], trim, [0, 0.8, 0.186]);
+  cylinder(captain, 0.09, 0.105, 0.2, skin, [0, 1.44, 0]);
+  box(captain, [0.2, 0.3, 0.05], cream, [0, 1.285, 0.195]);
+  box(captain, [0.045, 0.18, 0.02], 0x607c88, [0, 1.26, 0.228]);
+  for (const side of [-1, 1]) {
+    box(captain, [0.105, 0.29, 0.055], trim, [side * 0.105, 1.275, 0.216], { rotation: [0, 0, side * -0.32] });
+    box(captain, [0.22, 0.045, 0.15], trim, [side * 0.285, 1.385, 0]);
+    box(captain, [0.12, 0.018, 0.115], brass, [side * 0.3, 1.412, 0.01]);
+    for (const y of [1.14, 1.015, 0.89]) {
+      sphere(captain, 0.023, brass, [side * 0.108, y, 0.208], { scale: [1, 1, 0.4] });
+    }
+    box(captain, [0.125, 0.038, 0.028], trim, [side * 0.185, 0.955, 0.169]);
+    // Relaxed elbows bend forward, with a hand resting near the jacket hem.
+    const shoulder = [side * 0.29, 1.31, 0];
+    const elbow = [side * 0.4, 1.045, 0.02];
+    const wrist = [side * 0.335, 0.91, 0.205];
+    sphere(captain, 0.117, navy, shoulder);
+    limb(shoulder, elbow, 0.105, navy, 0.092);
+    sphere(captain, 0.092, navy, elbow);
+    limb(elbow, wrist, 0.092, navy, 0.071);
+    limb([side * 0.345, 0.931, 0.177], wrist, 0.075, brass, 0.074);
+    sphere(captain, 0.074, skin, [side * 0.322, 0.872, 0.229], { scale: [0.8, 1.12, 0.85] });
+    sphere(captain, 0.033, skin, [side * 0.266, 0.893, 0.228]);
+  }
+  // A tapered jaw, warm cheeks and raised brows keep the older face friendly.
+  sphere(captain, 0.235, skin, [0, 1.64, 0.012], { scale: [0.94, 1.09, 0.91] });
+  sphere(captain, 0.17, grey, [0, 1.505, 0.073], { scale: [1.04, 0.64, 0.85] });
+  for (const side of [-1, 1]) {
+    sphere(captain, 0.052, skin, [side * 0.222, 1.63, 0.006], { scale: [0.65, 1.08, 0.75] });
+    sphere(captain, 0.025, 0xad775f, [side * 0.239, 1.63, 0.038], { scale: [0.5, 1, 0.45] });
+    sphere(captain, 0.088, grey, [side * 0.186, 1.719, -0.053], { scale: [0.5, 1.13, 1.23], rotation: [0, 0, side * -0.25] });
+    sphere(captain, 0.066, 0xd49b7e, [side * 0.13, 1.579, 0.169], { scale: [0.93, 0.62, 0.44] });
+    sphere(captain, 0.044, 0xf3ead8, [side * 0.083, 1.668, 0.207], { scale: [1, 0.66, 0.3] });
+    sphere(captain, 0.023, 0x54716d, [side * 0.083, 1.666, 0.221], { scale: [0.8, 1, 0.37] });
+    sphere(captain, 0.012, 0x222d31, [side * 0.083, 1.666, 0.23], { scale: [0.75, 1, 0.3] });
+    box(captain, [0.094, 0.023, 0.027], 0xb8b8ab, [side * 0.085, 1.722, 0.203], { rotation: [0, 0, side * -0.12] });
+    sphere(captain, 0.073, 0xc1bfb1, [side * 0.058, 1.554, 0.216], { scale: [1.08, 0.43, 0.53], rotation: [0, 0, side * 0.16] });
+  }
+  sphere(captain, 0.047, skin, [0, 1.616, 0.239], { scale: [0.74, 1.06, 0.91] });
+  box(captain, [0.075, 0.012, 0.016], 0x805d50, [0, 1.52, 0.202]);
+  sphere(captain, 0.061, 0xbdbcb0, [0, 1.478, 0.168], { scale: [1.03, 0.6, 0.58] });
+  sphere(captain, 0.213, grey, [0, 1.743, -0.057], { scale: [1, 0.71, 0.82] });
+  sphere(captain, 0.12, 0xc1bfb2, [-0.06, 1.815, 0.095], { scale: [1.35, 0.34, 0.8], rotation: [0, 0, -0.19] });
+  // Cream skipper cap: low crown, navy band, projecting dark visor, gold badge.
+  cylinder(captain, 0.235, 0.236, 0.075, navy, [0, 1.835, 0], { segments: 12, scale: [1, 1, 0.92] });
+  sphere(captain, 0.258, cream, [0, 1.906, -0.017], { scale: [1.05, 0.37, 0.94], widthSegments: 12 });
+  sphere(captain, 0.22, 0x27353d, [0, 1.809, 0.177], { scale: [1.08, 0.105, 0.82], widthSegments: 12 });
+  box(captain, [0.3, 0.018, 0.02], brass, [0, 1.831, 0.224]);
+  sphere(captain, 0.05, brass, [0, 1.899, 0.213], { scale: [0.72, 1, 0.24] });
+  box(captain, [0.013, 0.051, 0.012], navy, [0, 1.899, 0.228]);
+  box(captain, [0.04, 0.012, 0.012], navy, [0, 1.893, 0.23]);
   const label = makeLabel('CAPTAIN MARK', '#f2b268', '#2f3d30', 0.38);
   label.position.set(0, 2.45, 0);
   captain.add(label);
@@ -2744,7 +2814,7 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   const naturalist = id === 'brynlee';
   const guard = id === 'brooks';
   const skin = naturalist ? 0xd69b78 : guard ? 0xb97c5b : 0xe0b190;
-  const hair = naturalist ? 0x733d29 : guard ? 0x35332e : 0x4d3c34;
+  const hair = naturalist ? 0xe8c568 : guard ? 0x35332e : 0x4d3c34;
   const leather = 0x614534;
   const dark = 0x293a36;
   const shirt = naturalist ? 0xf1dfb3 : guard ? 0xabc3b9 : 0xf2ead6;
@@ -2767,10 +2837,10 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
     box(group, [0.115, 0.018, 0.018], 0xc7b18b, [footX, 0.22, footZ + 0.096]);
   }
   cylinder(group, 0.21, 0.245, 0.25, coatColor, [0, 0.79, 0], { scale: [1, 1, 0.72] });
-  cylinder(group, 0.285, 0.22, 0.5, shirt, [0, 1.1, 0], { scale: [1, 1, 0.62] });
+  cylinder(group, naturalist ? 0.255 : 0.285, naturalist ? 0.185 : 0.22, 0.5, shirt, [0, 1.1, 0], { scale: [1, 1, 0.62] });
   // Open jacket panels, contrasting shirt and folded lapels, all facing +Z.
   for (const side of [-1, 1]) {
-    box(group, [0.15, guard ? 0.47 : 0.58, 0.27], coatColor, [side * 0.178, guard ? 1.08 : 1.025, 0]);
+    box(group, [naturalist ? 0.125 : 0.15, guard ? 0.47 : 0.58, 0.27], coatColor, [side * (naturalist ? 0.157 : 0.178), guard ? 1.08 : 1.025, 0], { rotation: [0, 0, naturalist ? side * -0.075 : 0] });
     box(group, [0.08, 0.22, 0.035], naturalist ? 0xb9698a : guard ? 0x304e57 : 0xc2adca, [side * 0.097, 1.22, 0.16], { rotation: [0, 0, side * 0.28] });
     box(group, [0.105, 0.095, 0.025], coatColor, [side * 0.19, 0.94, 0.153]);
     box(group, [0.115, 0.022, 0.03], accentColor, [side * 0.19, 0.99, 0.17]);
@@ -2780,20 +2850,20 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   for (const y of [1.03, 1.12, 1.21]) sphere(group, 0.014, leather, [0, y, 0.176]);
   cylinder(group, 0.085, 0.098, 0.16, skin, [0, 1.385, 0]);
   sphere(group, 0.245, skin, [0, 1.62, 0.012], { widthSegments: 12, heightSegments: 9, scale: [0.86, 1.08, 0.86] });
-  sphere(group, 0.16, skin, [0, 1.505, 0.068], { scale: [0.95, 0.75, 0.86] });
+  sphere(group, 0.16, skin, [0, 1.505, 0.068], { scale: [naturalist ? 0.76 : 0.95, naturalist ? 0.65 : 0.75, 0.86] });
   for (const side of [-1, 1]) {
     sphere(group, 0.054, skin, [side * 0.207, 1.61, 0.004], { scale: [0.65, 1, 0.75] });
     sphere(group, 0.027, 0xb87962, [side * 0.222, 1.61, 0.025], { scale: [0.5, 1, 0.55] });
     sphere(group, 0.039, 0xfff2d9, [side * 0.081, 1.653, 0.193], { scale: [1, 0.7, 0.36] });
     sphere(group, 0.02, dark, [side * 0.077, 1.652, 0.206], { scale: [0.8, 1, 0.45] });
-    box(group, [0.075, 0.018, 0.024], hair, [side * 0.082, 1.712, 0.182], { rotation: [0, 0, side * -0.12] });
+    box(group, [0.075, naturalist ? 0.012 : 0.018, 0.024], naturalist ? 0x967342 : hair, [side * 0.082, 1.712, 0.182], { rotation: [0, 0, side * -0.12] });
     sphere(group, 0.066, hair, [side * 0.176, 1.715, -0.005], { scale: [0.55, 1.4, 1.5] });
   }
   sphere(group, 0.045, skin, [0, 1.598, 0.209], { scale: [0.7, 1, 0.95] });
-  box(group, [0.065, 0.013, 0.016], 0x935b4e, [0, 1.523, 0.197]);
+  box(group, [naturalist ? 0.074 : 0.065, naturalist ? 0.021 : 0.013, 0.016], naturalist ? 0xb96865 : 0x935b4e, [0, 1.523, 0.197]);
   sphere(group, 0.235, hair, [0, 1.752, -0.022], { scale: [0.92, 0.55, 0.94] });
   for (const side of [-1, 1]) {
-    const shoulder = [side * 0.275, 1.275, 0];
+    const shoulder = [side * (naturalist ? 0.245 : 0.275), 1.275, 0];
     const elbow = [side * 0.36, 1.065, 0.055];
     const hand = naturalist ? [side * 0.32, 0.88, 0.16]
       : guard ? [side * 0.39, side === 1 ? 1.07 : 0.89, 0.22]
@@ -2812,9 +2882,16 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
     cylinder(group, 0.19, 0.235, 0.15, 0xddbb80, [0, 1.902, -0.015], { segments: 10 });
     cylinder(group, 0.227, 0.235, 0.045, leather, [0, 1.85, -0.015], { segments: 10 });
     box(group, [0.065, 0.07, 0.018], accentColor, [0.16, 1.871, 0.173], { rotation: [0, 0, -0.3] });
-    // A braid curls over her shoulder rather than hanging unattached.
+    // Golden side-swept fringe, soft cheek color and subtle outer lashes.
+    for (const side of [-1, 1]) {
+      sphere(group, 0.09, hair, [side * 0.177, 1.60, -0.02], { scale: [0.64, 2.0, 0.8] });
+      sphere(group, 0.035, 0xd9927c, [side * 0.126, 1.585, 0.174], { scale: [1, 0.5, 0.18] });
+      box(group, [0.029, 0.009, 0.015], 0x695134, [side * 0.111, 1.668, 0.203], { rotation: [0, 0, side * 0.35] });
+    }
+    sphere(group, 0.105, 0xf2d886, [-0.068, 1.754, 0.14], { scale: [1.35, 0.5, 0.55], rotation: [0, 0, -0.22] });
+    // A fuller blonde braid curls over her shoulder, with pale woven highlights.
     for (let i = 0; i < 7; i += 1) {
-      sphere(group, 0.06 - i * 0.003, hair, [0.184 + Math.sin(i * 0.6) * 0.022, 1.65 - i * 0.079, 0.055 + Math.min(i * 0.035, 0.16)], { scale: [0.9, 1.05, 0.8] });
+      sphere(group, 0.072 - i * 0.003, i % 2 ? 0xf2d886 : hair, [0.184 + Math.sin(i * 0.6) * 0.022, 1.65 - i * 0.079, 0.055 + Math.min(i * 0.035, 0.16)], { scale: [0.9, 1.05, 0.8] });
     }
     sphere(group, 0.039, accentColor, [0.171, 1.155, 0.213], { scale: [1.1, 0.45, 1] });
     box(group, [0.044, 0.69, 0.035], leather, [0.015, 1.092, 0.207], { rotation: [0, 0, -0.59] });
@@ -3192,8 +3269,8 @@ function talkToCaptainMark() {
     setStatus('The lake is open for future fieldwork.');
     return;
   }
-  const hasFish = (save.cooked.grilledFish || 0) > 0;
-  const hasCarrots = (save.cooked.glazedCarrots || 0) > 0;
+  const hasFish = (save.cooked?.grilledFish || 0) > 0;
+  const hasCarrots = (save.cooked?.glazedCarrots || 0) > 0;
   if (!hasFish || !hasCarrots) {
     toast('Captain Mark is hungry for grilled fish and glazed carrots.', 'warning');
     setStatus('Bring Captain Mark 1 grilled fish and 1 glazed carrot to pass the lake gate.');

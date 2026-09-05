@@ -1,7 +1,8 @@
 # Field team and skiff visual polish
 
 ## Changes
-- Brynlee: safari hat, shoulder braid, satchel, layered pink field jacket.
+- Brynlee: golden-blonde highlighted braid and fringe, softer facial features, tailored pink jacket silhouette, safari hat and satchel.
+- Captain Mark: cream skipper cap with badge, grey hair and beard, navy brass-button jacket, epaulettes, connected bent arms and grounded boots. Fresh-save dialogue now safely handles a missing cooked-food inventory.
 - Brooks: uniform cap, badge, cuffs, caged hand-held lantern.
 - Grayson: round glasses, swept hair, long purple coat, held clipboard and pen.
 - Shared face, connected elbow/hand geometry, boots and clothing details.
