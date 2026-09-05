@@ -1171,16 +1171,74 @@ function createLakeLilyPad(x, z, scale = 1, index = 0) {
   return { pad, flower };
 }
 
-function createLakeBoat(x, z) {
+function createResearchSkiffModel() {
   const boat = new THREE.Group();
-  boat.position.set(x, 0.33, z);
-  addMesh(boat, new THREE.CylinderGeometry(0.98, 0.76, 0.2, 4), mat(0xd2d5d0, { metalness: 0.25, roughness: 0.55 }), [0, 0, 0], [0, Math.PI / 4, 0]);
-  box(boat, [0.16, 0.2, 1.24], 0x707a75, [0, 0.14, 0]);
-  box(boat, [0.88, 0.08, 0.1], 0x8b938d, [0, 0.25, 0]);
-  box(boat, [0.62, 0.08, 0.2], 0x594839, [0, 0.32, 0.2]);
-  const label = makeLabel('BOAT', '#d8ef85', '#30442f', 0.3);
-  label.position.set(0, 1.0, 0);
+  boat.name = 'research-skiff';
+  // Bow points along local -Z, matching the existing steering convention.
+  // Open, flared shell rather than a solid primitive: the cockpit has real depth.
+  const outline = [[-0.59, 1.24], [0.59, 1.24], [0.77, 0.54], [0.72, -0.64], [0.43, -1.25], [0, -1.58], [-0.43, -1.25], [-0.72, -0.64], [-0.77, 0.54]];
+  const ring = (scale, y) => outline.map(([px, pz]) => new THREE.Vector3(px * scale, y, pz * scale));
+  const shellBand = (lower, upper, color) => {
+    const vertices = [];
+    for (let i = 0; i < lower.length; i += 1) {
+      const j = (i + 1) % lower.length;
+      for (const p of [lower[i], lower[j], upper[j], lower[i], upper[j], upper[i]]) vertices.push(p.x, p.y, p.z);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.computeVertexNormals();
+    return addMesh(boat, geometry, mat(color, { side: THREE.DoubleSide, roughness: 0.62, metalness: 0.12 }));
+  };
+  const keel = ring(0.69, -0.22);
+  const chine = ring(0.88, -0.04);
+  const stripe = ring(0.985, 0.26);
+  const rim = ring(1, 0.32);
+  const inner = ring(0.91, 0.30);
+  shellBand(keel, chine, 0x203f3d);
+  shellBand(chine, stripe, 0x3f7770);
+  shellBand(stripe, rim, 0xf0deb0);
+  shellBand(rim, inner, 0xbfa47a);
+  shellBand(ring(0.70, -0.10), inner, 0x879c8b);
+  // Fitted teak sole and two cross-thwarts, with subtle plank seams.
+  for (let i = -3; i <= 3; i += 1) {
+    box(boat, [0.135, 0.07, 1.64 - Math.abs(i) * 0.065], i % 2 ? 0x9f754e : 0xb78c60, [i * 0.145, -0.06, 0.11]);
+  }
+  for (const zSeat of [-0.53, 0.65]) {
+    box(boat, [1.23, 0.11, 0.28], 0xc49965, [0, 0.22, zSeat]);
+    box(boat, [1.05, 0.16, 0.06], 0x53675e, [0, 0.085, zSeat]);
+    for (const px of [-0.51, 0.51]) cylinder(boat, 0.018, 0.018, 0.008, 0xe5dbb7, [px, 0.28, zSeat], { segments: 6 });
+  }
+  const spar = (a, b, radius, color) => {
+    const from = new THREE.Vector3(...a), to = new THREE.Vector3(...b);
+    const mesh = cylinder(boat, radius, radius, from.distanceTo(to), color, from.clone().add(to).multiplyScalar(0.5).toArray(), { segments: 6 });
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.sub(from).normalize());
+    return mesh;
+  };
+  for (let i = 0; i < rim.length; i += 1) spar(rim[i].toArray(), rim[(i + 1) % rim.length].toArray(), 0.033, 0xe6d2a6);
+  // Stowed paddle, rope coil, specimen box, life ring and a compact outboard.
+  spar([-0.61, 0.39, 0.95], [-0.55, 0.39, -0.91], 0.026, 0x95683e);
+  box(boat, [0.17, 0.035, 0.40], 0xc9a16c, [-0.55, 0.39, -0.91], { rotation: [0, -0.04, 0] });
+  for (const r of [0.085, 0.12, 0.155]) addMesh(boat, new THREE.TorusGeometry(r, 0.013, 5, 20), mat(0xd3bd8e), [0.28, 0.30, 0.65], [Math.PI / 2, 0, 0]);
+  box(boat, [0.37, 0.23, 0.30], 0xd9dfcd, [0.15, 0.10, 0.05]);
+  box(boat, [0.40, 0.05, 0.33], 0x385b52, [0.15, 0.245, 0.05]);
+  box(boat, [0.09, 0.06, 0.025], 0xc4a665, [0.15, 0.20, 0.21]);
+  addMesh(boat, new THREE.TorusGeometry(0.18, 0.055, 7, 20), mat(0xd97945), [0.71, 0.13, 0.30], [0, Math.PI / 2, 0]);
+  box(boat, [0.23, 0.17, 0.16], 0x596960, [0, 0.29, 1.25]);
+  box(boat, [0.32, 0.31, 0.32], 0x263c3c, [0, 0.43, 1.41]);
+  box(boat, [0.26, 0.045, 0.27], 0xd3d2bd, [0, 0.60, 1.41]);
+  box(boat, [0.075, 0.53, 0.09], 0x455352, [0, 0.03, 1.45]);
+  spar([0.10, 0.43, 1.37], [0.31, 0.43, 0.98], 0.027, 0x303b37);
+  const label = makeLabel('JENKINS · FIELD SKIFF', '#f0deb0', '#274941', 0.3);
+  label.position.set(0, 1.15, 0);
   boat.add(label);
+  // Gameplay root stays at its existing height; immerse the visual keel.
+  for (const child of boat.children) child.position.y -= 0.15;
+  return boat;
+}
+
+function createLakeBoat(x, z) {
+  const boat = createResearchSkiffModel();
+  boat.position.set(x, 0.33, z);
   world.add(boat);
   const interactable = {
     type: 'lake-boat',
@@ -2028,25 +2086,10 @@ function createPath(x, z, width, length, color = 0xb3a47a) {
 }
 
 function createFieldResearchBoat() {
-  const group = new THREE.Group();
-  group.position.set(0, 0.18, -14.35);
-  group.rotation.y = Math.PI;
-  const hull = new THREE.Shape();
-  hull.moveTo(-1.35, -0.7); hull.lineTo(1.35, -0.7); hull.lineTo(1.72, 0); hull.lineTo(1.12, 0.72); hull.lineTo(-1.12, 0.72); hull.lineTo(-1.72, 0); hull.closePath();
-  const hullMesh = addMesh(group, new THREE.ExtrudeGeometry(hull, { depth: 0.38, bevelEnabled: true, bevelSegments: 1, bevelSize: 0.08, bevelThickness: 0.08 }), mat(0x315a55, { roughness: 0.72 }), [0, 0.46, 0], [Math.PI / 2, 0, 0]);
-  hullMesh.castShadow = true;
-  box(group, [2.25, 0.12, 0.95], 0xc18c54, [0, 0.76, 0]);
-  box(group, [1.2, 0.08, 0.58], 0x253a35, [0, 0.86, 0.08]);
-  box(group, [0.72, 0.5, 0.42], 0x6e8b72, [0, 1.03, 0.2]);
-  box(group, [0.48, 0.26, 0.26], 0x25312d, [0, 1.35, 0.2]);
-  cylinder(group, 0.12, 0.12, 0.92, 0x8c6243, [0, 1.62, 0.2], { segments: 8 });
-  sphere(group, 0.16, 0xf5c96a, [0, 2.12, 0.2], { material: { emissive: 0xb56a22, emissiveIntensity: 1.3 } });
-  box(group, [0.42, 0.08, 0.08], 0xffcf6b, [0, 0.92, -0.54], { material: { emissive: 0xa85b22, emissiveIntensity: 0.8 } });
-  box(group, [0.34, 0.34, 0.34], 0xd39a58, [-0.84, 0.91, 0.18]);
-  box(group, [0.34, 0.34, 0.34], 0xd39a58, [0.84, 0.91, 0.18]);
-  const label = makeLabel('FIELD SKIFF', '#d8ef85', '#1c3028', 0.42);
-  label.position.set(0, 2.42, 0);
-  group.add(label);
+  const group = createResearchSkiffModel();
+  // Float beyond the end rail, not intersecting the dock planks.
+  group.position.set(0, 0.33, FOREST_DOCK.endZ - 1.15);
+  group.rotation.y = Math.PI / 2;
   world.add(group);
 }
 
@@ -2698,21 +2741,114 @@ function buildZoo() {
 function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
-  cylinder(group, 0.38, 0.44, 1.08, coatColor, [0, 0.75, 0], { segments: 8 });
-  sphere(group, 0.28, 0xc98263, [0, 1.52, 0]);
-  box(group, [0.14, 0.62, 0.14], 0x3b443d, [-0.18, 0.28, 0]);
-  box(group, [0.14, 0.62, 0.14], 0x3b443d, [0.18, 0.28, 0]);
-  box(group, [0.12, 0.52, 0.12], coatColor, [-0.5, 0.78, 0], { rotation: [0, 0, -0.16] });
-  box(group, [0.12, 0.52, 0.12], coatColor, [0.5, 0.78, 0], { rotation: [0, 0, 0.16] });
-  if (id === 'brynlee') {
-    torus(group, 0.22, 0.045, accentColor, [0, 1.74, 0], [0, 0, 0], 8, 14);
-    box(group, [0.16, 0.16, 0.16], accentColor, [0.43, 0.72, -0.03]);
-  } else if (id === 'brooks') {
-    cylinder(group, 0.05, 0.05, 0.9, 0x523e2c, [0.48, 1.05, -0.08], { segments: 6, rotation: [0, 0, -0.2] });
-    sphere(group, 0.12, accentColor, [0.38, 1.44, -0.06], { material: { emissive: 0x9a5b20, emissiveIntensity: 1.2 } });
+  const naturalist = id === 'brynlee';
+  const guard = id === 'brooks';
+  const skin = naturalist ? 0xd69b78 : guard ? 0xb97c5b : 0xe0b190;
+  const hair = naturalist ? 0x733d29 : guard ? 0x35332e : 0x4d3c34;
+  const leather = 0x614534;
+  const dark = 0x293a36;
+  const shirt = naturalist ? 0xf1dfb3 : guard ? 0xabc3b9 : 0xf2ead6;
+  // Joint-to-joint limbs keep the elbows, cuffs and carried props connected.
+  const limb = (from, to, radius, color, endRadius = radius) => {
+    const a = new THREE.Vector3(...from);
+    const b = new THREE.Vector3(...to);
+    const mesh = cylinder(group, endRadius, radius, a.distanceTo(b), color, a.clone().add(b).multiplyScalar(0.5).toArray());
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
+    return mesh;
+  };
+  for (const side of [-1, 1]) {
+    const footX = side * 0.135;
+    const footZ = side === -1 ? 0.035 : -0.035;
+    box(group, [0.205, 0.115, 0.33], dark, [footX, 0.0575, footZ + 0.055]);
+    sphere(group, 0.13, leather, [footX, 0.145, footZ + 0.07], { scale: [0.8, 0.65, 1.25] });
+    cylinder(group, 0.092, 0.1, 0.24, leather, [footX, 0.235, footZ]);
+    cylinder(group, 0.1, 0.105, 0.05, 0x96704b, [footX, 0.34, footZ]);
+    limb([footX, 0.32, footZ], [side * 0.12, 0.76, 0], 0.092, guard ? 0x34474a : 0x666852, 0.112);
+    box(group, [0.115, 0.018, 0.018], 0xc7b18b, [footX, 0.22, footZ + 0.096]);
+  }
+  cylinder(group, 0.21, 0.245, 0.25, coatColor, [0, 0.79, 0], { scale: [1, 1, 0.72] });
+  cylinder(group, 0.285, 0.22, 0.5, shirt, [0, 1.1, 0], { scale: [1, 1, 0.62] });
+  // Open jacket panels, contrasting shirt and folded lapels, all facing +Z.
+  for (const side of [-1, 1]) {
+    box(group, [0.15, guard ? 0.47 : 0.58, 0.27], coatColor, [side * 0.178, guard ? 1.08 : 1.025, 0]);
+    box(group, [0.08, 0.22, 0.035], naturalist ? 0xb9698a : guard ? 0x304e57 : 0xc2adca, [side * 0.097, 1.22, 0.16], { rotation: [0, 0, side * 0.28] });
+    box(group, [0.105, 0.095, 0.025], coatColor, [side * 0.19, 0.94, 0.153]);
+    box(group, [0.115, 0.022, 0.03], accentColor, [side * 0.19, 0.99, 0.17]);
+  }
+  cylinder(group, 0.24, 0.24, 0.055, leather, [0, 0.856, 0], { scale: [1, 1, 0.72] });
+  box(group, [0.065, 0.06, 0.025], 0xdcbf79, [0, 0.856, 0.18]);
+  for (const y of [1.03, 1.12, 1.21]) sphere(group, 0.014, leather, [0, y, 0.176]);
+  cylinder(group, 0.085, 0.098, 0.16, skin, [0, 1.385, 0]);
+  sphere(group, 0.245, skin, [0, 1.62, 0.012], { widthSegments: 12, heightSegments: 9, scale: [0.86, 1.08, 0.86] });
+  sphere(group, 0.16, skin, [0, 1.505, 0.068], { scale: [0.95, 0.75, 0.86] });
+  for (const side of [-1, 1]) {
+    sphere(group, 0.054, skin, [side * 0.207, 1.61, 0.004], { scale: [0.65, 1, 0.75] });
+    sphere(group, 0.027, 0xb87962, [side * 0.222, 1.61, 0.025], { scale: [0.5, 1, 0.55] });
+    sphere(group, 0.039, 0xfff2d9, [side * 0.081, 1.653, 0.193], { scale: [1, 0.7, 0.36] });
+    sphere(group, 0.02, dark, [side * 0.077, 1.652, 0.206], { scale: [0.8, 1, 0.45] });
+    box(group, [0.075, 0.018, 0.024], hair, [side * 0.082, 1.712, 0.182], { rotation: [0, 0, side * -0.12] });
+    sphere(group, 0.066, hair, [side * 0.176, 1.715, -0.005], { scale: [0.55, 1.4, 1.5] });
+  }
+  sphere(group, 0.045, skin, [0, 1.598, 0.209], { scale: [0.7, 1, 0.95] });
+  box(group, [0.065, 0.013, 0.016], 0x935b4e, [0, 1.523, 0.197]);
+  sphere(group, 0.235, hair, [0, 1.752, -0.022], { scale: [0.92, 0.55, 0.94] });
+  for (const side of [-1, 1]) {
+    const shoulder = [side * 0.275, 1.275, 0];
+    const elbow = [side * 0.36, 1.065, 0.055];
+    const hand = naturalist ? [side * 0.32, 0.88, 0.16]
+      : guard ? [side * 0.39, side === 1 ? 1.07 : 0.89, 0.22]
+        : [side * 0.19, 1.075, 0.34];
+    sphere(group, 0.107, coatColor, shoulder);
+    limb(shoulder, elbow, 0.102, coatColor, 0.083);
+    sphere(group, 0.084, coatColor, elbow);
+    limb(elbow, hand, 0.081, coatColor, 0.063);
+    const cuff = new THREE.Vector3(...hand).lerp(new THREE.Vector3(...elbow), 0.18).toArray();
+    limb(cuff, hand, 0.069, shirt, 0.067);
+    sphere(group, 0.069, skin, hand, { scale: [0.83, 1.05, 0.86] });
+    sphere(group, 0.027, skin, [hand[0] - side * 0.04, hand[1] + 0.015, hand[2] + 0.035]);
+  }
+  if (naturalist) {
+    cylinder(group, 0.34, 0.35, 0.035, 0xc8a269, [0, 1.82, 0], { segments: 12, scale: [1, 1, 0.87] });
+    cylinder(group, 0.19, 0.235, 0.15, 0xddbb80, [0, 1.902, -0.015], { segments: 10 });
+    cylinder(group, 0.227, 0.235, 0.045, leather, [0, 1.85, -0.015], { segments: 10 });
+    box(group, [0.065, 0.07, 0.018], accentColor, [0.16, 1.871, 0.173], { rotation: [0, 0, -0.3] });
+    // A braid curls over her shoulder rather than hanging unattached.
+    for (let i = 0; i < 7; i += 1) {
+      sphere(group, 0.06 - i * 0.003, hair, [0.184 + Math.sin(i * 0.6) * 0.022, 1.65 - i * 0.079, 0.055 + Math.min(i * 0.035, 0.16)], { scale: [0.9, 1.05, 0.8] });
+    }
+    sphere(group, 0.039, accentColor, [0.171, 1.155, 0.213], { scale: [1.1, 0.45, 1] });
+    box(group, [0.044, 0.69, 0.035], leather, [0.015, 1.092, 0.207], { rotation: [0, 0, -0.59] });
+    box(group, [0.24, 0.26, 0.15], leather, [-0.27, 0.775, 0.18]);
+    box(group, [0.255, 0.1, 0.035], 0x9d744e, [-0.27, 0.88, 0.269]);
+    box(group, [0.048, 0.063, 0.018], accentColor, [-0.27, 0.839, 0.294]);
+  } else if (guard) {
+    cylinder(group, 0.205, 0.235, 0.11, coatColor, [0, 1.83, 0], { segments: 10 });
+    box(group, [0.32, 0.035, 0.19], dark, [0, 1.786, 0.175]);
+    box(group, [0.062, 0.066, 0.025], accentColor, [0, 1.83, 0.231]);
+    box(group, [0.08, 0.09, 0.025], accentColor, [-0.18, 1.2, 0.166]);
+    // Closed bail joins his curled hand to a caged warm lantern.
+    const lanternX = 0.39;
+    for (const dx of [-0.085, 0.085]) limb([lanternX + dx, 0.91, 0.22], [lanternX + dx, 1.07, 0.22], 0.014, dark);
+    limb([lanternX - 0.085, 1.07, 0.22], [lanternX + 0.085, 1.07, 0.22], 0.014, dark);
+    cylinder(group, 0.11, 0.115, 0.035, dark, [lanternX, 0.91, 0.22]);
+    cylinder(group, 0.09, 0.09, 0.2, accentColor, [lanternX, 0.793, 0.22], { material: { emissive: 0xffb64f, emissiveIntensity: 1.3 } });
+    cylinder(group, 0.12, 0.1, 0.04, dark, [lanternX, 0.675, 0.22]);
+    for (const dx of [-0.078, 0.078]) for (const dz of [-0.065, 0.065]) {
+      limb([lanternX + dx, 0.69, 0.22 + dz], [lanternX + dx, 0.91, 0.22 + dz], 0.012, dark);
+    }
   } else {
-    box(group, [0.46, 0.06, 0.34], accentColor, [0, 1.18, -0.28]);
-    box(group, [0.18, 0.18, 0.18], accentColor, [-0.42, 0.72, -0.03]);
+    for (const side of [-1, 1]) {
+      addMesh(group, new THREE.TorusGeometry(0.055, 0.009, 5, 12), mat(0xb3c9b8, { metalness: 0.4 }), [side * 0.083, 1.653, 0.224]);
+      limb([side * 0.136, 1.66, 0.224], [side * 0.204, 1.665, 0.009], 0.008, dark);
+      box(group, [0.17, 0.23, 0.265], coatColor, [side * 0.157, 0.728, -0.005]);
+    }
+    box(group, [0.06, 0.012, 0.016], dark, [0, 1.657, 0.226]);
+    sphere(group, 0.1, hair, [-0.07, 1.792, 0.099], { scale: [1.5, 0.53, 0.7], rotation: [0, 0, -0.15] });
+    box(group, [0.35, 0.35, 0.038], leather, [0, 1.095, 0.341]);
+    box(group, [0.29, 0.285, 0.007], 0xf3e6c6, [0, 1.089, 0.364]);
+    box(group, [0.105, 0.04, 0.019], 0xb2c3b7, [0, 1.255, 0.372]);
+    for (const y of [1.16, 1.12, 1.08]) box(group, [0.17, 0.01, 0.008], 0x8d9c8d, [-0.017, y, 0.373]);
+    box(group, [0.036, 0.16, 0.018], accentColor, [0.198, 1.095, 0.383], { rotation: [0, 0, -0.17] });
   }
   const label = makeLabel(`${name} · ${role}`, `#${new THREE.Color(accentColor).getHexString()}`, '#1c3028', 0.34);
   label.position.set(0, 2.15, 0);
