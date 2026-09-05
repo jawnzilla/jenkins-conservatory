@@ -216,9 +216,8 @@ const SHOP_ITEMS = [
   { key: 'feather', group: 'lure', label: 'Feather lure', note: 'A light presentation for shallows.', cost: 14, amount: 1 },
   { key: 'nets', group: 'tool', label: 'Field net', note: 'For rabbits, squirrels, and flying bugs.', cost: 24, amount: 1 },
   { key: 'magnifiers', group: 'tool', label: 'Magnifying glass', note: 'Reveals hidden bug movement.', cost: 22, amount: 1 },
-  { key: 'pans', group: 'tool', label: 'Camp cooking pan', note: 'Needed to cook at the cabin stove.', cost: 30, amount: 1 },
-  { key: 'waders', group: 'tool', label: 'Field waders', note: 'Walk twice as far into lake water.', cost: 38, amount: 1 },
-  { key: 'flowerSeeds', group: 'seed', label: 'Flower seed packet', note: 'Plant in the pollinator field. Blooms in 5 minutes.', cost: 12, amount: 3 }
+  { key: 'goldenSeeds', group: 'care', label: 'Golden seed bundle', note: 'Brynlee uses these to start a caretaker shift.', cost: 18, amount: 1 },
+  { key: 'lanternOil', group: 'night', label: 'Lantern oil', note: 'Keeps Brooks on night watch.', cost: 14, amount: 1 }
 ];
 
 const DEFAULT_SAVE = {
@@ -231,20 +230,15 @@ const DEFAULT_SAVE = {
     feather: 2,
     nets: 2,
     magnifiers: 1,
-    pans: 0,
-    waders: 0,
-    flowerSeeds: 2,
-    carrotSeeds: 0,
+    goldenSeeds: 1,
+    lanternOil: 1
   },
   caught: {},
   cleanedEnclosures: {},
-  gardenFlowers: null,
-  records: {},
-  honey: 0,
-  ingredients: { carrots: 0, flowers: 0, trout: 0, sunfish: 0, bass: 0, crappie: 0, mushrooms: 0, morels: 0, treeMushrooms: 0, wildRice: 0, scallions: 0, berries: 0, duckEggs: 0 },
-  cooked: { grilledFish: 0, glazedCarrots: 0, risotto: 0, sunfishSalad: 0, troutEggsBenedict: 0 },
-  meals: 0,
-  jenkinsLakePass: false,
+  brynleeCaretakerUntil: 0,
+  brooksWatchUntil: 0,
+  brooksAssignment: 'conservatory',
+  graysonResearch: 0,
   lastZone: 'forest'
 };
 
@@ -381,6 +375,7 @@ let fallbackPointerId = null;
 let yaw = 0;
 let pitch = -0.08;
 let elapsed = 0;
+let serviceCheckAt = 0;
 let currentNoise = 0;
 let spookRisk = 0.02;
 let toastId = 0;
@@ -466,12 +461,10 @@ function loadSave() {
       supplies: { ...DEFAULT_SAVE.supplies, ...(parsed.supplies || {}) },
       caught: { ...(parsed.caught || {}) },
       cleanedEnclosures: { ...(parsed.cleanedEnclosures || {}) },
-      gardenFlowers: Array.isArray(parsed.gardenFlowers) ? parsed.gardenFlowers : null,
-      records: { ...(parsed.records || {}) },
-      honey: Number(parsed.honey || 0),
-      ingredients: { ...DEFAULT_SAVE.ingredients, ...(parsed.ingredients || {}) },
-      cooked: { ...DEFAULT_SAVE.cooked, ...(parsed.cooked || {}) },
-      meals: Number(parsed.meals || 0)
+      brynleeCaretakerUntil: Number(parsed.brynleeCaretakerUntil || 0),
+      brooksWatchUntil: Number(parsed.brooksWatchUntil || 0),
+      brooksAssignment: parsed.brooksAssignment || 'conservatory',
+      graysonResearch: Number(parsed.graysonResearch || 0)
     };
   } catch (error) {
     console.warn('Save data unavailable; using a fresh field kit.', error);
@@ -2034,6 +2027,29 @@ function createPath(x, z, width, length, color = 0xb3a47a) {
   box(world, [width, 0.04, length], color, [x, 0, z]);
 }
 
+function createFieldResearchBoat() {
+  const group = new THREE.Group();
+  group.position.set(0, 0.18, -14.35);
+  group.rotation.y = Math.PI;
+  const hull = new THREE.Shape();
+  hull.moveTo(-1.35, -0.7); hull.lineTo(1.35, -0.7); hull.lineTo(1.72, 0); hull.lineTo(1.12, 0.72); hull.lineTo(-1.12, 0.72); hull.lineTo(-1.72, 0); hull.closePath();
+  const hullMesh = addMesh(group, new THREE.ExtrudeGeometry(hull, { depth: 0.38, bevelEnabled: true, bevelSegments: 1, bevelSize: 0.08, bevelThickness: 0.08 }), mat(0x315a55, { roughness: 0.72 }), [0, 0.46, 0], [Math.PI / 2, 0, 0]);
+  hullMesh.castShadow = true;
+  box(group, [2.25, 0.12, 0.95], 0xc18c54, [0, 0.76, 0]);
+  box(group, [1.2, 0.08, 0.58], 0x253a35, [0, 0.86, 0.08]);
+  box(group, [0.72, 0.5, 0.42], 0x6e8b72, [0, 1.03, 0.2]);
+  box(group, [0.48, 0.26, 0.26], 0x25312d, [0, 1.35, 0.2]);
+  cylinder(group, 0.12, 0.12, 0.92, 0x8c6243, [0, 1.62, 0.2], { segments: 8 });
+  sphere(group, 0.16, 0xf5c96a, [0, 2.12, 0.2], { material: { emissive: 0xb56a22, emissiveIntensity: 1.3 } });
+  box(group, [0.42, 0.08, 0.08], 0xffcf6b, [0, 0.92, -0.54], { material: { emissive: 0xa85b22, emissiveIntensity: 0.8 } });
+  box(group, [0.34, 0.34, 0.34], 0xd39a58, [-0.84, 0.91, 0.18]);
+  box(group, [0.34, 0.34, 0.34], 0xd39a58, [0.84, 0.91, 0.18]);
+  const label = makeLabel('FIELD SKIFF', '#d8ef85', '#1c3028', 0.42);
+  label.position.set(0, 2.42, 0);
+  group.add(label);
+  world.add(group);
+}
+
 function createPondDock() {
   const group = new THREE.Group();
   const length = FOREST_DOCK.shoreZ - FOREST_DOCK.endZ;
@@ -2246,6 +2262,7 @@ function buildForest() {
   shoreline.receiveShadow = true;
   addMesh(world, new THREE.CircleGeometry(10.7, 48), mat(0x6a7d55, { roughness: 1 }), [0, 0.02, -17], [-Math.PI / 2, 0, 0]);
   createPondDock();
+  createFieldResearchBoat();
 
   const treeSpots = [
     [-16, -15, 1.3], [-13, -3, 1.5], [-10, 5, 1.1], [14, -2, 1.45], [17, -16, 1.2],
@@ -2673,6 +2690,35 @@ function buildZoo() {
   addEnclosureInteractable('meadow', 'Clean meadow enclosure', -9, -5.55, 'Clear the meadow habitat so the ground animals have a safe field.');
   addEnclosureInteractable('pollinator', 'Clean pollinator enclosure', 9, -5.55, 'Clear the pollinator habitat so the flying animals can forage.');
   addEnclosureInteractable('water-wing', 'Clean water wing', 0, -18.65, 'Clear the water wing so the aquatic exhibit stays healthy.');
+  createFieldCharacter('brynlee', 'Brynlee', 'FIELD NATURALIST', -14.8, -3.8, 0xe889b0, 0xd8ef85);
+  createFieldCharacter('brooks', 'Brooks', 'NIGHT GUARD', 14.8, -3.8, 0x476e78, 0xffc86b);
+  createFieldCharacter('grayson', 'Grayson', 'SPECIMEN RESEARCH', 0, -5.4, 0x6d587e, 0x89e0c7);
+}
+
+function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  cylinder(group, 0.38, 0.44, 1.08, coatColor, [0, 0.75, 0], { segments: 8 });
+  sphere(group, 0.28, 0xc98263, [0, 1.52, 0]);
+  box(group, [0.14, 0.62, 0.14], 0x3b443d, [-0.18, 0.28, 0]);
+  box(group, [0.14, 0.62, 0.14], 0x3b443d, [0.18, 0.28, 0]);
+  box(group, [0.12, 0.52, 0.12], coatColor, [-0.5, 0.78, 0], { rotation: [0, 0, -0.16] });
+  box(group, [0.12, 0.52, 0.12], coatColor, [0.5, 0.78, 0], { rotation: [0, 0, 0.16] });
+  if (id === 'brynlee') {
+    torus(group, 0.22, 0.045, accentColor, [0, 1.74, 0], [0, 0, 0], 8, 14);
+    box(group, [0.16, 0.16, 0.16], accentColor, [0.43, 0.72, -0.03]);
+  } else if (id === 'brooks') {
+    cylinder(group, 0.05, 0.05, 0.9, 0x523e2c, [0.48, 1.05, -0.08], { segments: 6, rotation: [0, 0, -0.2] });
+    sphere(group, 0.12, accentColor, [0.38, 1.44, -0.06], { material: { emissive: 0x9a5b20, emissiveIntensity: 1.2 } });
+  } else {
+    box(group, [0.46, 0.06, 0.34], accentColor, [0, 1.18, -0.28]);
+    box(group, [0.18, 0.18, 0.18], accentColor, [-0.42, 0.72, -0.03]);
+  }
+  const label = makeLabel(`${name} · ${role}`, `#${new THREE.Color(accentColor).getHexString()}`, '#1c3028', 0.34);
+  label.position.set(0, 2.15, 0);
+  group.add(label);
+  world.add(group);
+  interactables.push({ type: 'character', character: id, label: `Talk to ${name}`, position: new THREE.Vector3(x, 1, z), radius: 3.2 });
 }
 
 function createJenkinsLakeRoad() {
@@ -4392,12 +4438,18 @@ function setInventoryTab(tab) {
 function updateHUD() {
   dom.zoneLabel.textContent = ZONES[currentZone].label;
   dom.coinLabel.textContent = `${save.coins}¢`;
-  dom.equipmentList.innerHTML = renderInventoryPanel();
-  dom.inventoryTabs?.querySelectorAll('[data-inventory-tab]').forEach((button) => {
-    const active = button.dataset.inventoryTab === activeInventoryTab;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-selected', String(active));
-  });
+  const baitLabel = formatName(selectedBait);
+  const lureLabel = formatName(selectedLure);
+  dom.equipmentList.innerHTML = `
+    <div class="equipment-item"><strong>BAIT <small>${baitLabel}</small></strong><em>${save.supplies[selectedBait] || 0}</em></div>
+    <div class="equipment-item"><strong>LURE <small>${lureLabel}</small></strong><em>REUSABLE</em></div>
+    <div class="equipment-item"><strong>NETS</strong><em>${save.supplies.nets || 0}</em></div>
+    <div class="equipment-item"><strong>GLASSES</strong><em>${save.supplies.magnifiers || 0}</em></div>
+    <div class="equipment-item"><strong>SEEDS</strong><em>${save.supplies.goldenSeeds || 0}</em></div>
+    <div class="equipment-item"><strong>OIL</strong><em>${save.supplies.lanternOil || 0}</em></div>
+    <div class="equipment-item"><strong>FIELD NOTES</strong><em>${Object.values(save.caught).reduce((sum, count) => sum + count, 0)}</em></div>
+    <div class="equipment-item equipment-help"><span>B / L</span><span>cycle kit</span></div>
+  `;
   dom.noiseValue.textContent = currentNoise > 0.55 ? 'HIGH' : currentNoise > 0.25 ? 'MEDIUM' : 'LOW';
   dom.noiseValue.style.color = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
   dom.noiseMeter.style.width = `${Math.max(4, currentNoise * 100)}%`;
@@ -4717,138 +4769,95 @@ function buyItem(itemKey, group) {
   toast(`${item.label} added to the field kit.`, 'success');
 }
 
-function buyShopDisplay(display) {
-  if (!display) return;
-  const item = SHOP_ITEMS.find((candidate) => candidate.key === display.itemKey && candidate.group === display.group);
-  if (!item) return;
-  if (save.coins < item.cost) {
-    toast(`You need ${item.cost}¢ for ${item.label}.`, 'warning');
-    return;
-  }
-  buyItem(item.key, item.group);
-  setStatus(`${item.label} purchased from the display. Walk to another display or return to the counter.`);
+function serviceActive(until) {
+  return Number(until || 0) > Date.now();
 }
 
-function inspectFridge() {
-  const ingredients = save.ingredients || DEFAULT_SAVE.ingredients;
-  const cooked = save.cooked || DEFAULT_SAVE.cooked;
-  const inventory = `Fish ${ingredients.trout || 0} trout / ${ingredients.sunfish || 0} sunfish / ${ingredients.bass || 0} bass / ${ingredients.crappie || 0} crappie · carrots ${ingredients.carrots || 0} · mushrooms ${(ingredients.mushrooms || 0) + (ingredients.morels || 0) + (ingredients.treeMushrooms || 0)} · rice ${ingredients.wildRice || 0} · scallions ${ingredients.scallions || 0} · berries ${ingredients.berries || 0} · duck eggs ${ingredients.duckEggs || 0} · honey ${save.honey || 0} · flowers ${ingredients.flowers || 0} · cooked ${Object.values(cooked).reduce((sum, count) => sum + (count || 0), 0)}`;
-  toast(`Fridge inventory — ${inventory}`, 'success');
-  setStatus(inventory);
-}
-
-function getRecipeIngredientCount(ingredient) {
-  if (ingredient.anyOf) return ingredient.anyOf.reduce((total, key) => total + (key === 'honey' ? save.honey || 0 : save.ingredients[key] || 0), 0);
-  return ingredient.key === 'honey' ? save.honey || 0 : save.ingredients[ingredient.key] || 0;
-}
-
-function getRecipeStatus(recipe) {
-  const progress = recipe.ingredients.reduce((total, ingredient) => total + Math.min(1, getRecipeIngredientCount(ingredient) / ingredient.amount), 0);
-  const complete = recipe.ingredients.every((ingredient) => getRecipeIngredientCount(ingredient) >= ingredient.amount);
-  return { complete, partial: !complete && progress > 0, progress };
-}
-
-function formatRecipeIngredient(ingredient) {
-  const owned = getRecipeIngredientCount(ingredient);
-  const label = ingredient.anyOf ? ingredient.label : ingredient.label;
-  return `${label} ${Math.min(owned, ingredient.amount)}/${ingredient.amount}`;
-}
-
-function chooseRecipeIngredient(ingredient) {
-  if (!ingredient.anyOf) return ingredient.key;
-  return ingredient.anyOf.find((key) => (key === 'honey' ? save.honey || 0 : save.ingredients[key] || 0) >= ingredient.amount) || ingredient.anyOf[0];
-}
-
-function consumeRecipeIngredient(ingredient) {
-  const key = chooseRecipeIngredient(ingredient);
-  if (key === 'honey') save.honey -= ingredient.amount;
-  else save.ingredients[key] -= ingredient.amount;
-}
-
-function openStoveMenu() {
-  const hasPan = (save.supplies.pans || 0) > 0;
-  dom.stoveRecipes.innerHTML = COOKING_RECIPES.map((recipe) => {
-    const status = getRecipeStatus(recipe);
-    const statusLabel = !hasPan ? 'NEED PAN' : status.complete ? 'READY' : status.partial ? 'PARTIAL' : 'MISSING';
-    const disabled = !hasPan || !status.complete ? 'disabled' : '';
-    const stateClass = status.complete ? 'is-complete' : status.partial ? 'is-partial' : '';
-    return `<button class="recipe-option ${stateClass}" data-cook-recipe="${recipe.key}" type="button" ${disabled}>
-      <span class="recipe-copy"><span class="recipe-name">${recipe.label}</span><span class="recipe-note">${recipe.note}</span><span class="recipe-requirements">${recipe.ingredients.map(formatRecipeIngredient).join(' · ')}</span></span>
-      <span class="recipe-status">${statusLabel}</span>
-    </button>`;
-  }).join('');
-  openModal(dom.stoveModal);
-}
-
-function cookAtStove() {
-  openStoveMenu();
-}
-
-function cookRecipe(recipeKey) {
-  const recipe = COOKING_RECIPES.find((candidate) => candidate.key === recipeKey);
-  if (!recipe) return;
-  const status = getRecipeStatus(recipe);
-  if ((save.supplies.pans || 0) <= 0) {
-    toast('The stove needs a camp cooking pan. Buy one at the field store.', 'warning');
-    setStatus('A pan is required before the cabin stove can be used.');
-    return;
-  }
-  if (!status.complete) {
-    toast('That recipe still needs ingredients.', 'warning');
-    setStatus(`${recipe.label} needs ${recipe.ingredients.map(formatRecipeIngredient).join(', ')}.`);
-    return;
-  }
-  recipe.ingredients.forEach(consumeRecipeIngredient);
-  recipe.outputs.forEach((output) => {
-    save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
+function setAllHabitatsClean(cleaned) {
+  zooEnclosures.forEach((enclosure) => {
+    enclosure.cleaned = cleaned;
+    updateEnclosureVisual(enclosure);
+    save.cleanedEnclosures[enclosure.id] = cleaned;
   });
-  save.meals = (save.meals || 0) + recipe.outputs.reduce((total, output) => total + output.amount, 0);
   saveGame();
-  updateHUD();
-  closeModal(dom.stoveModal);
-  toast(`${recipe.label} added to the inventory.`, 'success');
-  setStatus(`${recipe.label} is stored for a future consumption system.`);
 }
 
-function sleepAtCabin() {
-  const advanceMs = 60 * 60 * 1000;
-  for (const flower of save.gardenFlowers || []) {
-    flower.seededAt -= advanceMs;
-    flower.bloomsAt -= advanceMs;
-    flower.despawnsAt -= advanceMs;
+function updateCharacterServices() {
+  const brynleeActive = serviceActive(save.brynleeCaretakerUntil);
+  const brooksActive = serviceActive(save.brooksWatchUntil);
+  if (brynleeActive) {
+    setAllHabitatsClean(true);
+  } else if (save.brynleeCaretakerUntil && !save.brynleeCaretakerExpired) {
+    save.brynleeCaretakerExpired = true;
+    setAllHabitatsClean(false);
+    toast('Brynlee’s caretaker shift ended. The habitats need attention again.', 'warning');
   }
-  for (const node of wildFlowerNodes) {
-    node.harvested = false;
-    node.group.visible = true;
-    node.marker.visible = true;
+  if (!brooksActive && save.brooksWatchUntil && !save.brooksWatchExpired) {
+    save.brooksWatchExpired = true;
+    toast('Brooks’ night watch has ended. Assign him another shift.', 'warning');
   }
-  for (const node of carrotNodes) {
-    node.harvested = false;
-    node.pulls = 0;
-    node.group.position.y = 0;
-    node.group.visible = true;
-    node.marker.visible = true;
-  }
-  for (const node of natureResourceNodes) {
-    if (node.type !== 'carrot') {
-      node.used = false;
-      node.group.visible = true;
-      node.marker.visible = true;
+}
+
+function talkToCharacter(character) {
+  if (character === 'brynlee') {
+    if (serviceActive(save.brynleeCaretakerUntil)) {
+      const remaining = Math.ceil((save.brynleeCaretakerUntil - Date.now()) / 60000);
+      setStatus(`Brynlee is on caretaker duty for about ${remaining} more minute${remaining === 1 ? '' : 's'}.`);
+      toast('Brynlee is keeping the Conservatory tidy.', 'success');
+      return;
     }
+    if ((save.supplies.goldenSeeds || 0) <= 0) {
+      setStatus('Brynlee needs a Golden Seed Bundle to start her next caretaker shift.');
+      toast('Bring Brynlee a Golden Seed Bundle.', 'warning');
+      return;
+    }
+    save.supplies.goldenSeeds -= 1;
+    save.brynleeCaretakerUntil = Date.now() + 15 * 60 * 1000;
+    save.brynleeCaretakerExpired = false;
+    setAllHabitatsClean(true);
+    updateHUD();
+    toast('Brynlee started a 15-minute caretaker shift.', 'success');
+    setStatus('Brynlee is cleaning the Conservatory automatically. Come back before her shift ends.');
+    return;
   }
-  for (const bug of bugNodes) {
-    bug.cooldown = 0;
-    bug.revealed = false;
-    bug.bugModel.visible = false;
+  if (character === 'brooks') {
+    if (serviceActive(save.brooksWatchUntil)) {
+      setStatus(`Brooks is watching the ${save.brooksAssignment} route tonight.`);
+      toast('Brooks is already on night watch.', 'success');
+      return;
+    }
+    if ((save.supplies.lanternOil || 0) <= 0) {
+      setStatus('Brooks needs Lantern Oil before he can start a night watch.');
+      toast('Bring Brooks Lantern Oil.', 'warning');
+      return;
+    }
+    save.supplies.lanternOil -= 1;
+    save.brooksWatchUntil = Date.now() + 30 * 60 * 1000;
+    save.brooksWatchExpired = false;
+    save.brooksAssignment = 'conservatory';
+    save.coins += 6;
+    saveGame();
+    updateHUD();
+    toast('Brooks started a 30-minute Conservatory night watch. +6¢', 'success');
+    setStatus('Brooks is patrolling the Conservatory. Night disturbances will be reported.');
+    return;
   }
-  for (const hive of beehives) hive.lootedAt = -1000;
-  for (const critter of critters) {
-    if (critter.hidden && !critter.caught) critter.respawnAt = elapsed;
+  if (character === 'grayson') {
+    const researchable = Object.entries(save.caught).filter(([, count]) => count > 0);
+    if (!researchable.length) {
+      setStatus('Grayson needs a recorded specimen before he can begin research.');
+      toast('Bring Grayson a specimen from the field.', 'warning');
+      return;
+    }
+    const [speciesKey] = researchable.sort((a, b) => b[1] - a[1])[0];
+    save.graysonResearch += 1;
+    save.coins += 8;
+    save.caught[speciesKey] -= 1;
+    saveGame();
+    updateHUD();
+    toast(`Grayson analyzed your ${SPECIES[speciesKey].label}. +8¢`, 'success');
+    setStatus(`${SPECIES[speciesKey].label} research complete: look for it near its preferred field habitat.`);
   }
-  saveGame();
-  updateHUD();
-  toast('You rest at the cabin. Plants age and field resources recover.', 'success');
-  setStatus('Morning light returns. The garden and nature areas have advanced by one hour.');
 }
 
 function handleInteract() {
@@ -4857,6 +4866,10 @@ function handleInteract() {
     return;
   }
   const target = getInteractionTarget();
+  if (target?.type === 'character') {
+    talkToCharacter(target.character);
+    return;
+  }
   if (target?.type === 'car') {
     openTravel();
     return;
@@ -5077,7 +5090,10 @@ function animate() {
   updateJenkinsLakeGate();
   updateAquarium();
   updatePollinatorGarden();
-  updateBeehives();
+  if (elapsed > serviceCheckAt) {
+    serviceCheckAt = elapsed + 3;
+    updateCharacterServices();
+  }
   updateQTE(delta);
   updatePrompt();
   updateCrosshair();
