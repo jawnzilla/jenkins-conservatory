@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import './style.css';
+import './interaction-feedback.css';
 
 const SAVE_KEY = 'jenkins-conservatory-save-v1';
 const ZONE_ORDER = ['store', 'forest', 'zoo', 'lake'];
@@ -379,6 +380,11 @@ let serviceCheckAt = 0;
 let currentNoise = 0;
 let spookRisk = 0.02;
 let toastId = 0;
+let feedbackTimer = null;
+const feedbackHub = document.querySelector('#interaction-hub');
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--feedback-height', `${Math.ceil(entry.target.getBoundingClientRect().height)}px`);
+}).observe(feedbackHub);
 let lastPromptKey = '';
 let primaryHeld = false;
 let actionHeld = false;
@@ -976,9 +982,32 @@ function createCar() {
   const group = new THREE.Group();
   const body = box(group, [3.6, 0.65, 1.7], 0xd76d4d, [0, 0.78, 0]);
   body.castShadow = true;
-  box(group, [2.05, 0.65, 1.4], 0xc8d8d1, [0, 1.28, -0.08], { material: { color: 0x263c3a, roughness: 0.5, metalness: 0.15 } });
-  box(group, [0.3, 0.24, 1.9], 0xffcc69, [-1.83, 0.78, 0], { material: { emissive: 0x8a3d1c, emissiveIntensity: 0.45 } });
-  box(group, [0.18, 0.23, 1.92], 0xfff2b0, [1.82, 0.8, 0], { material: { emissive: 0x76522b, emissiveIntensity: 0.25 } });
+  // Baked low-poly cabin profile, with the existing X-axis wheelbase and footprint.
+  const cabinShape = new THREE.Shape();
+  cabinShape.moveTo(-1.15, 1.08); cabinShape.lineTo(-0.78, 1.62);
+  cabinShape.lineTo(0.55, 1.62); cabinShape.lineTo(1.08, 1.08); cabinShape.closePath();
+  addMesh(group, new THREE.ExtrudeGeometry(cabinShape, { depth: 1.3, bevelEnabled: false }), mat(0x344e4b, { roughness: 0.42 }), [0, 0, -0.65]);
+  box(group, [1.4, 0.085, 1.38], 0xd76d4d, [-0.12, 1.65, 0]);
+  for (const side of [-1, 1]) {
+    box(group, [0.07, 0.51, 0.045], 0xd76d4d, [-0.17, 1.34, side * 0.675]);
+    box(group, [2.08, 0.07, 0.055], 0xe49a70, [-0.04, 1.09, side * 0.69]);
+    box(group, [0.21, 0.04, 0.045], 0xd8d2b7, [-0.43, 0.96, side * 0.862]);
+    box(group, [0.24, 0.12, 0.13], 0xd76d4d, [0.9, 1.13, side * 0.83]);
+    box(group, [0.03, 0.44, 0.02], 0xa1503b, [-0.18, 0.83, side * 0.858]);
+    box(group, [3.1, 0.09, 0.055], 0x39443b, [0, 0.52, side * 0.86]);
+    for (const x of [-1.2, 1.2]) {
+      cylinder(group, 0.19, 0.19, 0.035, 0xb6bba9, [x, 0.38, side * 0.877], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
+      cylinder(group, 0.075, 0.075, 0.04, 0x56665c, [x, 0.38, side * 0.9], { rotation: [Math.PI / 2, 0, 0], segments: 8 });
+    }
+  }
+  for (const end of [-1, 1]) {
+    box(group, [0.1, 0.16, 1.65], 0xadb3a0, [end * 1.83, 0.53, 0]);
+    box(group, [0.08, 0.24, 1.65], 0xd76d4d, [end * 1.84, 0.8, 0]);
+    for (const side of [-1, 1]) box(group, [0.1, 0.2, 0.32], end === 1 ? 0xffe4a0 : 0xb94532, [end * 1.89, 0.83, side * 0.61]);
+    box(group, [0.115, 0.12, 0.33], 0xefe3b8, [end * 1.88, 0.55, 0]);
+  }
+  box(group, [0.13, 0.16, 0.65], 0x34433b, [1.9, 0.8, 0]);
+  for (const z of [-0.22, 0, 0.22]) box(group, [0.14, 0.11, 0.025], 0xb6bba9, [1.91, 0.8, z]);
   for (const x of [-1.2, 1.2]) {
     cylinder(group, 0.34, 0.34, 0.22, 0x1a201c, [x, 0.38, -0.75], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
     cylinder(group, 0.34, 0.34, 0.22, 0x1a201c, [x, 0.38, 0.75], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
@@ -2232,12 +2261,33 @@ function createPracticeDucks() {
 function createStorekeeper() {
   const npc = new THREE.Group();
   npc.position.set(0, 1.05, -6.45);
-  sphere(npc, 0.34, 0xc88561, [0, 1.35, 0]);
-  sphere(npc, 0.25, 0x2b322d, [-0.1, 1.41, -0.22], { scale: [0.25, 0.18, 0.08] });
-  cylinder(npc, 0.48, 0.58, 0.9, 0x4f6c65, [0, 0.66, 0], { segments: 8 });
-  box(npc, [0.72, 0.12, 0.62], 0xd4b67b, [0, 1.18, 0]);
-  cylinder(npc, 0.08, 0.08, 0.72, 0xc88561, [-0.55, 0.67, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
-  cylinder(npc, 0.08, 0.08, 0.72, 0xc88561, [0.55, 0.67, 0], { rotation: [0, 0, -Math.PI / 2], segments: 7 });
+  // Keep the clerk's original root/collider; model coordinates include the hidden legs.
+  for (const side of [-1, 1]) {
+    cylinder(npc, 0.14, 0.12, 1.04, 0x394f49, [side * 0.19, -0.30, 0], { segments: 8 });
+    box(npc, [0.29, 0.2, 0.46], 0x40382e, [side * 0.19, -0.92, 0.09]);
+  }
+  cylinder(npc, 0.34, 0.3, 0.94, 0x4f6c65, [0, 0.61, 0], { segments: 8, scale: [1, 1, 0.72] });
+  cylinder(npc, 0.12, 0.14, 0.19, 0xc88561, [0, 1.12, 0], { segments: 8 });
+  sphere(npc, 0.29, 0xc88561, [0, 1.38, 0], { scale: [0.88, 1.08, 0.9] });
+  sphere(npc, 0.295, 0x49382c, [0, 1.46, -0.09], { scale: [0.94, 0.94, 0.78] });
+  sphere(npc, 0.16, 0x49382c, [0.04, 1.3, -0.3]);
+  for (const side of [-1, 1]) {
+    sphere(npc, 0.055, 0xc88561, [side * 0.255, 1.37, 0]);
+    sphere(npc, 0.029, 0x292e27, [side * 0.095, 1.42, 0.242]);
+    box(npc, [0.085, 0.025, 0.025], 0x49382c, [side * 0.095, 1.49, 0.238]);
+    cylinder(npc, 0.14, 0.12, 0.38, 0x4f6c65, [side * 0.4, 0.85, 0], { segments: 8, rotation: [0, 0, side * 0.22] });
+    cylinder(npc, 0.085, 0.075, 0.35, 0xc88561, [side * 0.45, 0.55, 0.09], { segments: 8, rotation: [-0.4, 0, side * 0.05] });
+    sphere(npc, 0.095, 0xc88561, [side * 0.46, 0.38, 0.16], { scale: [0.85, 1.1, 0.8] });
+  }
+  sphere(npc, 0.047, 0xd49a75, [0, 1.35, 0.265], { scale: [0.8, 1, 0.8] });
+  box(npc, [0.085, 0.018, 0.018], 0x874e3e, [0, 1.27, 0.24]);
+  box(npc, [0.45, 0.7, 0.055], 0xbca477, [0, 0.54, 0.25]);
+  for (const side of [-1, 1]) box(npc, [0.055, 0.3, 0.05], 0xbca477, [side * 0.16, 0.99, 0.24]);
+  box(npc, [0.28, 0.19, 0.035], 0x967b53, [0, 0.41, 0.291]);
+  box(npc, [0.13, 0.07, 0.025], 0xefe4bb, [-0.09, 0.79, 0.29]);
+  cylinder(npc, 0.36, 0.36, 0.045, 0xd4b67b, [0, 1.65, 0.035], { segments: 12, scale: [1, 1, 0.87] });
+  cylinder(npc, 0.235, 0.255, 0.17, 0xd4b67b, [0, 1.75, -0.015], { segments: 10 });
+  cylinder(npc, 0.255, 0.26, 0.05, 0x4f6c65, [0, 1.69, -0.015], { segments: 10 });
   const name = makeLabel('MARA · FIELD CLERK', '#f2b268', '#2f3f31', 0.33);
   name.position.set(0, 1.95, 0);
   npc.add(name);
@@ -2338,7 +2388,8 @@ function buildStore() {
   createStorekeeper();
   createStoreRecordBoard();
 
-  const backXs = [-5.8, 0, 5.8];
+  // Keep the clerk's face clear of the middle display's shelf/backboard.
+  const backXs = [-5.8, -2.8, 5.8];
   SHOP_ITEMS.slice(0, 3).forEach((item, index) => createShopDisplay(item, backXs[index], -6.72, 1));
   const sideSpots = [
     [-8.62, -1.5, Math.PI / 2, 0], [-8.62, -4.55, Math.PI / 2, 0],
@@ -2356,8 +2407,30 @@ function buildStore() {
 }
 
 function addSmallCrates(x, y, z) {
-  box(world, [0.8, 0.8, 0.8], 0xb5794e, [x, y + 0.4, z], { rotation: [0, 0.08, 0.05] });
-  box(world, [0.68, 0.68, 0.68], 0xe0a566, [x + 0.7, y + 0.34, z + 0.2], { rotation: [0.03, -0.1, 0] });
+  // Retain both original centers, sizes and tilts; details stay on the old cube faces.
+  for (const [size, color, center, rotation] of [
+    [0.8, 0xb5794e, [x, y + 0.4, z], [0, 0.08, 0.05]],
+    [0.68, 0xe0a566, [x + 0.7, y + 0.34, z + 0.2], [0.03, -0.1, 0]]
+  ]) {
+    const crate = new THREE.Group();
+    crate.position.set(...center); crate.rotation.set(...rotation);
+    box(crate, [size, size, size], color, [0, 0, 0]);
+    const edge = size / 2;
+    for (const side of [-1, 1]) {
+      for (const seam of [-0.18, 0.06]) {
+        box(crate, [size * 0.87, 0.016, 0.008], 0x795334, [0, size * seam, side * (edge + 0.004)]);
+        box(crate, [0.008, 0.016, size * 0.87], 0x795334, [side * (edge + 0.004), size * seam, 0]);
+      }
+      for (const rail of [-0.36, 0.36]) {
+        box(crate, [size * 0.13, size, 0.025], 0x986b42, [size * rail, 0, side * edge]);
+        box(crate, [0.025, size, size * 0.13], 0x986b42, [side * edge, 0, size * rail]);
+        box(crate, [size * 0.13, 0.025, size], 0x986b42, [size * rail, edge, 0]);
+      }
+      box(crate, [size * 0.32, size * 0.07, 0.012], 0x4a3b2b, [0, size * 0.32, side * (edge + 0.009)]);
+    }
+    for (const seam of [-0.18, 0.06]) box(crate, [size * 0.72, 0.009, 0.015], 0x795334, [0, edge + 0.004, size * seam]);
+    world.add(crate);
+  }
 }
 
 function buildForest() {
@@ -4702,6 +4775,15 @@ function updateFishingTips() {
 }
 
 function updateFishingCallout() {
+  const liveState = fishing.phase === 'reeling' ? `${fishing.phase}:${fishing.tensionState}` : fishing.phase;
+  const previousState = feedbackHub.dataset.fishingState;
+  feedbackHub.dataset.fishingActive = String(['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState && !lakeBoatPilot?.active && fishing.phase !== 'idle');
+  feedbackHub.dataset.fishingState = liveState;
+  if (previousState && previousState !== liveState && dom.toastStack.firstElementChild?.dataset.fishingState === previousState) {
+    window.clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+    dom.toastStack.replaceChildren();
+  }
   const visible = ['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState;
   dom.fishingCallout.classList.toggle('is-hidden', !visible || lakeBoatPilot?.active);
   if (!visible || lakeBoatPilot?.active) return;
@@ -4778,16 +4860,43 @@ function updateActionDock() {
 }
 
 function setStatus(message) {
-  dom.statusMessage.textContent = message;
+  // Persistent guidance returns after the latest interaction result is read.
+  // A result from the previous zone must not obscure new arrival instructions.
+  if (dom.toastStack.firstElementChild?.dataset.zone !== undefined && dom.toastStack.firstElementChild.dataset.zone !== currentZone) {
+    window.clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+    dom.toastStack.replaceChildren();
+  }
+  if (dom.statusMessage.textContent !== message) dom.statusMessage.textContent = message;
 }
 
 function toast(message, tone = 'success') {
-  const element = document.createElement('div');
-  element.className = `toast ${tone === 'warning' ? 'is-warning' : tone === 'danger' ? 'is-danger' : ''}`;
-  element.dataset.toastId = String(++toastId);
-  element.textContent = message;
-  dom.toastStack.appendChild(element);
-  window.setTimeout(() => element.remove(), 4000);
+  // One stable location and one current result, never a growing corner stack.
+  const kind = tone === 'warning' ? 'warning' : tone === 'danger' ? 'danger' : 'success';
+  const current = dom.toastStack.firstElementChild;
+  window.clearTimeout(feedbackTimer);
+  if (!current || current.dataset.message !== message || current.dataset.tone !== kind) {
+    const element = document.createElement('div');
+    element.className = `toast is-${kind}`;
+    element.dataset.toastId = String(++toastId);
+    element.dataset.message = message;
+    element.dataset.tone = kind;
+    element.dataset.zone = currentZone;
+    if (fishing.phase !== 'idle') element.dataset.fishingState = fishing.phase === 'reeling' ? `${fishing.phase}:${fishing.tensionState}` : fishing.phase;
+    const label = document.createElement('strong');
+    label.className = 'feedback-label';
+    label.textContent = kind === 'warning' ? 'ATTENTION' : kind === 'danger' ? 'UNABLE TO COMPLETE' : 'FIELD UPDATE';
+    const text = document.createElement('span');
+    text.textContent = message;
+    element.append(label, text);
+    dom.toastStack.replaceChildren(element);
+  }
+  // Long dialogue gets longer reading time; repeated messages refresh, not stack.
+  const duration = Math.min(16000, Math.max(8000, message.length * 55));
+  feedbackTimer = window.setTimeout(() => {
+    dom.toastStack.replaceChildren();
+    feedbackTimer = null;
+  }, duration);
 }
 
 function setTool(tool) {
@@ -4887,6 +4996,7 @@ function cycleFood() {
 function openModal(element) {
   modalOpen = true;
   element.classList.remove('is-hidden');
+  element.appendChild(feedbackHub);
   releaseFieldModeForModal();
 }
 
@@ -4907,6 +5017,7 @@ function restoreFieldMode() {
 }
 
 function closeModal(element) {
+  document.querySelector('#game-shell').appendChild(feedbackHub);
   element.classList.add('is-hidden');
   modalOpen = false;
   if (element === dom.qteModal) qteState = null;
@@ -4918,6 +5029,7 @@ function closeModal(element) {
 }
 
 function closeAllModals(restore = true) {
+  document.querySelector('#game-shell').appendChild(feedbackHub);
   [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
   modalOpen = false;
   qteState = null;

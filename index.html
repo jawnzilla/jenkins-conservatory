@@ -33,11 +33,6 @@
               <span class="status-dot" id="lock-dot"></span>
               <span id="lock-label">CLICK TO ENTER FIELD MODE</span>
             </div>
-            <p id="status-message" class="status-message">Find the car to choose your first destination.</p>
-          </div>
-          <div id="prompt-card" class="panel prompt-card is-hidden" aria-live="polite">
-            <span class="prompt-key" id="prompt-key">E</span>
-            <span id="prompt-text">Interact</span>
           </div>
         </section>
 
@@ -79,8 +74,7 @@
         </section>
 
         <div id="crosshair" class="crosshair" aria-hidden="true"><span></span></div>
-        <div id="fishing-callout" class="fishing-callout is-hidden" aria-live="polite"></div>
-        <div id="action-hint" class="action-hint" aria-live="polite"></div>
+
 
         <section id="action-dock" class="action-dock" aria-label="Current tool actions">
           <button id="primary-action" class="action-button" type="button">CLICK TO LOOK</button>
@@ -94,8 +88,20 @@
           <button class="tool-button" data-tool="food" type="button" title="Food: hold a carrot or fish to attract nearby animals"><span class="tool-icon">◉</span><span>FOOD</span></button>
         </section>
 
-        <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
       </div>
+
+      <section id="interaction-hub" class="interaction-hub" aria-label="Interaction and field feedback">
+        <div id="prompt-card" class="panel prompt-card is-hidden" aria-live="polite">
+          <span class="prompt-key" id="prompt-key">E</span>
+          <span id="prompt-text">Interact</span>
+        </div>
+        <div class="feedback-card">
+          <div id="toast-stack" class="toast-stack" role="status" aria-live="polite" aria-atomic="true"></div>
+          <p id="status-message" class="status-message" role="status" aria-live="polite" aria-atomic="true">Find the car to choose your first destination.</p>
+        </div>
+        <div id="fishing-callout" class="fishing-callout is-hidden" aria-live="polite"></div>
+        <div id="action-hint" class="action-hint"></div>
+      </section>
 
       <section id="tips-menu" class="tips-menu panel is-hidden" aria-label="Field guide settings">
         <div class="card-heading">

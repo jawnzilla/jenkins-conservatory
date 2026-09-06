@@ -1,0 +1,140 @@
+/* A single reading lane: target -> result/guidance -> tool context. */
+.interaction-hub {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: max(116px, calc(env(safe-area-inset-bottom) + 104px));
+  transform: translateX(-50%);
+  width: min(540px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+  color: #fff8e8;
+}
+.interaction-hub .prompt-card {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 700;
+  background: #182d24;
+  border: 1px solid #c9df93;
+  box-shadow: 0 4px 20px #0006;
+  pointer-events: none;
+}
+.interaction-hub .prompt-key { width: 32px; height: 32px; flex: 0 0 32px; font-size: 15px; background: #314635; }
+.feedback-card {
+  background: rgba(15, 29, 23, 0.97);
+  border: 1px solid #91a382;
+  border-left: 4px solid #c9df93;
+  box-shadow: 0 5px 24px #0008;
+}
+.interaction-hub .status-message {
+  margin: 0;
+  padding: 13px 16px;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #fff8e8;
+  overflow-wrap: anywhere;
+}
+.interaction-hub .toast-stack {
+  position: static;
+  width: 100%;
+  display: block;
+  justify-items: stretch;
+  text-align: left;
+}
+.interaction-hub .toast-stack:empty { display: none; }
+.interaction-hub .toast {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #fff8e8;
+  overflow-wrap: anywhere;
+  animation: none;
+}
+.feedback-label { color: #d6ec9b; font-size: 11px; letter-spacing: 0.1em; }
+.is-warning .feedback-label { color: #ffd194; }
+.is-danger .feedback-label { color: #ffada2; }
+.feedback-card:has(.is-warning) { border-left-color: #ffc177; }
+.feedback-card:has(.is-danger) { border-left-color: #ff9889; }
+.feedback-card:has(.toast) .status-message { display: none; }
+.interaction-hub .action-hint,
+.interaction-hub .fishing-callout {
+  position: static;
+  width: 100%;
+  transform: none;
+  margin: 0;
+  text-shadow: none;
+}
+.interaction-hub .action-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 5px 10px;
+  background: #10251aeb;
+  color: #eeeeda;
+  letter-spacing: 0;
+}
+.interaction-hub .action-hint:empty { display: none; }
+.interaction-hub .fishing-callout { padding: 9px 12px; font-size: 12px; line-height: 1.4; letter-spacing: 0.06em; }
+/* An object prompt/result takes priority over generic tool instructions. */
+.interaction-hub:has(.toast) .action-hint,
+.interaction-hub:has(.prompt-card:not(.is-hidden)) .action-hint,
+.interaction-hub:has(.toast) .fishing-callout:not(.is-bite),
+.interaction-hub:has(.prompt-card:not(.is-hidden)) .fishing-callout:not(.is-bite) { display: none; }
+/* Feedback stays in the same reading lane when a shop/modal is open. */
+body:has(.modal-shell:not(.is-hidden)) .interaction-hub { bottom: max(12px, env(safe-area-inset-bottom)); }
+body:has(.modal-shell:not(.is-hidden)) .interaction-hub .prompt-card,
+body:has(.modal-shell:not(.is-hidden)) .interaction-hub .action-hint,
+body:has(.modal-shell:not(.is-hidden)) .interaction-hub .fishing-callout,
+body:has(.modal-shell:not(.is-hidden)) .interaction-hub .status-message { display: none; }
+body:has(.modal-shell:not(.is-hidden)) .feedback-card:not(:has(.toast)) { display: none; }
+body:has(.interaction-hub .toast) .modal-shell { padding-bottom: calc(var(--feedback-height, 80px) + 28px); }
+body:has(.interaction-hub .toast) .modal-card { max-height: calc(100dvh - var(--feedback-height, 80px) - 56px); }
+/* Gameplay-critical instructions always outrank ambient/action-result messages. */
+#interaction-hub[data-fishing-active="true"] .feedback-card,
+#interaction-hub[data-fishing-active="true"] .prompt-card,
+#interaction-hub[data-fishing-active="true"] .action-hint { display: none; }
+#interaction-hub[data-fishing-active="true"] .fishing-callout:not(.is-hidden) { display: block; }
+#interaction-hub[data-fishing-active="true"] .fishing-callout { grid-column: 1 / -1; grid-row: 1; }
+@media (max-width: 700px) {
+  .interaction-hub { bottom: max(112px, calc(env(safe-area-inset-bottom) + 104px)); width: calc(100vw - 24px); gap: 5px; }
+  .interaction-hub .toast, .interaction-hub .status-message { padding: 10px 12px; font-size: 14px; line-height: 1.45; }
+  .interaction-hub .prompt-card { padding: 8px 12px; font-size: 14px; }
+  .interaction-hub .action-hint { font-size: 11px; }
+  .fishing-tips { display: none; }
+}
+@media (max-height: 480px) and (min-width: 520px) {
+  .interaction-hub {
+    width: min(720px, calc(100vw - 24px));
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+    align-items: stretch;
+  }
+  .interaction-hub .prompt-card { grid-column: 1; grid-row: 1; }
+  .interaction-hub .feedback-card { grid-column: 2; grid-row: 1; }
+  .interaction-hub:has(.prompt-card.is-hidden) .feedback-card { grid-column: 1 / -1; }
+  .interaction-hub .fishing-callout { grid-column: 1 / -1; }
+  .fishing-tips { display: none; }
+  body:has(.modal-shell:not(.is-hidden)) .interaction-hub { display: flex; }
+}
+@media (max-height: 600px) {
+  .interaction-hub { bottom: 102px; }
+  .interaction-hub .action-hint { display: none; }
+  .interaction-hub .status-message, .interaction-hub .toast { padding: 8px 12px; font-size: 14px; }
+  .interaction-hub .prompt-card { padding: 6px 12px; }
+}
+@media (max-height: 480px) and (min-width: 520px) {
+  .interaction-hub { bottom: max(76px, calc(env(safe-area-inset-bottom) + 64px)); }
+  .action-dock { left: 12px; bottom: 12px; width: auto; transform: none; }
+  .action-button { min-width: 140px; }
+  .equipment-dock { left: auto; right: 12px; bottom: 12px; }
+}
