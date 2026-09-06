@@ -1723,3 +1723,28 @@ h2 {
 @media (max-width: 700px) {
   .journal-toggle .key-hint { display: none; }
 }
+
+/* --- Sleep ------------------------------------------------------------------
+   A full-screen wipe that covers the jump in the sky colour while the field
+   clock is moved forward. */
+
+.sleep-veil {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  opacity: 0;
+  background: #05090c;
+  pointer-events: none;
+  transition: opacity 620ms ease;
+}
+
+.sleep-veil.is-sleeping {
+  opacity: 1;
+}
+
+.wake-option-time {
+  color: var(--aqua);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}

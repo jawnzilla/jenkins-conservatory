@@ -7,7 +7,7 @@ await page.route('**/src/main.js*',async route=>{ const r=await route.fetch(); l
 await page.goto('http://127.0.0.1:5193/jenkins-conservatory/');
 await page.waitForFunction(()=>window.qa); await page.waitForTimeout(1500);
 fs.mkdirSync('artifacts',{recursive:true});
-for(const [name,x,z] of [['brynlee',-14.8,-3.8],['brooks',14.8,-3.8],['grayson',0,-5.4]]){
+for(const [name,x,z] of [['brynlee',-14.8,-3.8],['brooks',14.8,-3.8],['grayson',0,-5.4],['brax',-9,-31.4]]){
  await page.evaluate(({x,z})=>{qa.enterZone('zoo'); qa.view={from:[x+(x===0?3.2:1.7),2.15,z+(x===0?1.6:3.4)],to:[x,1.0,z]};}, {x,z});
  await page.waitForTimeout(500); await page.screenshot({path:`artifacts/${name}.png`});
 }
@@ -18,4 +18,4 @@ await page.waitForTimeout(600);await page.screenshot({path:'artifacts/captain-ma
 const result=await page.evaluate(()=>{qa.enterZone('zoo');const characters=qa.interactables.filter(e=>e.type==='character').map(e=>e.character).sort(); for(const id of characters)qa.talkToCharacter(id); qa.enterZone('lake'); const captain=qa.interactables.filter(e=>e.type==='captain').length; qa.talkToCaptainMark(); const b=qa.getBoat(); const before=b.group.position.clone(); qa.enterLakeBoat(b); qa.cycleLakeBoatSpeed(1);qa.updateLakeBoatMovement(0.1); const moved=b.group.position.distanceTo(before);qa.exitLakeBoat();return {moved,pilotExited:!qa.getPilot(),characters,captain};});
 await page.screenshot({path:'artifacts/lake.png'});
 console.log(JSON.stringify({errors,result},null,2)); await browser.close();
-if(errors.length||result.captain!==1||!result.moved||!result.pilotExited||result.characters.join(',')!=='brooks,brynlee,grayson')process.exitCode=1;
+if(errors.length||result.captain!==1||!result.moved||!result.pilotExited||result.characters.join(',')!=='brax,brooks,brynlee,grayson')process.exitCode=1;

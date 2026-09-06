@@ -232,7 +232,11 @@ const SHOP_ITEMS = [
   { key: 'nets', group: 'tool', label: 'Field net', note: 'For rabbits, squirrels, and flying bugs.', cost: 24, amount: 1 },
   { key: 'magnifiers', group: 'tool', label: 'Magnifying glass', note: 'Reveals hidden bug movement.', cost: 22, amount: 1 },
   { key: 'goldenSeeds', group: 'care', label: 'Golden seed bundle', note: 'Brynlee uses these to start a caretaker shift.', cost: 18, amount: 1 },
-  { key: 'lanternOil', group: 'night', label: 'Lantern oil', note: 'Keeps Brooks on night watch.', cost: 14, amount: 1 }
+  { key: 'lanternOil', group: 'night', label: 'Lantern oil', note: 'Keeps Brooks on night watch.', cost: 14, amount: 1 },
+  // Both of these were read all over the code but had no way to be obtained,
+  // which left the cabin stove — and so Captain Mark's gate — unreachable.
+  { key: 'pans', group: 'tool', label: 'Camp cooking pan', note: 'Required to cook anything on the cabin stove.', cost: 26, amount: 1 },
+  { key: 'waders', group: 'tool', label: 'Chest waders', note: 'Wade further out from the bank before the drop-off.', cost: 32, amount: 1 }
 ];
 
 const DEFAULT_SAVE = {
@@ -248,6 +252,35 @@ const DEFAULT_SAVE = {
     goldenSeeds: 1,
     lanternOil: 1
   },
+  // Harvested field ingredients, cooked dishes, personal fish records and the
+  // raw materials Brax builds with. These are read unguarded all over the file,
+  // so they have to exist on a fresh save rather than being created on first use.
+  ingredients: {
+    carrots: 0,
+    mushrooms: 0,
+    morels: 0,
+    treeMushrooms: 0,
+    wildRice: 0,
+    scallions: 0,
+    berries: 0,
+    duckEggs: 0,
+    flowers: 0,
+    trout: 0,
+    sunfish: 0,
+    bass: 0,
+    crappie: 0
+  },
+  cooked: {
+    grilledFish: 0,
+    glazedCarrots: 0,
+    risotto: 0,
+    sunfishSalad: 0,
+    troutEggsBenedict: 0
+  },
+  materials: { sticks: 0, stones: 0 },
+  builds: {},
+  honey: 0,
+  records: {},
   caught: {},
   cleanedEnclosures: {},
   brynleeCaretakerUntil: 0,
@@ -303,6 +336,13 @@ const dom = {
   qteCopy: document.querySelector('#qte-copy'),
   collectionModal: document.querySelector('#collection-modal'),
   collectionGrid: document.querySelector('#collection-grid'),
+  buildModal: document.querySelector('#build-modal'),
+  buildOptions: document.querySelector('#build-options'),
+  buildStock: document.querySelector('#build-stock'),
+  sleepModal: document.querySelector('#sleep-modal'),
+  sleepOptions: document.querySelector('#sleep-options'),
+  sleepCopy: document.querySelector('#sleep-copy'),
+  sleepVeil: document.querySelector('#sleep-veil'),
   journalModal: document.querySelector('#journal-modal'),
   journalBody: document.querySelector('#journal-body'),
   journalToggleButton: document.querySelector('#journal-toggle-button'),
@@ -394,6 +434,7 @@ let fallbackPointerId = null;
 let yaw = 0;
 let pitch = -0.08;
 let elapsed = 0;
+let dayTimeOffset = 0;
 let currentDaylight = 1;
 let currentDayPeriod = getDayPeriod(SKY_PHASE_OFFSET % 1);
 let serviceCheckAt = 0;
@@ -419,6 +460,7 @@ let treeInteractions = [];
 let zooAnimals = [];
 let zooEnclosures = [];
 let fieldCharacters = [];
+let buildSites = [];
 let visitors = [];
 let visitorSpawnAt = 0;
 let visitorsSeeded = false;
@@ -490,6 +532,12 @@ function loadSave() {
       ...structuredClone(DEFAULT_SAVE),
       ...parsed,
       supplies: { ...DEFAULT_SAVE.supplies, ...(parsed.supplies || {}) },
+      ingredients: { ...DEFAULT_SAVE.ingredients, ...(parsed.ingredients || {}) },
+      cooked: { ...DEFAULT_SAVE.cooked, ...(parsed.cooked || {}) },
+      materials: { ...DEFAULT_SAVE.materials, ...(parsed.materials || {}) },
+      builds: { ...(parsed.builds || {}) },
+      honey: Number(parsed.honey || 0),
+      records: { ...(parsed.records || {}) },
       caught: { ...(parsed.caught || {}) },
       cleanedEnclosures: { ...(parsed.cleanedEnclosures || {}) },
       brynleeCaretakerUntil: Number(parsed.brynleeCaretakerUntil || 0),
@@ -622,8 +670,11 @@ function resolveWorldCollisions() {
           if (fromX > fromZ) player.x = collider.x + Math.sign(player.x - collider.x || 1) * (collider.halfWidth + PLAYER_RADIUS);
           else player.z = collider.z + Math.sign(player.z - collider.z || 1) * (collider.halfDepth + PLAYER_RADIUS);
         }
-        continue;
       }
+      // A rectangle is fully described by the box test. Falling through to the
+      // circle test below would give every rect an invisible circular bulge of
+      // its `radius`, which is what used to seal gaps in walls and fences.
+      continue;
     }
     const dx = player.x - collider.x;
     const dz = player.z - collider.z;
@@ -852,8 +903,25 @@ function createLowClouds() {
   scene.add(skyCloudLayer);
 }
 
+// `dayTimeOffset` is what sleeping moves. Keeping it separate from `elapsed`
+// means a night's sleep does not also fast-forward every respawn, cooldown and
+// patrol timer in the world.
 function getDayPhase() {
-  return (elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1;
+  return (((elapsed + dayTimeOffset) / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1 + 1) % 1;
+}
+
+function phaseForHour(hour) {
+  return (((hour - DAY_HOUR_OFFSET) / 24) % 1 + 1) % 1;
+}
+
+// Always moves the clock forward, so picking a time earlier than now sleeps
+// through to that time tomorrow rather than winding the day backwards.
+function advanceDayToPhase(targetPhase) {
+  const current = getDayPhase();
+  let delta = targetPhase - current;
+  if (delta <= 0.0005) delta += 1;
+  dayTimeOffset += delta * SKY_CYCLE_SECONDS;
+  return delta * SKY_CYCLE_SECONDS;
 }
 
 function getDayPeriod(phase = getDayPhase()) {
@@ -868,8 +936,11 @@ function getDayPeriod(phase = getDayPhase()) {
 
 function getFieldClockLabel(phase = getDayPhase()) {
   const hours = (phase * 24 + DAY_HOUR_OFFSET) % 24;
-  const whole = Math.floor(hours);
-  const minutes = Math.floor((hours - whole) * 60);
+  // Round to the nearest minute rather than flooring: the phase is accumulated
+  // in floats, so an exact hour can land a hair under and read as :59.
+  const totalMinutes = Math.round(hours * 60) % (24 * 60);
+  const whole = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   return `${String(whole).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
@@ -1998,23 +2069,48 @@ function inspectTree(interaction) {
 }
 
 
-function createFence(x, z, width, depth, color = 0x806e53, solid = true) {
+// `gate` opens a caretaker gap in the path-side (+Z) rail: { offset, width } in
+// local x. Visitors and staff route around the enclosure entirely, so the gap is
+// there for the caretaker to tend and clean the habitat from the inside.
+function createFence(x, z, width, depth, color = 0x806e53, solid = true, gate = null) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   const railY = [0.7, 1.3];
+  // Rail runs from `from` to `to` in local x, so a gated side can be built as
+  // two shorter spans instead of one continuous bar.
+  const spans = gate
+    ? [[-width / 2, gate.offset - gate.width / 2], [gate.offset + gate.width / 2, width / 2]]
+        .filter(([from, to]) => to - from > 0.02)
+    : [[-width / 2, width / 2]];
   for (const y of railY) {
     box(group, [width, 0.12, 0.12], color, [0, y, -depth / 2]);
-    box(group, [width, 0.12, 0.12], color, [0, y, depth / 2]);
+    for (const [from, to] of spans) {
+      box(group, [to - from, 0.12, 0.12], color, [(from + to) / 2, y, depth / 2]);
+    }
     box(group, [0.12, 0.12, depth], color, [-width / 2, y, 0]);
     box(group, [0.12, 0.12, depth], color, [width / 2, y, 0]);
   }
   for (const post of [[-width / 2, -depth / 2], [width / 2, -depth / 2], [-width / 2, depth / 2], [width / 2, depth / 2]]) {
     cylinder(group, 0.11, 0.14, 1.9, color, [post[0], 0.9, post[1]], { segments: 6 });
   }
+  if (gate) {
+    // Taller posts and a sign board mark the gap as a way in, not a broken rail.
+    for (const side of [-1, 1]) {
+      const postX = gate.offset + side * (gate.width / 2);
+      cylinder(group, 0.1, 0.13, 2.15, color, [postX, 1.07, depth / 2], { segments: 6 });
+      cylinder(group, 0.05, 0.05, 0.05, 0xd7c088, [postX, 2.18, depth / 2], { segments: 6 });
+    }
+    box(group, [gate.width, 0.05, 0.5], 0xa8946a, [gate.offset, 0.03, depth / 2], { material: { roughness: 1 } });
+    const gateSign = makeLabel('CARETAKER GATE', '#d8ef85', '#2c4130', 0.24);
+    gateSign.position.set(gate.offset, 2.42, depth / 2);
+    group.add(gateSign);
+  }
   world.add(group);
   if (solid) {
     addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
-    addCollider(x, z + depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
+    for (const [from, to] of spans) {
+      addCollider(x + (from + to) / 2, z + depth / 2, (to - from) / 2, { type: 'rect', halfWidth: (to - from) / 2, halfDepth: 0.18, zone: currentZone });
+    }
     addCollider(x - width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
     addCollider(x + width / 2, z, 0.18, { type: 'rect', halfWidth: 0.18, halfDepth: depth / 2, zone: currentZone });
   }
@@ -2216,7 +2312,7 @@ function createShowcaseCabin(x, z) {
   world.add(cabin);
   interactables.push({ type: 'fridge', label: 'Check ingredient fridge', position: new THREE.Vector3(x + 1.55, 1, z + 1.15), radius: 2.3 });
   interactables.push({ type: 'stove', label: 'Use cabin stove', position: new THREE.Vector3(x + 1.48, 0.9, z - 1.18), radius: 2.3 });
-  interactables.push({ type: 'bed', label: 'Sleep until morning', position: new THREE.Vector3(x - 1.15, 0.7, z + 0.95), radius: 2.4 });
+  interactables.push({ type: 'bed', label: 'Sleep · set a wake time', position: new THREE.Vector3(x - 1.15, 0.7, z + 0.95), radius: 2.4 });
   interactables.push({ type: 'desk', label: 'Inspect field desk', position: new THREE.Vector3(x - 1.2, 1, z - 1.2), radius: 2.3 });
 }
 
@@ -2413,7 +2509,14 @@ function createShopDisplay(item, x, z, row = 0, rotation = 0) {
   box(display, [1.72, 0.12, 0.72], 0xc29a62, [0, 0.48, 0.12]);
   box(display, [1.72, 0.1, 0.72], 0x334f3d, [0, 0.56, 0.1]);
   if (item.group === 'tool') {
-    if (item.key === 'waders') {
+    if (item.key === 'pans') {
+      // Hung face-out on the backboard with the handle down, the way a shop
+      // actually displays one, so the round face reads from the aisle.
+      cylinder(display, 0.3, 0.3, 0.09, 0x4a5350, [0, 1.16, 0.02], { rotation: [Math.PI / 2, 0, 0], segments: 14 });
+      cylinder(display, 0.245, 0.245, 0.035, 0x6b7570, [0, 1.16, 0.075], { rotation: [Math.PI / 2, 0, 0], segments: 14 });
+      cylinder(display, 0.045, 0.05, 0.52, 0x2e3634, [0, 0.8, 0.02], { segments: 7 });
+      torus(display, 0.05, 0.016, 0x2e3634, [0, 0.55, 0.02], [0, 0, 0], 6, 14);
+    } else if (item.key === 'waders') {
       cylinder(display, 0.18, 0.22, 0.76, 0x4d6b69, [-0.22, 1.02, 0], { segments: 8 });
       cylinder(display, 0.18, 0.22, 0.76, 0x4d6b69, [0.22, 1.02, 0], { segments: 8 });
       box(display, [0.34, 0.14, 0.4], 0x2d493e, [-0.22, 0.62, 0.02]);
@@ -2503,10 +2606,15 @@ function buildStore() {
   const sideSpots = [
     [-8.62, -1.5, Math.PI / 2, 0], [-8.62, -4.55, Math.PI / 2, 0],
     [8.62, -1.5, -Math.PI / 2, 0], [8.62, -4.55, -Math.PI / 2, 0],
-    [-8.62, -6.7, Math.PI / 2, 1], [8.62, -6.7, -Math.PI / 2, 1]
+    [-8.62, -6.7, Math.PI / 2, 1], [8.62, -6.7, -Math.PI / 2, 1],
+    [-8.62, -3.0, Math.PI / 2, 1], [8.62, -3.0, -Math.PI / 2, 1]
   ];
   SHOP_ITEMS.slice(3).forEach((item, index) => {
-    const [x, z, rotation, row] = sideSpots[index];
+    const spot = sideSpots[index];
+    // Anything past the last shelf stays on the counter list rather than
+    // throwing when a new item is added to SHOP_ITEMS.
+    if (!spot) return;
+    const [x, z, rotation, row] = spot;
     createShopDisplay(item, x, z, row, rotation);
   });
   createTree(-14, -4, 1.1, 0x44694e);
@@ -2721,7 +2829,7 @@ function createNatureScatter(zoneKey) {
     if (isGrassNaturePosition(zoneKey, x, z)) createGroundFoliage(x, z, 0.7 + (index % 3) * 0.18, index % 2 ? 0x4d8055 : 0x5b8d5b);
   });
   layouts.rocks.forEach(([x, z, scale], index) => {
-    if (isGrassNaturePosition(zoneKey, x, z)) addRock(x, 0.18, z, scale, index % 2 ? 0x718474 : 0x667b6e);
+    if (isGrassNaturePosition(zoneKey, x, z)) createNatureRock(x, z, scale, index);
   });
   layouts.sticks.forEach(([x, z], index) => {
     if (isGrassNaturePosition(zoneKey, x, z)) createNatureStick(x, z, index);
@@ -2749,11 +2857,45 @@ function lootNatureStick(loot) {
   if (!loot || loot.used) return;
   loot.used = true;
   loot.group.visible = false;
+  loot.marker.visible = false;
   save.coins += 2;
+  save.materials.sticks = (save.materials.sticks || 0) + 1;
   saveGame();
   updateHUD();
-  toast('Fallen stick looted. +2¢', 'success');
-  setStatus('The ground cover is full of small field finds.');
+  toast(`Fallen stick looted. +1 stick · +2¢ (${save.materials.sticks} sticks)`, 'success');
+  setStatus('Brax builds with sticks and stones. Bring him what you gather.');
+}
+
+// Loose field stones, gathered the same way as sticks. The bigger scenery rocks
+// stay put; only the small scatter is worth carrying.
+function createNatureRock(x, z, scale, index = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const rock = addMesh(group, new THREE.DodecahedronGeometry(scale, 0), mat(index % 2 ? 0x718474 : 0x667b6e, { roughness: 0.96 }), [0, scale * 0.62, 0], [0.12, index * 0.4, 0.08], [1.3, 0.78, 1.05]);
+  rock.castShadow = true;
+  addMesh(group, new THREE.DodecahedronGeometry(scale * 0.5, 0), mat(index % 2 ? 0x66796c : 0x5d7165, { roughness: 0.98 }), [scale * 0.9, scale * 0.34, scale * 0.25], [0.3, index, 0.2]);
+  const marker = makeLabel('LOOT', '#f2b268', '#3b2e23', 0.22);
+  marker.position.set(0, scale * 1.5 + 0.35, 0);
+  group.add(marker);
+  world.add(group);
+  const loot = { type: 'nature-rock', label: 'Gather field stone', position: new THREE.Vector3(x, 0.35, z), radius: 1.6, group, marker, used: false };
+  natureLoot.push(loot);
+  interactables.push(loot);
+  addCollider(x, z, scale * 0.9, { zone: currentZone });
+  return loot;
+}
+
+function lootNatureRock(loot) {
+  if (!loot || loot.used) return;
+  loot.used = true;
+  loot.group.visible = false;
+  loot.marker.visible = false;
+  save.coins += 3;
+  save.materials.stones = (save.materials.stones || 0) + 1;
+  saveGame();
+  updateHUD();
+  toast(`Field stone gathered. +1 stone · +3¢ (${save.materials.stones} stones)`, 'success');
+  setStatus('Brax builds with sticks and stones. Bring him what you gather.');
 }
 
 function steerCritterFromEdge(critter, delta) {
@@ -2966,12 +3108,15 @@ function buildZoo() {
   createNatureScatter('zoo');
   createParkingHub('CONSERVATORY', ZONES.zoo.accent);
   createPath(0, -2.5, 6, 25, 0xc0ad78);
-  createPath(-9, -9, 3.2, 15, 0xc0ad78);
-  createPath(9, -9, 3.2, 15, 0xc0ad78);
+  // The viewing spurs stop at the enclosure rail rather than running through it.
+  createPath(-9, -3.6, 3.2, 4.6, 0xc0ad78);
+  createPath(9, -3.6, 3.2, 4.6, 0xc0ad78);
 
-  createFence(-9, -10, 8, 8, 0x806e53, false);
-  createFence(9, -10, 8, 8, 0x806e53, false);
-  createFence(0, -22, 14, 5, 0x66806d, false);
+  // Enclosures are fenced off. Visitors and staff view them from the path; each
+  // has a caretaker gate on the path side so you can still get in to work.
+  createFence(-9, -10, 8, 8, 0x806e53, true, { offset: 0, width: 1.9 });
+  createFence(9, -10, 8, 8, 0x806e53, true, { offset: 0, width: 1.9 });
+  createFence(0, -22, 14, 5, 0x66806d, true, { offset: 0, width: 1.9 });
   box(world, [5.3, 0.06, 1.85], 0x4f8054, [0, 0.04, 0.85], { material: { roughness: 1 } });
   const entranceName = makeLabel('JENKINS CONSERVATORY', '#e6f5b7', '#31563d', 0.68);
   entranceName.position.set(0, 1.9, 0.85);
@@ -3009,6 +3154,7 @@ function buildZoo() {
   addEnclosureInteractable('meadow', 'Clean meadow enclosure', -9, -5.55, 'Clear the meadow habitat so the ground animals have a safe field.');
   addEnclosureInteractable('pollinator', 'Clean pollinator enclosure', 9, -5.55, 'Clear the pollinator habitat so the flying animals can forage.');
   addEnclosureInteractable('water-wing', 'Clean water wing', 0, -18.65, 'Clear the water wing so the aquatic exhibit stays healthy.');
+  createBraxYard();
   createFieldCharacter('brynlee', 'Brynlee', 'FIELD NATURALIST', -14.8, -3.8, 0xe889b0, 0xd8ef85);
   createFieldCharacter('brooks', 'Brooks', 'NIGHT GUARD', 14.8, -3.8, 0x476e78, 0xffc86b);
   createFieldCharacter('grayson', 'Grayson', 'SPECIMEN RESEARCH', 0, -5.4, 0x6d587e, 0x89e0c7);
@@ -3019,11 +3165,12 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   group.position.set(x, 0, z);
   const naturalist = id === 'brynlee';
   const guard = id === 'brooks';
-  const skin = naturalist ? 0xd69b78 : guard ? 0xb97c5b : 0xe0b190;
-  const hair = naturalist ? 0xe8c568 : guard ? 0x35332e : 0x4d3c34;
+  const builder = id === 'brax';
+  const skin = naturalist ? 0xd69b78 : guard ? 0xb97c5b : builder ? 0x8a5a3a : 0xe0b190;
+  const hair = naturalist ? 0xe8c568 : guard ? 0x35332e : builder ? 0x241d18 : 0x4d3c34;
   const leather = 0x614534;
   const dark = 0x293a36;
-  const shirt = naturalist ? 0xf1dfb3 : guard ? 0xabc3b9 : 0xf2ead6;
+  const shirt = naturalist ? 0xf1dfb3 : guard ? 0xabc3b9 : builder ? 0xd9c9a4 : 0xf2ead6;
   // Joint-to-joint limbs keep the elbows, cuffs and carried props connected.
   const limb = (parent, from, to, radius, color, endRadius = radius) => {
     const a = new THREE.Vector3(...from);
@@ -3083,8 +3230,9 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
     const elbow = [side * 0.36, 1.065, 0.055];
     const hand = naturalist ? [side * 0.32, 0.88, 0.16]
       : guard ? [side * 0.39, side === 1 ? 1.07 : 0.89, 0.22]
-        : [side * 0.19, 1.075, 0.34];
-    const swings = naturalist || (guard && side === -1);
+        : builder ? [side * 0.34, side === 1 ? 0.95 : 0.86, side === 1 ? 0.22 : 0.14]
+          : [side * 0.19, 1.075, 0.34];
+    const swings = naturalist || ((guard || builder) && side === -1);
     let parent = group;
     if (swings) {
       const pivot = new THREE.Group();
@@ -3140,10 +3288,41 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
     cylinder(group, 0.11, 0.115, 0.035, dark, [lanternX, 0.91, 0.22]);
     const lanternGlass = cylinder(group, 0.09, 0.09, 0.2, accentColor, [lanternX, 0.793, 0.22], { material: { emissive: 0xffb64f, emissiveIntensity: 1.3 } });
     group.userData.lantern = lanternGlass;
+    // An emissive material only looks bright; it lights nothing around it. A
+    // point light in the same place is what actually makes the lantern glow.
+    const lanternLight = new THREE.PointLight(0xffb257, 0, 11, 1.7);
+    lanternLight.position.set(lanternX, 0.793, 0.22);
+    group.add(lanternLight);
+    group.userData.lanternLight = lanternLight;
+    // A soft halo around the glass so the source reads as lit from a distance.
+    const lanternHalo = sphere(group, 0.19, 0xffd39a, [lanternX, 0.793, 0.22], {
+      material: { transparent: true, opacity: 0, depthWrite: false, emissive: 0xffb257, emissiveIntensity: 1.6 }
+    });
+    group.userData.lanternHalo = lanternHalo;
     cylinder(group, 0.12, 0.1, 0.04, dark, [lanternX, 0.675, 0.22]);
     for (const dx of [-0.078, 0.078]) for (const dz of [-0.065, 0.065]) {
       limb(group, [lanternX + dx, 0.69, 0.22 + dz], [lanternX + dx, 0.91, 0.22 + dz], 0.012, dark);
     }
+  } else if (builder) {
+    // Flat work cap, a loaded tool belt and a mallet held in the right hand.
+    cylinder(group, 0.25, 0.255, 0.05, coatColor, [0, 1.845, -0.01], { segments: 10 });
+    cylinder(group, 0.175, 0.235, 0.13, coatColor, [0, 1.92, -0.02], { segments: 10 });
+    box(group, [0.31, 0.04, 0.22], 0x4a3a2c, [0, 1.835, 0.18], { rotation: [-0.08, 0, 0] });
+    box(group, [0.5, 0.12, 0.3], leather, [0, 0.88, 0.02], { scale: [1, 1, 1.04] });
+    box(group, [0.1, 0.09, 0.03], accentColor, [0, 0.88, 0.19]);
+    for (const [bx, bw, bc] of [[-0.24, 0.13, 0x7d5f3f], [0.24, 0.15, 0x6b7f6a]]) {
+      box(group, [bw, 0.2, 0.14], bc, [bx, 0.78, 0.14]);
+    }
+    // Chisels poking out of the belt pouch.
+    for (const dx of [-0.03, 0.03]) cylinder(group, 0.016, 0.016, 0.2, 0xc8ccc2, [-0.24 + dx, 0.9, 0.16], { segments: 5 });
+    // Shaft runs through the closed right hand, head just above the knuckles.
+    const malletX = 0.35;
+    cylinder(group, 0.028, 0.032, 0.54, 0x8a6440, [malletX, 0.88, 0.23], { rotation: [0.1, 0, 0.05], segments: 6 });
+    box(group, [0.14, 0.2, 0.2], 0x6f5334, [malletX + 0.02, 1.21, 0.25], { rotation: [0, 0, 0.05] });
+    box(group, [0.155, 0.05, 0.21], 0x4d3a26, [malletX + 0.02, 1.21, 0.25]);
+    sphere(group, 0.032, 0x8a6440, [malletX - 0.01, 0.62, 0.22]);
+    // Rolled sleeve cuff on the free arm.
+    box(group, [0.11, 0.1, 0.15], shirt, [-0.33, 1.0, 0.08]);
   } else {
     for (const side of [-1, 1]) {
       addMesh(group, new THREE.TorusGeometry(0.055, 0.009, 5, 12), mat(0xb3c9b8, { metalness: 0.4 }), [side * 0.083, 1.653, 0.224]);
@@ -3188,19 +3367,22 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
 // Where each of the three keeps to. Every route loops inside that person's own
 // corner of the showcase so they never wander into someone else's ground.
 const STAFF_PATROLS = {
-  // Brynlee works the west meadow enclosure and the lawn in front of it.
-  brynlee: [[-14.8, -3.8], [-14.2, -9.4], [-11.6, -13.2], [-15.8, -13.6], [-17.4, -8.2], [-16.6, -2.4]],
-  // Brooks walks the east pollinator side and the fence line behind it.
-  brooks: [[14.8, -3.8], [16.4, -8.6], [15.2, -13.8], [11.4, -13.4], [11.8, -7.4], [13.6, -2.2]],
+  // Brynlee works the west lawn, staying outside the meadow rail (x < -13).
+  brynlee: [[-14.8, -3.8], [-14.6, -9.4], [-15.2, -13.9], [-17.8, -11.6], [-17.4, -6.2], [-16.6, -2.4]],
+  // Brooks walks the east side, staying outside the pollinator rail (x > 13).
+  brooks: [[14.8, -3.8], [16.4, -8.6], [15.2, -13.9], [17.8, -11.4], [17.4, -6.4], [13.6, -2.2]],
   // Grayson stays on the central path between the record board and water wing.
-  grayson: [[0, -5.4], [-2.6, -9.6], [-2.4, -14.6], [2.4, -14.8], [2.8, -9.4]]
+  grayson: [[0, -5.4], [-2.6, -9.6], [-2.4, -14.6], [2.4, -14.8], [2.8, -9.4]],
+  // Brax works his build yard behind the showcase, circling the plots.
+  brax: [[-9, -32.5], [-13.5, -35], [-13.5, -42.5], [-4.5, -42.5], [-4.5, -35]]
 };
 
 // Night guard works nights; the naturalist and the researcher work days.
 const STAFF_SHIFTS = {
   brynlee: ['dawn', 'day'],
   grayson: ['dawn', 'day', 'dusk'],
-  brooks: ['dusk', 'night']
+  brooks: ['dusk', 'night'],
+  brax: ['dawn', 'day', 'dusk']
 };
 
 function isStaffOnShift(id) {
@@ -3251,8 +3433,14 @@ function updateFieldCharacters(delta) {
     group.position.y = Math.abs(Math.sin(staff.stride)) * 0.035 * clamp(staff.speed / 0.95, 0, 1);
     staff.interactable.position.set(group.position.x, 1, group.position.z);
     if (group.userData.lantern) {
-      // Brooks' lantern burns brighter once the light goes.
-      group.userData.lantern.material.emissiveIntensity = 0.35 + (1 - currentDaylight) * 1.6;
+      // Brooks' lantern lights up as the daylight drains away, and is out cold
+      // at midday. A little flicker keeps it from reading as a flat bulb.
+      const darkness = clamp(1 - currentDaylight, 0, 1);
+      const lit = Math.max(0, darkness - 0.18) / 0.82;
+      const flicker = lit > 0 ? 0.92 + Math.sin(elapsed * 7.3 + staff.stride) * 0.05 + Math.sin(elapsed * 17.1) * 0.03 : 1;
+      group.userData.lantern.material.emissiveIntensity = 0.2 + lit * 1.9 * flicker;
+      if (group.userData.lanternLight) group.userData.lanternLight.intensity = lit * 5.2 * flicker;
+      if (group.userData.lanternHalo) group.userData.lanternHalo.material.opacity = lit * 0.42 * flicker;
     }
   }
 }
@@ -3277,7 +3465,7 @@ const VISITOR_ROUTES = {
     gate: [-3.6, 5.0],
     capacity: 4,
     interval: [11, 24],
-    stops: [[0, 3.2], [-5.8, -2.4], [-6.6, -7.6], [-2.2, -11.6], [5.6, -7.4], [6.2, -2.2], [0, -16.2]],
+    stops: [[0, 3.2], [-4.4, -2.4], [-3.9, -8.4], [-2.2, -12.6], [3.9, -8.2], [4.4, -2.2], [0, -16.6]],
     lines: [
       'Is the tawny owl awake yet? We drove out just to see it.',
       'The meadow habitat looks spotless today.',
@@ -3469,6 +3657,200 @@ function updateVisitors(delta) {
     for (const arm of group.userData.arms) arm.pivot.rotation.x = -swing * 0.38 * arm.side;
     group.position.y = Math.abs(Math.sin(visitor.stride)) * 0.032 * clamp(visitor.speed / 1.05, 0, 1);
     visitor.interactable.position.set(group.position.x, 1, group.position.z);
+  }
+}
+
+// --- Brax's build yard --------------------------------------------------------
+// Sticks and stones gathered in the field are spent here. Each plot holds one
+// project, and what stands on each plot is kept in the save.
+
+const BUILD_PROJECTS = [
+  { key: 'cairn', label: 'Stone cairn', note: 'A stacked waymarker for the field trail.', cost: { stones: 4 } },
+  { key: 'firepit', label: 'Campfire ring', note: 'A ring of stones around a laid fire.', cost: { stones: 3, sticks: 2 } },
+  { key: 'bench', label: 'Log bench', note: 'A split log resting on two stone footings.', cost: { sticks: 4, stones: 2 } },
+  { key: 'trellis', label: 'Stick trellis', note: 'A lashed frame for climbing plants.', cost: { sticks: 6 } },
+  { key: 'nestbox', label: 'Nest box on a post', note: 'A raised box the sparrows will use.', cost: { sticks: 5, stones: 1 } },
+  { key: 'lamppost', label: 'Lantern post', note: 'A yard lamp that lights itself at dusk.', cost: { sticks: 3, stones: 3 } }
+];
+
+const BUILD_SITES = [
+  [-13, -37], [-9, -37], [-5, -37],
+  [-13, -41], [-9, -41], [-5, -41]
+];
+
+function materialCount(key) {
+  return save.materials?.[key] || 0;
+}
+
+function canAffordBuild(project) {
+  return Object.entries(project.cost).every(([key, amount]) => materialCount(key) >= amount);
+}
+
+function describeBuildCost(project) {
+  return Object.entries(project.cost)
+    .map(([key, amount]) => `${amount} ${key === 'sticks' ? 'stick' : 'stone'}${amount === 1 ? '' : 's'}`)
+    .join(' + ');
+}
+
+// Each project is a small low-poly prop built around the plot origin.
+function createBuildModel(key) {
+  const group = new THREE.Group();
+  if (key === 'cairn') {
+    const stack = [[0.42, 0.16, 0x6d8073], [0.34, 0.44, 0x7b8d80], [0.27, 0.68, 0x66796c], [0.19, 0.86, 0x84958a], [0.12, 0.99, 0x6d8073]];
+    stack.forEach(([radius, y, color], index) => {
+      addMesh(group, new THREE.DodecahedronGeometry(radius, 0), mat(color, { roughness: 0.95 }), [Math.sin(index * 1.7) * 0.05, y, Math.cos(index * 2.1) * 0.05], [0.2, index * 0.9, 0.12], [1.25, 0.66, 1.1]);
+    });
+  } else if (key === 'firepit') {
+    for (let index = 0; index < 9; index += 1) {
+      const angle = (index / 9) * Math.PI * 2;
+      addMesh(group, new THREE.DodecahedronGeometry(0.2, 0), mat(index % 2 ? 0x6d8073 : 0x7b8d80, { roughness: 0.95 }), [Math.cos(angle) * 0.66, 0.13, Math.sin(angle) * 0.66], [0.2, angle, 0.1], [1.2, 0.72, 1.1]);
+    }
+    addMesh(group, new THREE.CircleGeometry(0.56, 14), mat(0x3a3129, { roughness: 1 }), [0, 0.03, 0], [-Math.PI / 2, 0, 0]);
+    for (const [rot, tilt] of [[0.5, 0.5], [2.6, -0.45], [4.4, 0.4]]) {
+      cylinder(group, 0.045, 0.055, 0.8, 0x7d5c3d, [Math.cos(rot) * 0.16, 0.3, Math.sin(rot) * 0.16], { segments: 6, rotation: [tilt, rot, 0.5] });
+    }
+    cone(group, 0.2, 0.36, 0xe8913f, [0, 0.34, 0], { segments: 6, material: { emissive: 0xd2621f, emissiveIntensity: 0.9, transparent: true, opacity: 0.9 } });
+  } else if (key === 'bench') {
+    for (const x of [-0.62, 0.62]) {
+      addMesh(group, new THREE.DodecahedronGeometry(0.24, 0), mat(0x70837a, { roughness: 0.95 }), [x, 0.17, 0], [0.1, x, 0.1], [1.2, 0.9, 1.2]);
+    }
+    cylinder(group, 0.19, 0.19, 1.85, 0x99703f, [0, 0.42, 0], { rotation: [0, 0, Math.PI / 2], segments: 10 });
+    box(group, [1.85, 0.06, 0.44], 0xb5885a, [0, 0.5, 0]);
+  } else if (key === 'trellis') {
+    for (const x of [-0.5, 0.5]) cylinder(group, 0.045, 0.055, 1.7, 0x7d5c3d, [x, 0.85, 0], { segments: 6 });
+    for (const y of [0.45, 0.9, 1.35]) cylinder(group, 0.035, 0.035, 1.06, 0x8b6848, [0, y, 0], { rotation: [0, 0, Math.PI / 2], segments: 5 });
+    for (const [x, y] of [[-0.5, 0.45], [0.5, 0.9], [-0.5, 1.35]]) torus(group, 0.06, 0.014, 0xc7b18b, [x, y, 0], [0, Math.PI / 2, 0], 5, 10);
+    for (let index = 0; index < 4; index += 1) {
+      sphere(group, 0.12, 0x548a52, [-0.4 + index * 0.28, 0.36 + (index % 2) * 0.42, 0.06], { scale: [1.2, 0.5, 0.7] });
+    }
+  } else if (key === 'nestbox') {
+    cylinder(group, 0.075, 0.09, 1.75, 0x7d5c3d, [0, 0.87, 0], { segments: 7 });
+    for (const x of [-0.24, 0.24]) cylinder(group, 0.03, 0.03, 0.42, 0x8b6848, [x * 0.6, 1.36, 0], { rotation: [0, 0, x > 0 ? -0.7 : 0.7], segments: 5 });
+    box(group, [0.46, 0.5, 0.42], 0xa8794c, [0, 1.94, 0]);
+    box(group, [0.56, 0.07, 0.52], 0x6d5033, [0, 2.22, 0], { rotation: [0.16, 0, 0] });
+    cylinder(group, 0.075, 0.075, 0.06, 0x3b2d1f, [0, 2.0, 0.215], { rotation: [Math.PI / 2, 0, 0], segments: 8 });
+    cylinder(group, 0.02, 0.02, 0.16, 0x6d5033, [0, 1.85, 0.26], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
+  } else if (key === 'lamppost') {
+    for (let index = 0; index < 6; index += 1) {
+      const angle = (index / 6) * Math.PI * 2;
+      addMesh(group, new THREE.DodecahedronGeometry(0.16, 0), mat(0x6d8073, { roughness: 0.95 }), [Math.cos(angle) * 0.3, 0.1, Math.sin(angle) * 0.3], [0.2, angle, 0.1], [1.2, 0.6, 1.1]);
+    }
+    cylinder(group, 0.06, 0.08, 2.15, 0x6b5138, [0, 1.07, 0], { segments: 7 });
+    cylinder(group, 0.12, 0.1, 0.06, 0x4a3a2a, [0, 2.16, 0], { segments: 8 });
+    const glass = cylinder(group, 0.13, 0.13, 0.3, 0xffd08a, [0, 2.34, 0], { segments: 8, material: { emissive: 0xffb257, emissiveIntensity: 1.2, transparent: true, opacity: 0.9 } });
+    cone(group, 0.22, 0.2, 0x4a3a2a, [0, 2.58, 0], { segments: 8 });
+    const light = new THREE.PointLight(0xffb257, 0, 13, 1.7);
+    light.position.set(0, 2.34, 0);
+    group.add(light);
+    group.userData.yardLamp = { glass, light };
+  }
+  return group;
+}
+
+function createBuildSite(x, z, index) {
+  const id = `yard-${index}`;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const pad = addMesh(group, new THREE.CircleGeometry(0.95, 20), mat(0x7a6c53, { roughness: 1, transparent: true, opacity: 0.7 }), [0, 0.03, 0], [-Math.PI / 2, 0, 0]);
+  const ring = addMesh(group, new THREE.TorusGeometry(0.98, 0.05, 6, 22), mat(0xd8ef85, { emissive: 0x6f8a34, emissiveIntensity: 0.7, transparent: true, opacity: 0.85 }), [0, 0.05, 0], [-Math.PI / 2, 0, 0]);
+  world.add(group);
+  const site = {
+    type: 'build-site',
+    id,
+    label: 'Build here',
+    position: new THREE.Vector3(x, 0.6, z),
+    radius: 2.1,
+    group,
+    pad,
+    ring,
+    model: null,
+    project: null
+  };
+  buildSites.push(site);
+  interactables.push(site);
+  const existing = save.builds?.[id];
+  if (existing && BUILD_PROJECTS.some((project) => project.key === existing)) placeBuild(site, existing, false);
+  return site;
+}
+
+function placeBuild(site, projectKey, announce = true) {
+  const project = BUILD_PROJECTS.find((candidate) => candidate.key === projectKey);
+  if (!project) return;
+  if (site.model) site.group.remove(site.model);
+  const model = createBuildModel(projectKey);
+  site.group.add(model);
+  site.model = model;
+  site.project = project;
+  site.label = `${project.label} · inspect`;
+  save.builds[site.id] = projectKey;
+  site.ring.material.opacity = 0.12;
+  site.pad.material.opacity = 0.38;
+  if (announce) {
+    saveGame();
+    updateHUD();
+    toast(`${project.label} built. Brax nods approvingly.`, 'success');
+    setStatus(`${project.label} now stands in the yard. Gather more sticks and stones for the next plot.`);
+  }
+}
+
+function clearBuild(site) {
+  if (!site.project) return;
+  const project = site.project;
+  // Dismantling returns the full cost, so a plot can be reworked freely.
+  for (const [key, amount] of Object.entries(project.cost)) {
+    save.materials[key] = (save.materials[key] || 0) + amount;
+  }
+  site.group.remove(site.model);
+  site.model = null;
+  site.project = null;
+  site.label = 'Build here';
+  delete save.builds[site.id];
+  site.ring.material.opacity = 0.85;
+  site.pad.material.opacity = 0.7;
+  saveGame();
+  updateHUD();
+  toast(`${project.label} dismantled. ${describeBuildCost(project)} returned.`, 'success');
+}
+
+function createBraxYard() {
+  // A worked-earth pad behind the showcase, reached by the west path.
+  createPath(-9, -25, 3.4, 22, 0xb0a077);
+  const yard = addMesh(world, new THREE.PlaneGeometry(13, 11), mat(0x6f6247, { roughness: 1 }), [-9, -0.02, -39], [-Math.PI / 2, 0, 0]);
+  yard.receiveShadow = true;
+  const sign = makeLabel('BRAX · BUILD YARD', '#e2c78a', '#3a2f22', 0.62);
+  sign.position.set(-9, 2.5, -32.6);
+  world.add(sign);
+  // Stockpiles either side of the entrance, so the yard reads as a work site.
+  for (const [sx, sz] of [[-14.6, -33.6], [-3.4, -33.6]]) {
+    for (let index = 0; index < 5; index += 1) {
+      addMesh(world, new THREE.DodecahedronGeometry(0.26, 0), mat(index % 2 ? 0x6d8073 : 0x7b8d80, { roughness: 0.96 }), [sx + Math.sin(index * 2.2) * 0.4, 0.16 + (index % 2) * 0.22, sz + Math.cos(index * 1.8) * 0.36], [0.2, index, 0.1], [1.2, 0.7, 1.1]);
+    }
+  }
+  for (let index = 0; index < 7; index += 1) {
+    cylinder(world, 0.05, 0.06, 1.5, 0x7d5c3d, [-3.9 + (index % 3) * 0.16, 0.06 + Math.floor(index / 3) * 0.12, -35.6 + index * 0.07], { segments: 5, rotation: [Math.PI / 2, 0, 0.1 + index * 0.05] });
+  }
+  BUILD_SITES.forEach(([x, z], index) => createBuildSite(x, z, index));
+  createFieldCharacter('brax', 'Brax', 'FIELD BUILDER', -9, -31.4, 0x9c6f42, 0xe2c78a);
+}
+
+// Plot rings fade out once something stands on them, and only show up close.
+function updateBuildSites(delta) {
+  if (currentZone !== 'zoo') return;
+  for (const site of buildSites) {
+    const near = distanceTo(site.position) < 16;
+    site.group.visible = near || !site.project;
+    if (!site.project) {
+      site.ring.material.opacity = 0.55 + Math.sin(elapsed * 2.1 + site.position.x) * 0.22;
+    }
+    const lamp = site.model?.userData.yardLamp;
+    if (lamp) {
+      // Anything the player built that carries a light follows the same dusk
+      // curve as Brooks' lantern.
+      const lit = Math.max(0, clamp(1 - currentDaylight, 0, 1) - 0.18) / 0.82;
+      const flicker = 0.94 + Math.sin(elapsed * 5.8 + site.position.z) * 0.05;
+      lamp.light.intensity = lit * 4.6 * flicker;
+      lamp.glass.material.emissiveIntensity = 0.25 + lit * 1.8 * flicker;
+    }
   }
 }
 
@@ -4315,6 +4697,7 @@ function resetWorld() {
   zooAnimals = [];
   zooEnclosures = [];
   fieldCharacters = [];
+  buildSites = [];
   visitors = [];
   visitorSpawnAt = 0;
   visitorsSeeded = false;
@@ -5797,7 +6180,7 @@ function closeModal(element) {
 
 function closeAllModals(restore = true) {
   document.querySelector('#game-shell').appendChild(feedbackHub);
-  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal, dom.journalModal].forEach((modal) => modal.classList.add('is-hidden'));
+  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal, dom.journalModal, dom.buildModal, dom.sleepModal].forEach((modal) => modal.classList.add('is-hidden'));
   dom.journalToggleButton?.setAttribute('aria-expanded', 'false');
   modalOpen = false;
   qteState = null;
@@ -5940,6 +6323,8 @@ function renderJournal() {
         ${journalRow('Magnifying glasses', supplies.magnifiers || 0, !supplies.magnifiers)}
         ${journalRow('Golden seeds', supplies.goldenSeeds || 0, !supplies.goldenSeeds)}
         ${journalRow('Lantern oil', supplies.lanternOil || 0, !supplies.lanternOil)}
+        ${journalRow('Sticks · for Brax', materialCount('sticks'), !materialCount('sticks'))}
+        ${journalRow('Stones · for Brax', materialCount('stones'), !materialCount('stones'))}
       </div>
     </div>
 
@@ -5989,15 +6374,255 @@ function toggleJournal() {
   openJournal();
 }
 
-function buyItem(itemKey, group) {
-  const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
-  if (!item || save.coins < item.cost) return;
+function applyPurchase(item) {
   save.coins -= item.cost;
   save.supplies[item.key] = (save.supplies[item.key] || 0) + item.amount;
   saveGame();
   updateHUD();
+  toast(`${item.label} added to the field kit. -${item.cost}¢`, 'success');
+}
+
+function buyItem(itemKey, group) {
+  const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
+  if (!item || save.coins < item.cost) return;
+  applyPurchase(item);
+  // The counter list is already on screen; re-render it in place.
   openShop();
-  toast(`${item.label} added to the field kit.`, 'success');
+}
+
+// --- Pantry, cooking and counter purchases ------------------------------------
+// Honey lives at the top level of the save while everything else a recipe can
+// ask for sits under `ingredients`, so both reads and writes go through here.
+
+function pantryCount(key) {
+  if (key === 'honey') return save.honey || 0;
+  return save.ingredients?.[key] || 0;
+}
+
+function spendPantry(key, amount) {
+  if (key === 'honey') save.honey = Math.max(0, (save.honey || 0) - amount);
+  else save.ingredients[key] = Math.max(0, (save.ingredients[key] || 0) - amount);
+}
+
+// Resolves one recipe line to the key it will actually consume: an `anyOf` line
+// takes whichever stocked option the player has most of, so cooking never
+// silently burns the last of an ingredient another recipe needs more.
+function resolveRecipeIngredient(entry) {
+  const options = entry.anyOf || [entry.key];
+  const stocked = options
+    .map((key) => ({ key, held: pantryCount(key) }))
+    .sort((a, b) => b.held - a.held)[0];
+  return { ...entry, resolvedKey: stocked.key, held: stocked.held, ready: stocked.held >= entry.amount };
+}
+
+function describeRecipe(recipe) {
+  const lines = recipe.ingredients.map(resolveRecipeIngredient);
+  const ready = lines.every((line) => line.ready);
+  const partial = !ready && lines.some((line) => line.held > 0);
+  return { lines, ready, partial };
+}
+
+function renderStoveRecipes() {
+  const hasPan = (save.supplies.pans || 0) > 0;
+  dom.stoveRecipes.innerHTML = COOKING_RECIPES.map((recipe) => {
+    const { lines, ready, partial } = describeRecipe(recipe);
+    const requirements = lines
+      .map((line) => `${line.label} ${Math.min(line.held, line.amount)}/${line.amount}`)
+      .join(' · ');
+    const state = !hasPan ? 'NEEDS PAN' : ready ? 'COOK' : partial ? 'PARTLY STOCKED' : 'MISSING';
+    return `<button class="recipe-option ${ready && hasPan ? 'is-complete' : partial ? 'is-partial' : ''}" type="button"
+      data-cook-recipe="${recipe.key}" ${ready && hasPan ? '' : 'disabled'}>
+      <span class="recipe-copy">
+        <span class="recipe-name">${recipe.label}</span>
+        <span class="recipe-note">${recipe.note}</span>
+        <span class="recipe-requirements">${requirements}</span>
+      </span>
+      <span class="recipe-status">${state}</span>
+    </button>`;
+  }).join('');
+}
+
+function cookAtStove() {
+  renderStoveRecipes();
+  openModal(dom.stoveModal);
+  if ((save.supplies.pans || 0) <= 0) {
+    setStatus('The stove needs a camp cooking pan before anything can be prepared.');
+  }
+}
+
+function cookRecipe(recipeKey) {
+  const recipe = COOKING_RECIPES.find((candidate) => candidate.key === recipeKey);
+  if (!recipe) return;
+  if ((save.supplies.pans || 0) <= 0) {
+    toast('A camp cooking pan is required to use the stove.', 'warning');
+    return;
+  }
+  const { lines, ready } = describeRecipe(recipe);
+  if (!ready) {
+    toast('Some ingredients are still missing for that recipe.', 'warning');
+    return;
+  }
+  for (const line of lines) spendPantry(line.resolvedKey, line.amount);
+  for (const output of recipe.outputs) {
+    save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
+  }
+  saveGame();
+  updateHUD();
+  renderStoveRecipes();
+  toast(`${recipe.label} is ready.`, 'success');
+  setStatus('Cooked dishes are kept in the LOOT + FOOD tab and the field journal.');
+}
+
+function inspectFridge() {
+  const stock = Object.entries(save.ingredients || {})
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => `${formatName(key)} ${count}`);
+  if (save.honey) stock.push(`Honey ${save.honey}`);
+  if (!stock.length) {
+    toast('The fridge is empty. Forage the field for ingredients.', 'warning');
+    setStatus('Pull carrots, pick berries and land fish to stock the cabin fridge.');
+    return;
+  }
+  toast(`Fridge: ${stock.slice(0, 4).join(' · ')}${stock.length > 4 ? '…' : ''}`, 'success');
+  setStatus(`The fridge holds ${stock.length} ingredient type${stock.length === 1 ? '' : 's'}. Press J for the full larder.`);
+}
+
+// Quick purchase straight off a shop display, without opening the counter list.
+function buyShopDisplay(target) {
+  const item = SHOP_ITEMS.find((candidate) => candidate.key === target.itemKey && candidate.group === target.group);
+  if (!item) return;
+  if (save.coins < item.cost) {
+    toast(`${item.label} costs ${item.cost}¢. Record more field notes first.`, 'warning');
+    setStatus('Catch animals and log bugs to earn coins for the supply counter.');
+    return;
+  }
+  applyPurchase(item);
+  setStatus(`${item.label} bought from the shelf. ${save.coins}¢ left.`);
+}
+
+// --- Build menu ---------------------------------------------------------------
+
+let activeBuildSite = null;
+
+function renderBuildMenu() {
+  if (!activeBuildSite) return;
+  const site = activeBuildSite;
+  dom.buildStock.innerHTML = `<strong>MATERIALS ON HAND</strong><span>${materialCount('sticks')} stick${materialCount('sticks') === 1 ? '' : 's'} · ${materialCount('stones')} stone${materialCount('stones') === 1 ? '' : 's'}</span>`;
+  const standing = site.project
+    ? `<button class="recipe-option is-complete" type="button" data-clear-build="1">
+        <span class="recipe-copy">
+          <span class="recipe-name">Dismantle ${site.project.label}</span>
+          <span class="recipe-note">Take this plot back to bare earth.</span>
+          <span class="recipe-requirements">Returns ${describeBuildCost(site.project)}</span>
+        </span>
+        <span class="recipe-status">DISMANTLE</span>
+      </button>`
+    : '';
+  const options = BUILD_PROJECTS.map((project) => {
+    const affordable = canAffordBuild(project);
+    const isHere = site.project?.key === project.key;
+    const held = Object.entries(project.cost)
+      .map(([key, amount]) => `${key === 'sticks' ? 'Sticks' : 'Stones'} ${Math.min(materialCount(key), amount)}/${amount}`)
+      .join(' · ');
+    const partial = !affordable && Object.keys(project.cost).some((key) => materialCount(key) > 0);
+    const state = isHere ? 'BUILT' : affordable ? 'BUILD' : partial ? 'SHORT' : 'MISSING';
+    return `<button class="recipe-option ${isHere ? '' : affordable ? 'is-complete' : partial ? 'is-partial' : ''}" type="button"
+      data-build-project="${project.key}" ${affordable && !isHere ? '' : 'disabled'}>
+      <span class="recipe-copy">
+        <span class="recipe-name">${project.label}</span>
+        <span class="recipe-note">${project.note}</span>
+        <span class="recipe-requirements">${held}</span>
+      </span>
+      <span class="recipe-status">${state}</span>
+    </button>`;
+  }).join('');
+  dom.buildOptions.innerHTML = standing + options;
+}
+
+function openBuildMenu(site) {
+  activeBuildSite = site;
+  renderBuildMenu();
+  openModal(dom.buildModal);
+  if (!materialCount('sticks') && !materialCount('stones')) {
+    setStatus('Loot fallen sticks and field stones out in the forest, then come back to build.');
+  }
+}
+
+function buildProject(projectKey) {
+  const site = activeBuildSite;
+  const project = BUILD_PROJECTS.find((candidate) => candidate.key === projectKey);
+  if (!site || !project) return;
+  if (!canAffordBuild(project)) {
+    toast(`Not enough materials: ${project.label} needs ${describeBuildCost(project)}.`, 'warning');
+    return;
+  }
+  // A plot holds one project, so rebuilding refunds whatever stood there first.
+  if (site.project) clearBuild(site);
+  for (const [key, amount] of Object.entries(project.cost)) {
+    save.materials[key] = Math.max(0, materialCount(key) - amount);
+  }
+  placeBuild(site, project.key, true);
+  renderBuildMenu();
+}
+
+// --- Sleeping -----------------------------------------------------------------
+
+const WAKE_TIMES = [
+  { hour: 6, label: 'First light', note: 'Rabbits and foxes are still out; the day shift is waking.' },
+  { hour: 12, label: 'Midday', note: 'Full sun. Butterflies, bees and squirrels are working.' },
+  { hour: 19, label: 'Dusk', note: 'Owls and raccoons start their rounds.' },
+  { hour: 0, label: 'Midnight', note: 'Only the nocturnal animals are moving.' }
+];
+
+let sleepTimer = null;
+
+function formatSleepLength(seconds) {
+  const gameHours = (seconds / SKY_CYCLE_SECONDS) * 24;
+  const whole = Math.floor(gameHours);
+  const minutes = Math.round((gameHours - whole) * 60);
+  return `${whole}h ${String(minutes).padStart(2, '0')}m`;
+}
+
+function sleepAtCabin() {
+  const phase = getDayPhase();
+  dom.sleepCopy.textContent = `It is ${getFieldClockLabel(phase)}. Choose when to get up.`;
+  dom.sleepOptions.innerHTML = WAKE_TIMES.map((wake) => {
+    const target = phaseForHour(wake.hour);
+    let delta = target - phase;
+    if (delta <= 0.0005) delta += 1;
+    const clock = `${String(wake.hour).padStart(2, '0')}:00`;
+    return `<button class="travel-option" data-wake-hour="${wake.hour}" type="button">
+      <span class="travel-option-copy">
+        <span class="travel-option-title">${wake.label} · ${clock}</span>
+        <span class="travel-option-note">${wake.note}</span>
+      </span>
+      <span class="wake-option-time">${formatSleepLength(delta * SKY_CYCLE_SECONDS)}</span>
+    </button>`;
+  }).join('');
+  openModal(dom.sleepModal);
+}
+
+function wakeAt(hour) {
+  const wake = WAKE_TIMES.find((candidate) => candidate.hour === hour);
+  if (!wake) return;
+  closeModal(dom.sleepModal);
+  window.clearTimeout(sleepTimer);
+  dom.sleepVeil.classList.add('is-sleeping');
+  const slept = advanceDayToPhase(phaseForHour(hour));
+  // The period jumped, so adopt it silently rather than letting the ordinary
+  // dawn/dusk announcement fire on top of the wake-up message.
+  currentDayPeriod = getDayPeriod();
+  updateSkyCycle();
+  // A rested caretaker moves quietly again.
+  spookRisk = 0.02;
+  currentNoise = spookRisk;
+  saveGame();
+  updateHUD();
+  sleepTimer = window.setTimeout(() => {
+    dom.sleepVeil.classList.remove('is-sleeping');
+    toast(`You slept ${formatSleepLength(slept)}. It is ${getFieldClockLabel()}.`, 'success');
+    setStatus(`${wake.label} at the field cabin. ${wake.note}`);
+  }, 640);
 }
 
 function serviceActive(until) {
@@ -6071,6 +6696,22 @@ function talkToCharacter(character) {
     updateHUD();
     toast('Brooks started a 30-minute Conservatory night watch. +6¢', 'success');
     setStatus('Brooks is patrolling the Conservatory. Night disturbances will be reported.');
+    return;
+  }
+  if (character === 'brax') {
+    const sticks = materialCount('sticks');
+    const stones = materialCount('stones');
+    const free = buildSites.filter((site) => !site.project).length;
+    if (!sticks && !stones) {
+      setStatus('Brax needs sticks and field stones. Loot the fallen sticks and loose rocks out in the forest.');
+      toast('Brax: "Bring me sticks and stones and I will put up whatever you like."', 'info');
+      return;
+    }
+    const affordable = BUILD_PROJECTS.filter(canAffordBuild).map((project) => project.label);
+    toast(`Brax: "${sticks} stick${sticks === 1 ? '' : 's'}, ${stones} stone${stones === 1 ? '' : 's'}. ${affordable.length ? `We can put up a ${affordable[0].toLowerCase()} today.` : 'Not quite enough for anything yet.'}"`, 'success');
+    setStatus(free
+      ? `${free} open plot${free === 1 ? '' : 's'} in the yard. Stand on a marked ring and press E to build.`
+      : 'Every plot is built out. Dismantle one to free up its materials.');
     return;
   }
   if (character === 'grayson') {
@@ -6164,6 +6805,14 @@ function handleInteract() {
   }
   if (target?.type === 'nature-loot') {
     lootNatureStick(target);
+    return;
+  }
+  if (target?.type === 'nature-rock') {
+    lootNatureRock(target);
+    return;
+  }
+  if (target?.type === 'build-site') {
+    openBuildMenu(target);
     return;
   }
   if (target?.type === 'enclosure') {
@@ -6323,6 +6972,7 @@ function animate() {
   updateHotspots(delta);
   updateZooAnimals(delta);
   updateFieldCharacters(delta);
+  updateBuildSites(delta);
   updateVisitors(delta);
   updateJenkinsLakeGate();
   updateAquarium();
@@ -6528,6 +7178,23 @@ dom.shopItems.addEventListener('click', (event) => {
   const button = event.target.closest('[data-buy-item]');
   if (!button || button.disabled) return;
   buyItem(button.dataset.buyItem, button.dataset.buyGroup);
+});
+
+dom.sleepOptions?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-wake-hour]');
+  if (button) wakeAt(Number(button.dataset.wakeHour));
+});
+
+dom.buildOptions?.addEventListener('click', (event) => {
+  const clear = event.target.closest('[data-clear-build]');
+  if (clear) {
+    clearBuild(activeBuildSite);
+    renderBuildMenu();
+    return;
+  }
+  const button = event.target.closest('[data-build-project]');
+  if (!button || button.disabled) return;
+  buildProject(button.dataset.buildProject);
 });
 
 dom.stoveRecipes.addEventListener('click', (event) => {
