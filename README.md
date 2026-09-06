@@ -11,6 +11,10 @@ A low-poly Three.js visual slice for real-time wildlife fieldwork.
 - Stealth loop: hold Shift to move at half speed with a lower spook risk.
 - Squirrels and rabbits can be netted after a careful approach.
 - Magnifying-glass bug observation with a short focus timing event, followed by net capture.
+- A day/night cycle that animals actually follow: owls and raccoons come out at dusk, butterflies and squirrels work in daylight, and off-duty species leave the field until their hours come back around.
+- A field journal on `J`, checkable at any time, with the field clock, an activity board of what is out right now, collection progress, kit, larder, and staff duty status.
+- Brynlee, Grayson, and Brooks patrol their own areas of the showcase and stop to talk when you get close.
+- Visitors and customers arrive at the showcase and the supply depot, browse for a while, then leave.
 - Persistent browser-local inventory, currency, and collection records.
 - Responsive HUD with touch-friendly action buttons for tablet-sized screens.
 
@@ -45,7 +49,8 @@ The save system intentionally uses `localStorage` for this slice. It is device/b
 - `WASD`: move
 - `Mouse`: look after clicking the field
 - `Shift`: sneak at half speed
-- `E`: interact with the car, shop, or zoo record
+- `E`: interact with the car, shop, zoo record, or a person
+- `J`: open or close the field journal
 - `1 / 2 / 3`: equip rod / net / magnifying glass
 - `Left click`: cast, set hook, reel, or use the equipped tool
 - `Esc`: release pointer lock or exit an active observation

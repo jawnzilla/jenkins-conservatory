@@ -19,9 +19,12 @@
               <h1>Jenkins Conservatory</h1>
             </div>
           </div>
+          <button id="journal-toggle-button" class="help-toggle journal-toggle" type="button" aria-expanded="false" aria-controls="journal-modal">▤ JOURNAL<span class="key-hint"> · J</span></button>
           <div class="topbar-meta">
             <button id="tips-toggle-button" class="help-toggle" type="button" aria-expanded="false" aria-controls="tips-menu">? FIELD GUIDE</button>
             <span id="zone-label">PARKING LOT</span>
+            <span class="meta-divider" aria-hidden="true"></span>
+            <span id="clock-label" title="Field time. Animals keep their own hours.">05:00 DAWN</span>
             <span class="meta-divider" aria-hidden="true"></span>
             <span id="coin-label">120¢</span>
           </div>
@@ -186,6 +189,20 @@
           <div class="cleaning-progress-track"><span id="cleaning-progress"></span></div>
           <button id="cleaning-action" class="action-button accent" type="button">SWEEP HIGHLIGHTED SPOT</button>
           <p class="cleaning-tip">Click the glowing debris in sequence. Wrong spots reset the current sweep.</p>
+        </div>
+      </section>
+
+      <section id="journal-modal" class="modal-shell is-hidden" aria-modal="true" role="dialog" aria-labelledby="journal-title">
+        <div class="modal-card panel journal-modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="eyebrow">FIELD JOURNAL</p>
+              <h2 id="journal-title">Today in the field</h2>
+            </div>
+            <button class="icon-button" data-close-modal="journal-modal" type="button" aria-label="Close field journal">×</button>
+          </div>
+          <div id="journal-body" class="journal-body" aria-live="polite"></div>
+          <p class="modal-footnote">Press <b>J</b> at any time to open or close the journal. It reads live from the field, so the clock and the activity board keep updating while it is open.</p>
         </div>
       </section>
 

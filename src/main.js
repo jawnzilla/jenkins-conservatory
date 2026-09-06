@@ -178,26 +178,40 @@ const POLLINATOR_PLOTS = [
   [10.8, -10.0], [12.0, -9.6], [7.4, -8.4], [9.8, -8.2]
 ];
 
+// Field day periods, in the order the sky cycle walks through them.
+const DAY_PERIODS = ['dawn', 'day', 'dusk', 'night'];
+// Cycle phase boundaries, aligned with the SKY_STOPS gradient below.
+const DAY_PERIOD_BOUNDS = [
+  { key: 'dawn', from: 0.06 },
+  { key: 'day', from: 0.18 },
+  { key: 'dusk', from: 0.62 },
+  { key: 'night', from: 0.80 }
+];
+const DAY_PERIOD_LABELS = { dawn: 'Dawn', day: 'Daylight', dusk: 'Dusk', night: 'Night' };
+// Phase 0 sits in the small hours, so shift the readout to a believable clock.
+const DAY_HOUR_OFFSET = 4;
+const ALWAYS_ACTIVE = ['dawn', 'day', 'dusk', 'night'];
+
 const SPECIES = {
-  trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms' },
-  sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs' },
-  bass: { label: 'Largemouth bass', type: 'fish', sigil: '◒', color: 0x688c5a, note: 'Spinner + worms · lily pads' },
-  crappie: { label: 'Black crappie', type: 'fish', sigil: '◍', color: 0x8994a3, note: 'Spinner + worms · deep lake' },
-  rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◒', color: 0xe6d7bf, note: 'Sneak + net' },
-  squirrel: { label: 'Red squirrel', type: 'ground', sigil: '◓', color: 0xb56843, note: 'Sneak + net' },
-  fox: { label: 'Red fox', type: 'ground', sigil: '◇', color: 0xc96c3e, note: 'Sneak + net' },
-  frog: { label: 'Green frog', type: 'ground', sigil: '◉', color: 0x6fb36d, note: 'Sneak + net' },
-  turtle: { label: 'Pond turtle', type: 'ground', sigil: '⊙', color: 0x71926b, note: 'Sneak + net' },
-  owl: { label: 'Tawny owl', type: 'flying', sigil: '◎', color: 0xb79a70, note: 'Sneak + net' },
-  raccoon: { label: 'Raccoon', type: 'ground', sigil: '◐', color: 0x899291, note: 'Sneak + net' },
-  sparrow: { label: 'House sparrow', type: 'flying', sigil: '⌁', color: 0x9a8064, note: 'Sneak + net' },
-  duck: { label: 'Mallard duck', type: 'water', sigil: '◒', color: 0x587a61, note: 'Floats on the lake' },
-  butterfly: { label: 'Painted butterfly', type: 'bug', sigil: '✦', color: 0xf0a4c1, note: 'Catch with net' },
-  bee: { label: 'Meadow bee', type: 'bug', sigil: '✧', color: 0xf2c84b, note: 'Catch with net' },
-  dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌁', color: 0x83cfe7, note: 'Catch with net' }
-  ,caterpillar: { label: 'Monarch caterpillar', type: 'bug', sigil: '◍', color: 0xd59c3a, note: 'Magnify on flowers' }
-  ,worm: { label: 'Earthworm', type: 'bug', sigil: '≈', color: 0xb7775b, note: 'Magnify on plants · fishing lure' }
-  ,spider: { label: 'Garden spider', type: 'bug', sigil: '✣', color: 0x81768c, note: 'Magnify near webs' }
+  trout: { label: 'Brook trout', type: 'fish', sigil: '≈', color: 0xd78155, note: 'Spinner + worms', activity: ALWAYS_ACTIVE },
+  sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs', activity: ALWAYS_ACTIVE },
+  bass: { label: 'Largemouth bass', type: 'fish', sigil: '◒', color: 0x688c5a, note: 'Spinner + worms · lily pads', activity: ALWAYS_ACTIVE },
+  crappie: { label: 'Black crappie', type: 'fish', sigil: '◍', color: 0x8994a3, note: 'Spinner + worms · deep lake', activity: ALWAYS_ACTIVE },
+  rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◒', color: 0xe6d7bf, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
+  squirrel: { label: 'Red squirrel', type: 'ground', sigil: '◓', color: 0xb56843, note: 'Sneak + net', activity: ['dawn', 'day'] },
+  fox: { label: 'Red fox', type: 'ground', sigil: '◇', color: 0xc96c3e, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
+  frog: { label: 'Green frog', type: 'ground', sigil: '◉', color: 0x6fb36d, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
+  turtle: { label: 'Pond turtle', type: 'ground', sigil: '⊙', color: 0x71926b, note: 'Sneak + net', activity: ['day'] },
+  owl: { label: 'Tawny owl', type: 'flying', sigil: '◎', color: 0xb79a70, note: 'Sneak + net', activity: ['dusk', 'night'] },
+  raccoon: { label: 'Raccoon', type: 'ground', sigil: '◐', color: 0x899291, note: 'Sneak + net', activity: ['dusk', 'night'] },
+  sparrow: { label: 'House sparrow', type: 'flying', sigil: '⌁', color: 0x9a8064, note: 'Sneak + net', activity: ['dawn', 'day'] },
+  duck: { label: 'Mallard duck', type: 'water', sigil: '◒', color: 0x587a61, note: 'Floats on the lake', activity: ['dawn', 'day', 'dusk'] },
+  butterfly: { label: 'Painted butterfly', type: 'bug', sigil: '✦', color: 0xf0a4c1, note: 'Catch with net', activity: ['day'] },
+  bee: { label: 'Meadow bee', type: 'bug', sigil: '✧', color: 0xf2c84b, note: 'Catch with net', activity: ['dawn', 'day'] },
+  dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌁', color: 0x83cfe7, note: 'Catch with net', activity: ['day', 'dusk'] }
+  ,caterpillar: { label: 'Monarch caterpillar', type: 'bug', sigil: '◍', color: 0xd59c3a, note: 'Magnify on flowers', activity: ['dawn', 'day'] }
+  ,worm: { label: 'Earthworm', type: 'bug', sigil: '≈', color: 0xb7775b, note: 'Magnify on plants · fishing lure', activity: ['dawn', 'dusk', 'night'] }
+  ,spider: { label: 'Garden spider', type: 'bug', sigil: '✣', color: 0x81768c, note: 'Magnify near webs', activity: ['dawn', 'dusk', 'night'] }
 };
 
 const BAITS = [
@@ -247,6 +261,7 @@ const dom = {
   canvas: document.querySelector('#game-canvas'),
   zoneLabel: document.querySelector('#zone-label'),
   coinLabel: document.querySelector('#coin-label'),
+  clockLabel: document.querySelector('#clock-label'),
   lockDot: document.querySelector('#lock-dot'),
   lockLabel: document.querySelector('#lock-label'),
   statusMessage: document.querySelector('#status-message'),
@@ -288,6 +303,9 @@ const dom = {
   qteCopy: document.querySelector('#qte-copy'),
   collectionModal: document.querySelector('#collection-modal'),
   collectionGrid: document.querySelector('#collection-grid'),
+  journalModal: document.querySelector('#journal-modal'),
+  journalBody: document.querySelector('#journal-body'),
+  journalToggleButton: document.querySelector('#journal-toggle-button'),
   cleaningModal: document.querySelector('#cleaning-modal'),
   cleaningCopy: document.querySelector('#cleaning-copy'),
   cleaningField: document.querySelector('#cleaning-field'),
@@ -376,7 +394,10 @@ let fallbackPointerId = null;
 let yaw = 0;
 let pitch = -0.08;
 let elapsed = 0;
+let currentDaylight = 1;
+let currentDayPeriod = getDayPeriod(SKY_PHASE_OFFSET % 1);
 let serviceCheckAt = 0;
+let journalRefreshAt = 0;
 let currentNoise = 0;
 let spookRisk = 0.02;
 let toastId = 0;
@@ -397,6 +418,10 @@ let bugNodes = [];
 let treeInteractions = [];
 let zooAnimals = [];
 let zooEnclosures = [];
+let fieldCharacters = [];
+let visitors = [];
+let visitorSpawnAt = 0;
+let visitorsSeeded = false;
 let aquariumBubbles = [];
 let pollinatorFlowers = [];
 let wildFlowerNodes = [];
@@ -827,6 +852,79 @@ function createLowClouds() {
   scene.add(skyCloudLayer);
 }
 
+function getDayPhase() {
+  return (elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1;
+}
+
+function getDayPeriod(phase = getDayPhase()) {
+  let period = 'night';
+  for (const bound of DAY_PERIOD_BOUNDS) {
+    if (phase >= bound.from) period = bound.key;
+  }
+  // Everything before the first boundary belongs to the tail of the previous night.
+  if (phase < DAY_PERIOD_BOUNDS[0].from) period = 'night';
+  return period;
+}
+
+function getFieldClockLabel(phase = getDayPhase()) {
+  const hours = (phase * 24 + DAY_HOUR_OFFSET) % 24;
+  const whole = Math.floor(hours);
+  const minutes = Math.floor((hours - whole) * 60);
+  return `${String(whole).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function getPeriodSecondsRemaining(phase = getDayPhase()) {
+  const next = DAY_PERIOD_BOUNDS.map((bound) => bound.from).find((from) => from > phase);
+  const target = next === undefined ? 1 + DAY_PERIOD_BOUNDS[0].from : next;
+  return Math.max(0, (target - phase) * SKY_CYCLE_SECONDS);
+}
+
+function isSpeciesActive(species, period = currentDayPeriod) {
+  const activity = SPECIES[species]?.activity || ALWAYS_ACTIVE;
+  return activity.includes(period);
+}
+
+function describeSpeciesActivity(species) {
+  const activity = SPECIES[species]?.activity || ALWAYS_ACTIVE;
+  const day = activity.includes('day');
+  const night = activity.includes('night');
+  const dawn = activity.includes('dawn');
+  const dusk = activity.includes('dusk');
+  if (day && night) return 'Active around the clock';
+  if (!day && !night) return 'Crepuscular · dawn and dusk only';
+  if (night) {
+    if (dawn && dusk) return 'Nocturnal · dusk to first light';
+    if (dusk) return 'Nocturnal · out from dusk';
+    if (dawn) return 'Nocturnal · lingers past first light';
+    return 'Nocturnal · deep night only';
+  }
+  if (dawn && dusk) return 'Diurnal · first light to last';
+  if (dawn) return 'Diurnal · busiest at first light';
+  if (dusk) return 'Diurnal · works on into dusk';
+  return 'Diurnal · full daylight only';
+}
+
+function listActiveSpecies(period = currentDayPeriod) {
+  return Object.keys(SPECIES).filter((key) => SPECIES[key].type !== 'fish' && isSpeciesActive(key, period));
+}
+
+// Fires once whenever the field rolls into a new part of the day.
+function updateDayCycleEvents() {
+  const period = getDayPeriod();
+  if (period === currentDayPeriod) return;
+  const first = currentDayPeriod === '';
+  currentDayPeriod = period;
+  if (first) return;
+  const messages = {
+    dawn: 'First light. Rabbits and foxes are still out while the day shift wakes up.',
+    day: 'Full daylight. Butterflies, bees and squirrels are working the meadow.',
+    dusk: 'Dusk settles in. Owls and raccoons are starting their rounds.',
+    night: 'Night falls over the field. Only the nocturnal animals are moving now.'
+  };
+  toast(messages[period], period === 'night' ? 'warning' : 'success');
+  if (dom.journalModal && !dom.journalModal.classList.contains('is-hidden')) renderJournal();
+}
+
 function getSkyCycleSample() {
   const phase = (elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1;
   let before = SKY_STOPS[SKY_STOPS.length - 1];
@@ -861,6 +959,8 @@ function updateSkyCycle() {
   skyUniforms.horizonColor.value.copy(horizonColor);
   skyUniforms.lowerColor.value.copy(lowerColor);
   const daylight = THREE.MathUtils.lerp(before.daylight, after.daylight, blend);
+  currentDaylight = daylight;
+  updateDayCycleEvents();
   skybox.position.set(camera.position.x, camera.position.y, camera.position.z);
   if (skyCloudLayer) {
     skyCloudLayer.position.set(camera.position.x, 0, camera.position.z);
@@ -1282,8 +1382,10 @@ function createLakeBoat(x, z) {
   return interactable;
 }
 
+// The skiff's bow is modelled along local -Z, so a heading of `h` points the bow
+// at (-sin h, -cos h). Aim that vector at the open water in the middle of the lake.
 function getLakeBoatHeading(x, z) {
-  return Math.atan2(JENKINS_LAKE_WATER.centerX - x, -(JENKINS_LAKE_WATER.centerZ - z));
+  return Math.atan2(-(JENKINS_LAKE_WATER.centerX - x), -(JENKINS_LAKE_WATER.centerZ - z));
 }
 
 function isLakeBoatInSafeWater(x, z) {
@@ -1381,10 +1483,17 @@ function exitLakeBoat() {
 function updateLakeBoatMovement(delta) {
   if (!lakeBoatPilot?.active || !lakeBoatPilot.entry?.group) return;
   const boat = lakeBoatPilot.entry.group;
-  const steering = (isKeyDown('KeyD', 'd') ? 1 : 0) - (isKeyDown('KeyA', 'a') ? 1 : 0);
-  lakeBoatPilot.heading += steering * delta * 0.9;
+  // A turns the bow to port, D to starboard. Increasing the heading swings the
+  // bow counter-clockwise seen from above, which is a left turn from the helm.
+  const steering = (isKeyDown('KeyA', 'a') ? 1 : 0) - (isKeyDown('KeyD', 'd') ? 1 : 0);
+  // Reverse backs the stern around, so the helm response flips with the throttle.
   const speed = lakeBoatPilot.speed || 0;
-  const nextX = boat.position.x + Math.sin(lakeBoatPilot.heading) * speed * delta;
+  const turn = steering * delta * 0.9 * (speed < 0 ? -1 : 1);
+  lakeBoatPilot.heading += turn;
+  // Carry the view around with the hull so the bow stays where the pilot left it.
+  yaw += turn;
+  // Travel follows the bow: heading `h` means the bow points at (-sin h, -cos h).
+  const nextX = boat.position.x - Math.sin(lakeBoatPilot.heading) * speed * delta;
   const nextZ = boat.position.z - Math.cos(lakeBoatPilot.heading) * speed * delta;
   if (speed !== 0 && !isLakeBoatInSafeWater(nextX, nextZ)) {
     respawnLakeBoat('The boat touched the shoreline and was reset before it could get stuck.');
@@ -2556,8 +2665,14 @@ function spawnCritter(species, position) {
   const group = createAnimalModel(species, 0.9);
   group.position.set(...position);
   world.add(group);
-  const critter = { species, group, home: new THREE.Vector3(...position), direction: Math.random() * Math.PI * 2, state: 'idle', stateTime: Math.random() * 2, fleeTime: 0, caught: false, hidden: false, respawnAt: 0 };
+  // Ground gaits pitch the body forward as it bounds, so yaw has to be applied
+  // before pitch or the lean would tip sideways once the animal turns.
+  group.rotation.order = 'YXZ';
+  const direction = Math.random() * Math.PI * 2;
+  const critter = { species, group, home: new THREE.Vector3(...position), direction, targetDirection: direction, state: 'idle', stateTime: Math.random() * 2, fleeTime: 0, caught: false, hidden: false, respawnAt: 0 };
   critters.push(critter);
+  // Animals that are off duty at this hour wait out of sight until their time.
+  if (!isSpeciesActive(species)) retireCritter(critter);
   return critter;
 }
 
@@ -2696,6 +2811,17 @@ function keepGroundAnimalOnLand(animal, critter) {
   critter.home.copy(animal.position);
 }
 
+// Pulls an animal off the field without counting it as caught, so it can come
+// back the next time its part of the day comes around.
+function retireCritter(critter) {
+  if (critter.hidden) return;
+  world.remove(critter.group);
+  critter.hidden = true;
+  critter.state = 'idle';
+  critter.fleeTime = 0;
+  critter.respawnAt = elapsed + 1.5 + Math.random() * 4;
+}
+
 function respawnCritter(critter) {
   const bounds = ZONES[currentZone].bounds;
   for (let attempt = 0; attempt < 18; attempt += 1) {
@@ -2707,8 +2833,11 @@ function respawnCritter(critter) {
     if (!['forest', 'lake'].includes(currentZone) || (!validLand && !validAir)) continue;
     if (Math.hypot(x - player.x, z - player.z) < 9) continue;
     critter.group.position.set(x, isFlying ? 1.6 + Math.random() * 1.2 : 0.42, z);
+    critter.group.rotation.x = 0;
     critter.home.copy(critter.group.position);
     critter.direction = Math.random() * Math.PI * 2;
+    critter.targetDirection = critter.direction;
+    critter.gait = null;
     critter.state = 'idle';
     critter.stateTime = 0;
     critter.hidden = false;
@@ -2760,12 +2889,16 @@ function updateDucks(delta) {
     }
     const group = duck.group;
     const distance = distanceTo(group.position);
+    // Outside their hours the ducks raft up on the water and stop foraging.
+    const roosting = !isSpeciesActive('duck');
     if (duck.state === 'float') {
-      const holdingFish = activeTool === 'food' && (selectedFood === 'trout' || selectedFood === 'sunfish') && distance < 9;
+      const holdingFish = !roosting && activeTool === 'food' && (selectedFood === 'trout' || selectedFood === 'sunfish') && distance < 9;
       const attractionRadiusX = (water.radiusX || water.waterRadius) * 0.72;
       const attractionRadiusZ = (water.radiusZ || water.waterRadius) * 0.72;
-      const nextX = holdingFish ? clamp(player.x, water.centerX - attractionRadiusX, water.centerX + attractionRadiusX) : duck.home.x + Math.cos(elapsed * 0.22 + duck.phase) * 1.05;
-      const nextZ = holdingFish ? clamp(player.z, water.centerZ - attractionRadiusZ, water.centerZ + attractionRadiusZ) : duck.home.z + Math.sin(elapsed * 0.22 + duck.phase) * 0.78;
+      const drift = roosting ? 0.05 : 0.22;
+      const spread = roosting ? 0.3 : 1;
+      const nextX = holdingFish ? clamp(player.x, water.centerX - attractionRadiusX, water.centerX + attractionRadiusX) : duck.home.x + Math.cos(elapsed * drift + duck.phase) * 1.05 * spread;
+      const nextZ = holdingFish ? clamp(player.z, water.centerZ - attractionRadiusZ, water.centerZ + attractionRadiusZ) : duck.home.z + Math.sin(elapsed * drift + duck.phase) * 0.78 * spread;
       const dx = nextX - group.position.x;
       const dz = nextZ - group.position.z;
       group.position.x += dx * delta * 1.45;
@@ -2892,22 +3025,28 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   const dark = 0x293a36;
   const shirt = naturalist ? 0xf1dfb3 : guard ? 0xabc3b9 : 0xf2ead6;
   // Joint-to-joint limbs keep the elbows, cuffs and carried props connected.
-  const limb = (from, to, radius, color, endRadius = radius) => {
+  const limb = (parent, from, to, radius, color, endRadius = radius) => {
     const a = new THREE.Vector3(...from);
     const b = new THREE.Vector3(...to);
-    const mesh = cylinder(group, endRadius, radius, a.distanceTo(b), color, a.clone().add(b).multiplyScalar(0.5).toArray());
+    const mesh = cylinder(parent, endRadius, radius, a.distanceTo(b), color, a.clone().add(b).multiplyScalar(0.5).toArray());
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
     return mesh;
   };
+  // Each leg hangs off a hip pivot so a patrol route can drive a real walk cycle.
+  const legPivots = [];
   for (const side of [-1, 1]) {
-    const footX = side * 0.135;
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.12, 0.76, 0);
+    group.add(hip);
+    const footX = side * 0.015;
     const footZ = side === -1 ? 0.035 : -0.035;
-    box(group, [0.205, 0.115, 0.33], dark, [footX, 0.0575, footZ + 0.055]);
-    sphere(group, 0.13, leather, [footX, 0.145, footZ + 0.07], { scale: [0.8, 0.65, 1.25] });
-    cylinder(group, 0.092, 0.1, 0.24, leather, [footX, 0.235, footZ]);
-    cylinder(group, 0.1, 0.105, 0.05, 0x96704b, [footX, 0.34, footZ]);
-    limb([footX, 0.32, footZ], [side * 0.12, 0.76, 0], 0.092, guard ? 0x34474a : 0x666852, 0.112);
-    box(group, [0.115, 0.018, 0.018], 0xc7b18b, [footX, 0.22, footZ + 0.096]);
+    box(hip, [0.205, 0.115, 0.33], dark, [footX, -0.7025, footZ + 0.055]);
+    sphere(hip, 0.13, leather, [footX, -0.615, footZ + 0.07], { scale: [0.8, 0.65, 1.25] });
+    cylinder(hip, 0.092, 0.1, 0.24, leather, [footX, -0.525, footZ]);
+    cylinder(hip, 0.1, 0.105, 0.05, 0x96704b, [footX, -0.42, footZ]);
+    limb(hip, [footX, -0.44, footZ], [0, 0, 0], 0.092, guard ? 0x34474a : 0x666852, 0.112);
+    box(hip, [0.115, 0.018, 0.018], 0xc7b18b, [footX, -0.54, footZ + 0.096]);
+    legPivots.push({ pivot: hip, side });
   }
   cylinder(group, 0.21, 0.245, 0.25, coatColor, [0, 0.79, 0], { scale: [1, 1, 0.72] });
   cylinder(group, naturalist ? 0.255 : 0.285, naturalist ? 0.185 : 0.22, 0.5, shirt, [0, 1.1, 0], { scale: [1, 1, 0.62] });
@@ -2935,20 +3074,38 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   sphere(group, 0.045, skin, [0, 1.598, 0.209], { scale: [0.7, 1, 0.95] });
   box(group, [naturalist ? 0.074 : 0.065, naturalist ? 0.021 : 0.013, 0.016], naturalist ? 0xb96865 : 0x935b4e, [0, 1.523, 0.197]);
   sphere(group, 0.235, hair, [0, 1.752, -0.022], { scale: [0.92, 0.55, 0.94] });
+  // Free arms get their own shoulder pivot; a hand that is holding something
+  // (Brooks' lantern, Grayson's clipboard) stays welded to the torso instead.
+  const armPivots = [];
+  const shoulderPivots = {};
   for (const side of [-1, 1]) {
     const shoulder = [side * (naturalist ? 0.245 : 0.275), 1.275, 0];
     const elbow = [side * 0.36, 1.065, 0.055];
     const hand = naturalist ? [side * 0.32, 0.88, 0.16]
       : guard ? [side * 0.39, side === 1 ? 1.07 : 0.89, 0.22]
         : [side * 0.19, 1.075, 0.34];
-    sphere(group, 0.107, coatColor, shoulder);
-    limb(shoulder, elbow, 0.102, coatColor, 0.083);
-    sphere(group, 0.084, coatColor, elbow);
-    limb(elbow, hand, 0.081, coatColor, 0.063);
-    const cuff = new THREE.Vector3(...hand).lerp(new THREE.Vector3(...elbow), 0.18).toArray();
-    limb(cuff, hand, 0.069, shirt, 0.067);
-    sphere(group, 0.069, skin, hand, { scale: [0.83, 1.05, 0.86] });
-    sphere(group, 0.027, skin, [hand[0] - side * 0.04, hand[1] + 0.015, hand[2] + 0.035]);
+    const swings = naturalist || (guard && side === -1);
+    let parent = group;
+    if (swings) {
+      const pivot = new THREE.Group();
+      pivot.position.set(...shoulder);
+      group.add(pivot);
+      parent = pivot;
+      armPivots.push({ pivot, side });
+    }
+    shoulderPivots[side] = parent;
+    const local = (point) => (parent === group ? point : [point[0] - shoulder[0], point[1] - shoulder[1], point[2] - shoulder[2]]);
+    const localShoulder = local(shoulder);
+    const localElbow = local(elbow);
+    const localHand = local(hand);
+    sphere(parent, 0.107, coatColor, localShoulder);
+    limb(parent, localShoulder, localElbow, 0.102, coatColor, 0.083);
+    sphere(parent, 0.084, coatColor, localElbow);
+    limb(parent, localElbow, localHand, 0.081, coatColor, 0.063);
+    const cuff = new THREE.Vector3(...localHand).lerp(new THREE.Vector3(...localElbow), 0.18).toArray();
+    limb(parent, cuff, localHand, 0.069, shirt, 0.067);
+    sphere(parent, 0.069, skin, localHand, { scale: [0.83, 1.05, 0.86] });
+    sphere(parent, 0.027, skin, [localHand[0] - side * 0.04, localHand[1] + 0.015, localHand[2] + 0.035]);
   }
   if (naturalist) {
     cylinder(group, 0.34, 0.35, 0.035, 0xc8a269, [0, 1.82, 0], { segments: 12, scale: [1, 1, 0.87] });
@@ -2978,18 +3135,19 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
     box(group, [0.08, 0.09, 0.025], accentColor, [-0.18, 1.2, 0.166]);
     // Closed bail joins his curled hand to a caged warm lantern.
     const lanternX = 0.39;
-    for (const dx of [-0.085, 0.085]) limb([lanternX + dx, 0.91, 0.22], [lanternX + dx, 1.07, 0.22], 0.014, dark);
-    limb([lanternX - 0.085, 1.07, 0.22], [lanternX + 0.085, 1.07, 0.22], 0.014, dark);
+    for (const dx of [-0.085, 0.085]) limb(group, [lanternX + dx, 0.91, 0.22], [lanternX + dx, 1.07, 0.22], 0.014, dark);
+    limb(group, [lanternX - 0.085, 1.07, 0.22], [lanternX + 0.085, 1.07, 0.22], 0.014, dark);
     cylinder(group, 0.11, 0.115, 0.035, dark, [lanternX, 0.91, 0.22]);
-    cylinder(group, 0.09, 0.09, 0.2, accentColor, [lanternX, 0.793, 0.22], { material: { emissive: 0xffb64f, emissiveIntensity: 1.3 } });
+    const lanternGlass = cylinder(group, 0.09, 0.09, 0.2, accentColor, [lanternX, 0.793, 0.22], { material: { emissive: 0xffb64f, emissiveIntensity: 1.3 } });
+    group.userData.lantern = lanternGlass;
     cylinder(group, 0.12, 0.1, 0.04, dark, [lanternX, 0.675, 0.22]);
     for (const dx of [-0.078, 0.078]) for (const dz of [-0.065, 0.065]) {
-      limb([lanternX + dx, 0.69, 0.22 + dz], [lanternX + dx, 0.91, 0.22 + dz], 0.012, dark);
+      limb(group, [lanternX + dx, 0.69, 0.22 + dz], [lanternX + dx, 0.91, 0.22 + dz], 0.012, dark);
     }
   } else {
     for (const side of [-1, 1]) {
       addMesh(group, new THREE.TorusGeometry(0.055, 0.009, 5, 12), mat(0xb3c9b8, { metalness: 0.4 }), [side * 0.083, 1.653, 0.224]);
-      limb([side * 0.136, 1.66, 0.224], [side * 0.204, 1.665, 0.009], 0.008, dark);
+      limb(group, [side * 0.136, 1.66, 0.224], [side * 0.204, 1.665, 0.009], 0.008, dark);
       box(group, [0.17, 0.23, 0.265], coatColor, [side * 0.157, 0.728, -0.005]);
     }
     box(group, [0.06, 0.012, 0.016], dark, [0, 1.657, 0.226]);
@@ -3003,8 +3161,315 @@ function createFieldCharacter(id, name, role, x, z, coatColor, accentColor) {
   const label = makeLabel(`${name} · ${role}`, `#${new THREE.Color(accentColor).getHexString()}`, '#1c3028', 0.34);
   label.position.set(0, 2.15, 0);
   group.add(label);
+  group.userData.legs = legPivots;
+  group.userData.arms = armPivots;
   world.add(group);
-  interactables.push({ type: 'character', character: id, label: `Talk to ${name}`, position: new THREE.Vector3(x, 1, z), radius: 3.2 });
+  const interactable = { type: 'character', character: id, label: `Talk to ${name}`, position: new THREE.Vector3(x, 1, z), radius: 3.2 };
+  interactables.push(interactable);
+  const route = (STAFF_PATROLS[id] || []).map(([px, pz]) => new THREE.Vector3(px, 0, pz));
+  const staff = {
+    id,
+    name,
+    group,
+    interactable,
+    post: new THREE.Vector3(x, 0, z),
+    route,
+    target: 0,
+    facing: 0,
+    stride: Math.random() * Math.PI * 2,
+    speed: 0,
+    holdUntil: 0,
+    greeted: 0
+  };
+  fieldCharacters.push(staff);
+  return staff;
+}
+
+// Where each of the three keeps to. Every route loops inside that person's own
+// corner of the showcase so they never wander into someone else's ground.
+const STAFF_PATROLS = {
+  // Brynlee works the west meadow enclosure and the lawn in front of it.
+  brynlee: [[-14.8, -3.8], [-14.2, -9.4], [-11.6, -13.2], [-15.8, -13.6], [-17.4, -8.2], [-16.6, -2.4]],
+  // Brooks walks the east pollinator side and the fence line behind it.
+  brooks: [[14.8, -3.8], [16.4, -8.6], [15.2, -13.8], [11.4, -13.4], [11.8, -7.4], [13.6, -2.2]],
+  // Grayson stays on the central path between the record board and water wing.
+  grayson: [[0, -5.4], [-2.6, -9.6], [-2.4, -14.6], [2.4, -14.8], [2.8, -9.4]]
+};
+
+// Night guard works nights; the naturalist and the researcher work days.
+const STAFF_SHIFTS = {
+  brynlee: ['dawn', 'day'],
+  grayson: ['dawn', 'day', 'dusk'],
+  brooks: ['dusk', 'night']
+};
+
+function isStaffOnShift(id) {
+  return (STAFF_SHIFTS[id] || ALWAYS_ACTIVE).includes(currentDayPeriod);
+}
+
+// Walks each staff member around their own beat: they hold at each waypoint for a
+// beat, turn to face the player when spoken to, and slow to a stroll off-shift.
+function updateFieldCharacters(delta) {
+  if (currentZone !== 'zoo' || !fieldCharacters.length) return;
+  for (const staff of fieldCharacters) {
+    const group = staff.group;
+    const onShift = isStaffOnShift(staff.id);
+    const distance = distanceTo(group.position);
+    const cruise = onShift ? 0.95 : 0.42;
+    let desiredFacing = staff.facing;
+    let moving = false;
+    if (distance < 3.4) {
+      // Stop and turn to the visitor while they are close enough to talk to.
+      staff.holdUntil = Math.max(staff.holdUntil, elapsed + 1.4);
+      desiredFacing = Math.atan2(player.x - group.position.x, player.z - group.position.z);
+    } else if (staff.route.length && elapsed >= staff.holdUntil) {
+      const target = staff.route[staff.target];
+      tempVector.subVectors(target, group.position).setY(0);
+      const remaining = tempVector.length();
+      if (remaining < 0.35) {
+        staff.target = (staff.target + 1) % staff.route.length;
+        staff.holdUntil = elapsed + (onShift ? 1.6 + Math.random() * 2.6 : 4 + Math.random() * 5);
+      } else {
+        tempVector.normalize();
+        moving = true;
+        desiredFacing = Math.atan2(tempVector.x, tempVector.z);
+        group.position.x += tempVector.x * cruise * delta;
+        group.position.z += tempVector.z * cruise * delta;
+      }
+    }
+    staff.speed += ((moving ? cruise : 0) - staff.speed) * Math.min(1, delta * 5);
+    let turn = desiredFacing - staff.facing;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    staff.facing += clamp(turn, -delta * 3.2, delta * 3.2);
+    // The models are built facing +Z, so the yaw is the facing angle itself.
+    group.rotation.y = staff.facing;
+    staff.stride += staff.speed * 5.6 * delta;
+    const swing = Math.sin(staff.stride) * clamp(staff.speed / 0.95, 0, 1);
+    for (const leg of group.userData.legs || []) leg.pivot.rotation.x = swing * 0.52 * leg.side;
+    for (const arm of group.userData.arms || []) arm.pivot.rotation.x = -swing * 0.4 * arm.side;
+    group.position.y = Math.abs(Math.sin(staff.stride)) * 0.035 * clamp(staff.speed / 0.95, 0, 1);
+    staff.interactable.position.set(group.position.x, 1, group.position.z);
+    if (group.userData.lantern) {
+      // Brooks' lantern burns brighter once the light goes.
+      group.userData.lantern.material.emissiveIntensity = 0.35 + (1 - currentDaylight) * 1.6;
+    }
+  }
+}
+
+// --- Visiting members of the public -------------------------------------------
+// A handful of people drift through the showcase and the depot: they park, walk
+// a short loop of stops, linger at each one, then head back to the lot and go.
+
+const VISITOR_PALETTES = [
+  { coat: 0x8c6f9c, pants: 0x3f4a5c, shirt: 0xf0e5cf, skin: 0xe0b190, hair: 0x3a2e28, hat: 0, bag: 0xb5794e },
+  { coat: 0x4f7f6d, pants: 0x5a5140, shirt: 0xe7dcc2, skin: 0xc08457, hair: 0x1f1b18, hat: 0xd9c48a, bag: 0 },
+  { coat: 0xc2705a, pants: 0x39424a, shirt: 0xf3ecd8, skin: 0x8d5a3c, hair: 0x2a211c, hat: 0, bag: 0x66788a },
+  { coat: 0x5f6f9c, pants: 0x4a4238, shirt: 0xdfe8dd, skin: 0xf0c9a4, hair: 0x8c6a3c, hat: 0, bag: 0 },
+  { coat: 0xd0a94f, pants: 0x435049, shirt: 0xf5efdc, skin: 0xa9754d, hair: 0x4a3a2c, hat: 0x6d7f6a, bag: 0x8a6f4e },
+  { coat: 0x7a8c72, pants: 0x2f3a44, shirt: 0xeee3c8, skin: 0xd9a077, hair: 0x60483a, hat: 0, bag: 0 }
+];
+
+const VISITOR_ROUTES = {
+  zoo: {
+    noun: 'visitor',
+    entry: [-5.4, 15.4],
+    gate: [-3.6, 5.0],
+    capacity: 4,
+    interval: [11, 24],
+    stops: [[0, 3.2], [-5.8, -2.4], [-6.6, -7.6], [-2.2, -11.6], [5.6, -7.4], [6.2, -2.2], [0, -16.2]],
+    lines: [
+      'Is the tawny owl awake yet? We drove out just to see it.',
+      'The meadow habitat looks spotless today.',
+      'My kid has been counting butterflies since we walked in.',
+      'Do the ducks by the practice pond really lay eggs out here?',
+      'We saw the record board at the depot. That trout was enormous.'
+    ]
+  },
+  store: {
+    noun: 'customer',
+    entry: [5.4, 15.4],
+    gate: [3.4, 4.4],
+    capacity: 3,
+    interval: [14, 28],
+    stops: [[-6.5, -1.6], [-6.6, -5.3], [0, -3.7], [6.6, -5.2], [6.4, -1.4], [-3.2, -2.4]],
+    lines: [
+      'Do you know if the grub bait works on crappie?',
+      'I am after a spare lens before the light goes.',
+      'Picking up lantern oil. The night watch burns through it.',
+      'Everyone says the spinner is worth the sixteen coins.',
+      'Just browsing. The nets look better made than last season.'
+    ]
+  }
+};
+
+function createVisitorModel(palette) {
+  const group = new THREE.Group();
+  const dark = 0x2a3330;
+  const legs = [];
+  for (const side of [-1, 1]) {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.115, 0.74, 0);
+    group.add(hip);
+    cylinder(hip, 0.082, 0.095, 0.6, palette.pants, [0, -0.32, 0], { segments: 7 });
+    box(hip, [0.175, 0.1, 0.3], dark, [0, -0.67, 0.06]);
+    legs.push({ pivot: hip, side });
+  }
+  cylinder(group, 0.2, 0.235, 0.24, palette.coat, [0, 0.79, 0], { scale: [1, 1, 0.74] });
+  cylinder(group, 0.245, 0.19, 0.5, palette.coat, [0, 1.1, 0], { scale: [1, 1, 0.66] });
+  box(group, [0.15, 0.4, 0.03], palette.shirt, [0, 1.11, 0.145]);
+  const arms = [];
+  for (const side of [-1, 1]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.25, 1.26, 0);
+    group.add(pivot);
+    cylinder(pivot, 0.072, 0.088, 0.46, palette.coat, [side * 0.035, -0.23, 0.015], { segments: 7 });
+    sphere(pivot, 0.06, palette.skin, [side * 0.06, -0.46, 0.03], { scale: [0.85, 1, 0.9] });
+    arms.push({ pivot, side });
+  }
+  cylinder(group, 0.075, 0.088, 0.14, palette.skin, [0, 1.38, 0]);
+  sphere(group, 0.225, palette.skin, [0, 1.6, 0.01], { widthSegments: 12, heightSegments: 9, scale: [0.88, 1.06, 0.88] });
+  sphere(group, 0.22, palette.hair, [0, 1.71, -0.02], { scale: [0.96, 0.62, 0.98] });
+  for (const side of [-1, 1]) {
+    sphere(group, 0.05, palette.skin, [side * 0.19, 1.6, 0.0], { scale: [0.6, 1, 0.72] });
+    sphere(group, 0.034, 0xfff2d9, [side * 0.077, 1.632, 0.178], { scale: [1, 0.72, 0.36] });
+    sphere(group, 0.018, dark, [side * 0.075, 1.631, 0.19], { scale: [0.8, 1, 0.45] });
+  }
+  sphere(group, 0.04, palette.skin, [0, 1.578, 0.192], { scale: [0.7, 1, 0.9] });
+  box(group, [0.058, 0.012, 0.015], 0x8c5a4e, [0, 1.512, 0.182]);
+  if (palette.hat) {
+    cylinder(group, 0.31, 0.32, 0.03, palette.hat, [0, 1.79, -0.01], { segments: 12, scale: [1, 1, 0.9] });
+    cylinder(group, 0.17, 0.215, 0.15, palette.hat, [0, 1.865, -0.01], { segments: 10 });
+  }
+  if (palette.bag) {
+    box(group, [0.27, 0.31, 0.16], palette.bag, [0, 1.07, -0.25]);
+    box(group, [0.28, 0.06, 0.03], 0x3c342a, [0, 1.16, -0.34]);
+  }
+  group.userData.legs = legs;
+  group.userData.arms = arms;
+  return group;
+}
+
+// `warmStart` drops someone in mid-visit, so arriving in a zone does not mean
+// staring at an empty floor for the minute it takes the first person to walk in.
+function spawnVisitor(zoneKey, warmStart = false) {
+  const route = VISITOR_ROUTES[zoneKey];
+  if (!route) return null;
+  const palette = VISITOR_PALETTES[Math.floor(Math.random() * VISITOR_PALETTES.length)];
+  const group = createVisitorModel(palette);
+  const entry = new THREE.Vector3(route.entry[0] + (Math.random() - 0.5) * 2.6, 0, route.entry[1] + (Math.random() - 0.5) * 1.6);
+  group.position.copy(entry);
+  world.add(group);
+  const gate = () => new THREE.Vector3(route.gate[0] + (Math.random() - 0.5) * 1.6, 0, route.gate[1]);
+  const chosen = [...route.stops].sort(() => Math.random() - 0.5).slice(0, 2 + Math.floor(Math.random() * 3));
+  const plan = [{ point: gate(), hold: 0 }];
+  for (const [sx, sz] of chosen) {
+    plan.push({ point: new THREE.Vector3(sx + (Math.random() - 0.5) * 1.5, 0, sz + (Math.random() - 0.5) * 1.5), hold: 3.5 + Math.random() * 5.5 });
+  }
+  plan.push({ point: gate(), hold: 0 });
+  plan.push({ point: entry.clone(), hold: 0 });
+  const visitor = {
+    group,
+    plan,
+    index: 0,
+    holdUntil: 0,
+    facing: Math.PI,
+    browseFacing: Math.PI,
+    stride: Math.random() * Math.PI * 2,
+    speed: 0,
+    line: route.lines[Math.floor(Math.random() * route.lines.length)],
+    noun: route.noun
+  };
+  if (warmStart && plan.length > 3) {
+    const at = 1 + Math.floor(Math.random() * (plan.length - 3));
+    group.position.copy(plan[at].point);
+    visitor.index = at + 1;
+    visitor.holdUntil = elapsed + Math.random() * 3.5;
+    visitor.facing = Math.random() * Math.PI * 2;
+    visitor.browseFacing = visitor.facing;
+    group.rotation.y = visitor.facing;
+  }
+  visitor.interactable = { type: 'visitor', visitor, label: `Greet the ${route.noun}`, position: new THREE.Vector3(group.position.x, 1, group.position.z), radius: 2.4 };
+  interactables.push(visitor.interactable);
+  visitors.push(visitor);
+  return visitor;
+}
+
+function despawnVisitor(visitor) {
+  world.remove(visitor.group);
+  interactables = interactables.filter((entry) => entry !== visitor.interactable);
+  visitors = visitors.filter((entry) => entry !== visitor);
+}
+
+function greetVisitor(visitor) {
+  toast(visitor.line, 'info');
+  setStatus(`A ${visitor.noun} stopped to chat. They will be on their way shortly.`);
+}
+
+function updateVisitors(delta) {
+  const route = VISITOR_ROUTES[currentZone];
+  if (!route) {
+    if (visitors.length) visitors = [];
+    return;
+  }
+  // Far fewer people come through after dark, and the depot all but empties out.
+  const afterHours = currentDayPeriod === 'night';
+  const capacity = afterHours ? 1 : route.capacity;
+  if (!visitorsSeeded) {
+    visitorsSeeded = true;
+    const alreadyHere = afterHours ? 0 : 1 + Math.floor(Math.random() * 2);
+    for (let index = 0; index < alreadyHere; index += 1) spawnVisitor(currentZone, true);
+  }
+  if (elapsed >= visitorSpawnAt) {
+    if (visitors.length < capacity) spawnVisitor(currentZone);
+    const [min, max] = route.interval;
+    visitorSpawnAt = elapsed + (afterHours ? 45 + Math.random() * 45 : min + Math.random() * (max - min));
+  }
+  for (const visitor of [...visitors]) {
+    const group = visitor.group;
+    const step = visitor.plan[visitor.index];
+    if (!step) {
+      despawnVisitor(visitor);
+      continue;
+    }
+    let moving = false;
+    let desiredFacing = visitor.facing;
+    const nearPlayer = distanceTo(group.position) < 3;
+    if (elapsed < visitor.holdUntil) {
+      desiredFacing = nearPlayer
+        ? Math.atan2(player.x - group.position.x, player.z - group.position.z)
+        : visitor.browseFacing;
+    } else {
+      tempVector.subVectors(step.point, group.position).setY(0);
+      if (tempVector.length() < 0.32) {
+        visitor.index += 1;
+        if (visitor.index >= visitor.plan.length) {
+          despawnVisitor(visitor);
+          continue;
+        }
+        visitor.holdUntil = elapsed + step.hold;
+        visitor.browseFacing = visitor.facing + (Math.random() - 0.5) * 2.2;
+      } else {
+        tempVector.normalize();
+        moving = true;
+        desiredFacing = Math.atan2(tempVector.x, tempVector.z);
+        group.position.x += tempVector.x * 1.05 * delta;
+        group.position.z += tempVector.z * 1.05 * delta;
+      }
+    }
+    visitor.speed += ((moving ? 1.05 : 0) - visitor.speed) * Math.min(1, delta * 5);
+    let turn = desiredFacing - visitor.facing;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    visitor.facing += clamp(turn, -delta * 3.4, delta * 3.4);
+    group.rotation.y = visitor.facing;
+    visitor.stride += visitor.speed * 5.4 * delta;
+    const swing = Math.sin(visitor.stride) * clamp(visitor.speed / 1.05, 0, 1);
+    for (const leg of group.userData.legs) leg.pivot.rotation.x = swing * 0.5 * leg.side;
+    for (const arm of group.userData.arms) arm.pivot.rotation.x = -swing * 0.38 * arm.side;
+    group.position.y = Math.abs(Math.sin(visitor.stride)) * 0.032 * clamp(visitor.speed / 1.05, 0, 1);
+    visitor.interactable.position.set(group.position.x, 1, group.position.z);
+  }
 }
 
 function createJenkinsLakeRoad() {
@@ -3296,7 +3761,8 @@ function updateJenkinsLakeArrival(delta) {
   player.z = from[1] + (to[1] - from[1]) * blend;
   const nextX = to[0] - from[0];
   const nextZ = to[1] - from[1];
-  yaw = Math.atan2(nextX, -nextZ);
+  // The camera looks along (-sin yaw, -cos yaw); face it down the road segment.
+  yaw = Math.atan2(-nextX, -nextZ);
   camera.position.set(player.x, player.y, player.z);
   if (lakeArrival.progress >= 1) {
     lakeArrival.active = false;
@@ -3525,7 +3991,7 @@ function addExhibitAnimals(x, z, fallbackSpecies) {
     model.position.set(x - 2.4 + index * 2.4, isGround ? 0.5 : 1.7, z - 0.3 + index * 0.25);
     world.add(model);
     const type = isGround ? 'ground' : 'flying';
-    zooAnimals.push({ group: model, type, center: model.position.clone(), phase: index * 1.7 + x * 0.08, radiusX: type === 'ground' ? 2.1 : 1.45, radiusZ: type === 'ground' ? 1.25 : 0.85, speed: type === 'ground' ? 0.18 : 0.5 });
+    zooAnimals.push({ group: model, species, type, center: model.position.clone(), phase: index * 1.7 + x * 0.08, travel: index * 1.7 + x * 0.08, radiusX: type === 'ground' ? 2.1 : 1.45, radiusZ: type === 'ground' ? 1.25 : 0.85, speed: type === 'ground' ? 0.18 : 0.5, rest: 1 });
   });
 }
 
@@ -3546,27 +4012,69 @@ function createAnimalModel(species, scale = 1) {
     sphere(group, 0.2, 0xf2ede0, [0, 0.6, 0.75], { scale: [1.05, 1, 0.7] });
   } else if (species === 'squirrel') {
     sphere(group, 0.46, details.color, [0, 0.58, 0], { scale: [1.05, 0.95, 1.5] });
-    sphere(group, 0.3, 0xc8875d, [0, 0.88, -0.38], { scale: [1, 0.95, 0.96] });
-    sphere(group, 0.065, 0x241d1a, [-0.12, 0.94, -0.62]);
-    sphere(group, 0.065, 0x241d1a, [0.12, 0.94, -0.62]);
-    cone(group, 0.15, 0.34, details.color, [-0.19, 1.18, -0.38], { rotation: [0, 0, -0.22] });
-    cone(group, 0.15, 0.34, details.color, [0.19, 1.18, -0.38], { rotation: [0, 0, 0.22] });
-    sphere(group, 0.28, 0xb96843, [0, 0.88, 0.78], { scale: [1.45, 1.55, 0.7], rotation: [0.5, 0, 0] });
     sphere(group, 0.2, 0xd38e5b, [0.11, 0.62, 0.44], { scale: [0.75, 1, 1.25] });
+    // Head, tail and limbs hang off their own hinges so the scamper-and-freeze
+    // gait can turn the head, flick the tail and swing the legs independently.
+    const squirrelHead = new THREE.Group();
+    squirrelHead.position.set(0, 0.84, -0.3);
+    group.add(squirrelHead);
+    sphere(squirrelHead, 0.3, 0xc8875d, [0, 0.04, -0.08], { scale: [1, 0.95, 0.96] });
+    sphere(squirrelHead, 0.065, 0x241d1a, [-0.12, 0.1, -0.32]);
+    sphere(squirrelHead, 0.065, 0x241d1a, [0.12, 0.1, -0.32]);
+    sphere(squirrelHead, 0.05, 0x7d4b39, [0, 0.0, -0.42]);
+    cone(squirrelHead, 0.15, 0.34, details.color, [-0.19, 0.34, -0.08], { rotation: [0, 0, -0.22] });
+    cone(squirrelHead, 0.15, 0.34, details.color, [0.19, 0.34, -0.08], { rotation: [0, 0, 0.22] });
+    group.userData.head = squirrelHead;
+    const squirrelTail = new THREE.Group();
+    squirrelTail.position.set(0, 0.66, 0.5);
+    group.add(squirrelTail);
+    sphere(squirrelTail, 0.28, 0xb96843, [0, 0.22, 0.28], { scale: [1.45, 1.55, 0.7], rotation: [0.5, 0, 0] });
+    group.userData.tail = squirrelTail;
+    const squirrelLegs = [];
+    for (const side of [-1, 1]) {
+      for (const front of [true, false]) {
+        const hip = new THREE.Group();
+        hip.position.set(side * (front ? 0.16 : 0.21), front ? 0.46 : 0.5, front ? -0.3 : 0.26);
+        group.add(hip);
+        cylinder(hip, front ? 0.055 : 0.085, front ? 0.05 : 0.07, front ? 0.28 : 0.34, 0xa85f3d, [0, front ? -0.14 : -0.17, 0], { segments: 6 });
+        sphere(hip, front ? 0.06 : 0.08, 0x8d4f34, [0, front ? -0.28 : -0.34, -0.03], { scale: [0.85, 0.6, 1.3] });
+        // Bounding gait: both front legs reach together, both hind legs push together.
+        squirrelLegs.push({ pivot: hip, phase: front ? 0 : Math.PI, front });
+      }
+    }
+    group.userData.legs = squirrelLegs;
   } else if (species === 'fox') {
     sphere(group, 0.5, details.color, [0, 0.58, 0], { scale: [1.15, 0.88, 1.5] });
-    sphere(group, 0.32, details.color, [0, 0.9, -0.45], { scale: [1, 0.92, 0.95] });
-    cone(group, 0.16, 0.4, details.color, [-0.18, 1.2, -0.42], { rotation: [0, 0, -0.2] });
-    cone(group, 0.16, 0.4, details.color, [0.18, 1.2, -0.42], { rotation: [0, 0, 0.2] });
-    sphere(group, 0.06, 0x20231f, [-0.12, 0.95, -0.73]);
-    sphere(group, 0.06, 0x20231f, [0.12, 0.95, -0.73]);
-    sphere(group, 0.075, 0x29231f, [0, 0.86, -0.77]);
+    const foxHead = new THREE.Group();
+    foxHead.position.set(0, 0.82, -0.34);
+    group.add(foxHead);
+    sphere(foxHead, 0.32, details.color, [0, 0.08, -0.11], { scale: [1, 0.92, 0.95] });
+    cone(foxHead, 0.16, 0.4, details.color, [-0.18, 0.38, -0.08], { rotation: [0, 0, -0.2] });
+    cone(foxHead, 0.16, 0.4, details.color, [0.18, 0.38, -0.08], { rotation: [0, 0, 0.2] });
+    sphere(foxHead, 0.06, 0x20231f, [-0.12, 0.13, -0.39]);
+    sphere(foxHead, 0.06, 0x20231f, [0.12, 0.13, -0.39]);
+    sphere(foxHead, 0.075, 0x29231f, [0, 0.04, -0.43]);
+    sphere(foxHead, 0.13, 0xf0e2cd, [0, -0.03, -0.31], { scale: [0.8, 0.6, 0.95] });
+    group.userData.head = foxHead;
+    const foxLegs = [];
     for (const x of [-0.25, 0.25]) {
-      box(group, [0.14, 0.46, 0.14], details.color, [x, 0.28, -0.34]);
-      box(group, [0.14, 0.46, 0.14], details.color, [x, 0.28, 0.34]);
+      for (const z of [-0.34, 0.34]) {
+        const hip = new THREE.Group();
+        hip.position.set(x, 0.51, z);
+        group.add(hip);
+        box(hip, [0.14, 0.46, 0.14], details.color, [0, -0.23, 0]);
+        sphere(hip, 0.075, 0x30281f, [0, -0.45, -0.02], { scale: [0.9, 0.6, 1.25] });
+        // Diagonal pairs swing together, which is what a trotting fox does.
+        foxLegs.push({ pivot: hip, phase: (x > 0 ? 0 : Math.PI) + (z > 0 ? Math.PI : 0), front: z < 0 });
+      }
     }
-    sphere(group, 0.28, details.color, [0, 0.72, 0.82], { scale: [0.72, 1.15, 1.8], rotation: [0.44, 0, 0] });
-    sphere(group, 0.16, 0xf0d3a5, [0, 0.8, 1.38], { scale: [0.78, 0.92, 0.75] });
+    group.userData.legs = foxLegs;
+    const foxTail = new THREE.Group();
+    foxTail.position.set(0, 0.66, 0.52);
+    group.add(foxTail);
+    sphere(foxTail, 0.28, details.color, [0, 0.06, 0.3], { scale: [0.72, 1.15, 1.8], rotation: [0.44, 0, 0] });
+    sphere(foxTail, 0.16, 0xf0d3a5, [0, 0.14, 0.86], { scale: [0.78, 0.92, 0.75] });
+    group.userData.tail = foxTail;
   } else if (species === 'frog') {
     sphere(group, 0.43, details.color, [0, 0.4, 0], { scale: [1.25, 0.72, 1.3] });
     sphere(group, 0.34, details.color, [0, 0.62, -0.28], { scale: [1.18, 0.78, 0.9] });
@@ -3593,10 +4101,36 @@ function createAnimalModel(species, scale = 1) {
     for (const x of [-0.15, 0.15]) {
       sphere(group, 0.13, 0xf0e2ba, [x, 1.05, -0.35]);
       sphere(group, 0.055, 0x20231f, [x, 1.05, -0.46]);
+      // Ear tufts, so the silhouette still reads as an owl with the wings folded.
+      cone(group, 0.07, 0.19, details.color, [x * 1.5, 1.32, -0.05], { rotation: [0, 0, x * 0.9], segments: 5 });
     }
     cone(group, 0.08, 0.2, 0xd68b4e, [0, 0.96, -0.54], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
-    box(group, [0.16, 0.58, 0.42], 0x8c7152, [-0.39, 0.66, 0], { rotation: [0, 0.16, -0.18] });
-    box(group, [0.16, 0.58, 0.42], 0x8c7152, [0.39, 0.66, 0], { rotation: [0, -0.16, 0.18] });
+    // Barred tail and talons anchor the body over a branch.
+    box(group, [0.3, 0.07, 0.36], 0x7d6347, [0, 0.32, 0.34], { rotation: [0.34, 0, 0] });
+    for (const x of [-0.12, 0.12]) cylinder(group, 0.035, 0.03, 0.16, 0xd8b06d, [x, 0.18, -0.06], { segments: 5 });
+    // Wings hinge at the shoulder instead of floating beside the body, so the
+    // flap sweeps the whole wing up and down the way a real downstroke does.
+    const owlWings = [];
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.26, 0.86, 0);
+      group.add(pivot);
+      sphere(pivot, 0.33, 0x8c7152, [side * 0.3, -0.07, 0.02], { scale: [1.25, 0.26, 1.0] });
+      sphere(pivot, 0.21, 0x9d8360, [side * 0.08, -0.02, 0.0], { scale: [1.1, 0.5, 1.15] });
+      // Layered primaries fan out toward the wingtip.
+      for (let feather = 0; feather < 3; feather += 1) {
+        box(pivot, [0.32, 0.03, 0.12], feather % 2 ? 0x6f5840 : 0x7f6749,
+          [side * (0.62 + feather * 0.02), -0.09, -0.16 + feather * 0.16],
+          { rotation: [0, 0, side * 0.06] });
+      }
+      pivot.userData.wingSide = side;
+      // Resting droop: wings folded down against the flanks.
+      pivot.rotation.z = side * -0.14;
+      owlWings.push(pivot);
+    }
+    group.userData.wings = owlWings;
+    group.userData.wingSpeed = 5.4;
+    group.userData.wingSwing = 0.85;
   } else if (species === 'raccoon') {
     sphere(group, 0.48, details.color, [0, 0.58, 0], { scale: [1.1, 0.9, 1.48] });
     sphere(group, 0.31, details.color, [0, 0.88, -0.43], { scale: [1.02, 0.95, 0.94] });
@@ -3617,8 +4151,20 @@ function createAnimalModel(species, scale = 1) {
     cone(group, 0.09, 0.24, 0xd68b4e, [0, 0.13, -0.66], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
     sphere(group, 0.045, 0x20231f, [-0.1, 0.25, -0.57]);
     sphere(group, 0.045, 0x20231f, [0.1, 0.25, -0.57]);
-    box(group, [0.08, 0.42, 0.48], 0x765c4b, [-0.27, 0.02, 0], { rotation: [0, 0, -0.22] });
-    box(group, [0.08, 0.42, 0.48], 0x765c4b, [0.27, 0.02, 0], { rotation: [0, 0, 0.22] });
+    const sparrowWings = [];
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.16, 0.04, 0);
+      group.add(pivot);
+      sphere(pivot, 0.22, 0x765c4b, [side * 0.16, -0.02, 0], { scale: [1.05, 0.28, 1.1] });
+      box(pivot, [0.22, 0.025, 0.1], 0x63503f, [side * 0.32, -0.04, 0.12], { rotation: [0, 0, side * 0.06] });
+      pivot.userData.wingSide = side;
+      pivot.rotation.z = side * -0.2;
+      sparrowWings.push(pivot);
+    }
+    group.userData.wings = sparrowWings;
+    group.userData.wingSpeed = 13;
+    group.userData.wingSwing = 0.66;
     cone(group, 0.15, 0.38, details.color, [0, 0.02, 0.68], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
   } else if (species === 'duck') {
     sphere(group, 0.45, details.color, [0, 0.34, 0], { scale: [1.28, 0.72, 1.52] });
@@ -3653,32 +4199,81 @@ function createAnimalModel(species, scale = 1) {
     group.userData.fishTail = tail;
     group.userData.fishFins = [dorsal, anal, nearFin, farFin].map((fin) => ({ mesh: fin, baseRotation: fin.rotation.clone() }));
   } else if (species === 'butterfly') {
-    const leftWing = sphere(group, 0.32, details.color, [-0.11, 0.1, 0], { scale: [0.82, 0.12, 1.25], widthSegments: 7, heightSegments: 5, material: { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.9, side: THREE.DoubleSide } });
-    const rightWing = sphere(group, 0.32, details.color, [0.11, 0.1, 0], { scale: [0.82, 0.12, 1.25], widthSegments: 7, heightSegments: 5, material: { emissive: details.color, emissiveIntensity: 0.18, transparent: true, opacity: 0.9, side: THREE.DoubleSide } });
-    group.userData.wings = [leftWing, rightWing];
-    group.userData.wingSpeed = 12;
-    group.userData.isButterfly = true;
-    cylinder(group, 0.043, 0.052, 0.38, 0x483c35, [0, 0.13, 0], { segments: 6 });
-    cylinder(group, 0.012, 0.012, 0.22, 0x483c35, [-0.04, 0.4, 0], { rotation: [0, 0, -0.42], segments: 5 });
-    cylinder(group, 0.012, 0.012, 0.22, 0x483c35, [0.04, 0.4, 0], { rotation: [0, 0, 0.42], segments: 5 });
+    // Body runs fore-and-aft along -Z, and both wing pairs hinge on that axis so
+    // they close over the back like a book rather than pivoting mid-panel.
+    const wingMaterial = { emissive: details.color, emissiveIntensity: 0.16, transparent: true, opacity: 0.94, side: THREE.DoubleSide, roughness: 0.72 };
+    const hindColor = new THREE.Color(details.color).offsetHSL(0.02, -0.06, -0.07).getHex();
+    const butterflyWings = [];
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(0, 0.05, 0);
+      group.add(pivot);
+      // Larger fore wing forward, rounder hind wing behind it.
+      sphere(pivot, 0.3, details.color, [side * 0.27, 0, -0.13], { scale: [0.95, 0.055, 0.78], widthSegments: 8, heightSegments: 6, material: wingMaterial });
+      sphere(pivot, 0.23, hindColor, [side * 0.22, -0.005, 0.19], { scale: [0.95, 0.055, 0.86], widthSegments: 8, heightSegments: 6, material: wingMaterial });
+      // Wing markings: a pale eyespot and a dark leading edge.
+      sphere(pivot, 0.075, 0xf7ecd6, [side * 0.33, 0.012, -0.16], { scale: [1, 0.16, 1], material: { side: THREE.DoubleSide } });
+      box(pivot, [0.36, 0.01, 0.038], 0x6d4a4e, [side * 0.3, 0.018, -0.3], { rotation: [0, side * 0.2, 0] });
+      pivot.userData.wingSide = side;
+      // At rest the wings sit a little above horizontal, as a settled butterfly does.
+      pivot.rotation.z = side * 0.16;
+      butterflyWings.push(pivot);
+    }
+    group.userData.wings = butterflyWings;
+    group.userData.wingSpeed = 9;
+    group.userData.wingSwing = 0.95;
+    cylinder(group, 0.032, 0.048, 0.42, 0x483c35, [0, 0.03, 0.07], { rotation: [Math.PI / 2, 0, 0], segments: 7 });
+    sphere(group, 0.058, 0x3d332e, [0, 0.05, -0.2], { scale: [1, 0.95, 0.9] });
+    for (const side of [-1, 1]) {
+      sphere(group, 0.022, 0x1d1a17, [side * 0.036, 0.062, -0.235]);
+      cylinder(group, 0.008, 0.008, 0.24, 0x483c35, [side * 0.05, 0.13, -0.3], { rotation: [-0.9, 0, side * 0.4], segments: 5 });
+      sphere(group, 0.018, 0x483c35, [side * 0.088, 0.22, -0.38]);
+    }
   } else if (species === 'bee') {
     sphere(group, 0.3, details.color, [0, 0, 0], { scale: [1.15, 0.8, 0.8] });
     for (const x of [-0.1, 0.12]) torus(group, 0.245, 0.035, 0x262a20, [x, 0, 0], [0, Math.PI / 2, 0], 8, 18);
-    const leftWing = addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [-0.18, 0.28, 0], [0.1, Math.PI / 2, 0.2]);
-    const rightWing = addMesh(group, new THREE.CircleGeometry(0.23, 8), mat(0xdcefe3, { transparent: true, opacity: 0.7, side: THREE.DoubleSide }), [0.18, 0.28, 0], [-0.1, Math.PI / 2, -0.2]);
-    group.userData.wings = [leftWing, rightWing];
-    group.userData.wingSpeed = 18;
+    // Body runs along X, so the wing pairs sit out to ±Z and hinge on the thorax.
+    const beeWingMaterial = mat(0xdcefe3, { transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false });
+    const beeWings = [];
+    for (const side of [-1, 1]) {
+      for (const [anchorX, radius, wingPhase] of [[0.08, 0.2, 0], [-0.09, 0.15, Math.PI]]) {
+        const pivot = new THREE.Group();
+        pivot.position.set(anchorX, 0.19, 0);
+        group.add(pivot);
+        const wing = addMesh(pivot, new THREE.CircleGeometry(radius, 9), beeWingMaterial, [0, 0, side * (radius + 0.05)], [-Math.PI / 2, 0, 0]);
+        wing.scale.set(0.66, 1.1, 1);
+        pivot.userData.wingSide = side;
+        pivot.userData.wingPhase = wingPhase;
+        pivot.rotation.x = side * -0.1;
+        beeWings.push(pivot);
+      }
+    }
+    group.userData.wings = beeWings;
+    group.userData.wingAxis = 'x';
+    group.userData.wingSpeed = 22;
+    group.userData.wingSwing = 0.4;
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, -0.18]);
     sphere(group, 0.05, 0x24211c, [0.32, 0.1, 0.18]);
   } else if (species === 'dragonfly') {
     cylinder(group, 0.025, 0.09, 1.08, 0x6d8ca2, [0, 0, 0], { rotation: [0, 0, Math.PI / 2], segments: 7 });
     sphere(group, 0.075, 0x26333e, [0.58, 0, 0], { scale: [1.25, 0.82, 0.82] });
     const wingMaterial = { transparent: true, opacity: 0.86, emissive: details.color, emissiveIntensity: 0.52, side: THREE.DoubleSide, depthWrite: false };
-    const frontLeftWing = box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, -0.42], { material: wingMaterial, rotation: [0, 0.08, -0.05] });
-    const rearLeftWing = box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, -0.36], { material: wingMaterial, rotation: [0, -0.08, 0.06] });
-    const frontRightWing = box(group, [0.14, 0.018, 1.08], details.color, [-0.12, 0.12, 0.42], { material: wingMaterial, rotation: [0, -0.08, 0.05] });
-    const rearRightWing = box(group, [0.12, 0.018, 0.9], details.color, [0.18, 0.08, 0.36], { material: wingMaterial, rotation: [0, 0.08, -0.06] });
-    group.userData.wings = [frontLeftWing, rearLeftWing, frontRightWing, rearRightWing];
+    // Fore and hind wings beat half a cycle apart, hinged on the thorax.
+    const dragonflyWings = [];
+    for (const side of [-1, 1]) {
+      for (const [anchorX, anchorY, width, span, wingPhase] of [[-0.12, 0.12, 0.14, 1.08, 0], [0.18, 0.08, 0.12, 0.9, Math.PI]]) {
+        const pivot = new THREE.Group();
+        pivot.position.set(anchorX, anchorY, 0);
+        group.add(pivot);
+        box(pivot, [width, 0.018, span], details.color, [0, 0, side * (span * 0.39)], { material: wingMaterial, rotation: [0, side * 0.08, 0] });
+        pivot.userData.wingSide = side;
+        pivot.userData.wingPhase = wingPhase;
+        dragonflyWings.push(pivot);
+      }
+    }
+    group.userData.wings = dragonflyWings;
+    group.userData.wingAxis = 'x';
+    group.userData.wingSwing = 0.3;
     group.userData.wingSpeed = 34;
     for (const x of [-0.32, -0.02, 0.28]) cylinder(group, 0.01, 0.01, 0.22, 0x4c6e7e, [x, 0.15, 0], { rotation: [Math.PI / 2, 0, 0], segments: 5 });
   } else if (species === 'caterpillar') {
@@ -3719,6 +4314,10 @@ function resetWorld() {
   treeInteractions = [];
   zooAnimals = [];
   zooEnclosures = [];
+  fieldCharacters = [];
+  visitors = [];
+  visitorSpawnAt = 0;
+  visitorsSeeded = false;
   aquariumBubbles = [];
   pollinatorFlowers = [];
   wildFlowerNodes = [];
@@ -4154,6 +4753,8 @@ function scareCritter(critter) {
   critter.fleeTime = 3.8;
   tempVector.subVectors(critter.group.position, player).setY(0).normalize();
   critter.direction = Math.atan2(tempVector.x, tempVector.z);
+  critter.targetDirection = critter.direction;
+  if (critter.gait) critter.gait.mode = 'move';
 }
 
 function catchBug(bug) {
@@ -4320,11 +4921,11 @@ function getAimTarget(items, maxDistance, maxAngle = 0.34) {
 }
 
 function getAimCritter() {
-  return getAimTarget(critters.filter((critter) => !critter.caught), 8.5, 0.34);
+  return getAimTarget(critters.filter((critter) => !critter.caught && !critter.hidden), 8.5, 0.34);
 }
 
 function getNetCritterTarget() {
-  const candidates = critters.filter((critter) => !critter.caught && critter.state !== 'flee');
+  const candidates = critters.filter((critter) => !critter.caught && !critter.hidden && critter.state !== 'flee');
   const closeCandidates = candidates
     .filter((critter) => distanceTo(critter.group.position) <= 5.5)
     .sort((a, b) => distanceTo(a.group.position) - distanceTo(b.group.position));
@@ -4340,11 +4941,11 @@ function getNetDuckTarget() {
 }
 
 function getAimBug(revealedOnly = false) {
-  return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && ['worm', 'caterpillar', 'spider'].includes(bug.species) && (!revealedOnly || bug.revealed)), 7.5, 0.62);
+  return getAimTarget(bugNodes.filter((bug) => bug.cooldown <= 0 && isSpeciesActive(bug.species) && ['worm', 'caterpillar', 'spider'].includes(bug.species) && (!revealedOnly || bug.revealed)), 7.5, 0.62);
 }
 
 function getNearbyBug() {
-  return bugNodes.filter((bug) => bug.cooldown <= 0 && ['worm', 'caterpillar', 'spider'].includes(bug.species) && !bug.revealed).sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
+  return bugNodes.filter((bug) => bug.cooldown <= 0 && isSpeciesActive(bug.species) && ['worm', 'caterpillar', 'spider'].includes(bug.species) && !bug.revealed).sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
 }
 
 function getNearestRevealedBug() {
@@ -4353,39 +4954,166 @@ function getNearestRevealedBug() {
     .sort((a, b) => distanceTo(a.position) - distanceTo(b.position))[0] || null;
 }
 
-function animateWings(group, phase = 0, speed = group.userData.wingSpeed || 12) {
+// Every winged model registers hinge groups in `userData.wings`, each tagged with
+// the side of the body it belongs to. `wingAxis` says which body axis the stroke
+// turns around: 'z' for wings that reach out along ±X (birds, butterflies), 'x'
+// for insects whose body runs along X and whose wings reach out along ±Z.
+// `strength` scales the whole stroke, so a resting animal can hold its wings still.
+function animateWings(group, phase = 0, speed = group.userData.wingSpeed || 12, strength = 1) {
   const wings = group.userData.wings;
   if (!wings?.length) return;
-  const flap = Math.sin(elapsed * speed + phase);
-  wings.forEach((wing, index) => {
+  const swing = (group.userData.wingSwing ?? 0.45) * strength;
+  const axis = group.userData.wingAxis || 'z';
+  for (const wing of wings) {
     if (!wing.userData.baseRotation) wing.userData.baseRotation = wing.rotation.clone();
-    if (!wing.userData.baseScale) wing.userData.baseScale = wing.scale.clone();
-    if (!wing.userData.basePosition) wing.userData.basePosition = wing.position.clone();
-    const side = group.userData.isButterfly ? (index === 0 ? -1 : 1) : (index % 2 === 0 ? 1 : -1);
-    if (group.userData.isButterfly) {
-      const spread = 0.065 + Math.abs(flap) * 0.16;
-      wing.position.x = side * spread;
-      wing.rotation.y = wing.userData.baseRotation.y + flap * 0.58 * side;
-      wing.rotation.z = wing.userData.baseRotation.z + flap * 0.16 * side;
-      wing.scale.y = wing.userData.baseScale.y * (0.82 + Math.abs(flap) * 0.22);
-      return;
+    const side = wing.userData.wingSide ?? 1;
+    const flap = Math.sin(elapsed * speed + phase + (wing.userData.wingPhase || 0));
+    if (axis === 'x') {
+      wing.rotation.x = wing.userData.baseRotation.x + flap * swing * side;
+      wing.rotation.y = wing.userData.baseRotation.y + flap * 0.06 * side;
+      continue;
     }
-    wing.rotation.x = wing.userData.baseRotation.x + flap * 0.42 * side;
-    wing.rotation.z = wing.userData.baseRotation.z + flap * 0.08 * side;
-    wing.scale.y = wing.userData.baseScale.y * (0.82 + Math.abs(flap) * 0.18);
-  });
+    // Rolling the hinge about Z lifts the whole panel from the shoulder; the small
+    // pitch offset gives the downstroke its forward sweep.
+    wing.rotation.z = wing.userData.baseRotation.z + flap * swing * side;
+    wing.rotation.x = wing.userData.baseRotation.x + Math.cos(elapsed * speed + phase) * swing * 0.16;
+  }
+}
+
+// Ground locomotion profiles. Everything that separates a fox's steady, wary
+// trot from a squirrel's short scamper-and-freeze lives in these numbers.
+const GROUND_GAITS = {
+  fox: {
+    moveSpeed: 1.42, fleeSpeed: 4.1, moveFor: [2.2, 4.8], pauseFor: [1.3, 3.1],
+    turnRate: 1.15, wanderTurn: 0.55, strideRate: 4.6, strideLift: 0.42,
+    bodyLift: 0.05, tailSway: 0.2, roam: 6.6, sniffs: true, bounds: false
+  },
+  squirrel: {
+    moveSpeed: 2.7, fleeSpeed: 4.8, moveFor: [0.4, 1.15], pauseFor: [0.65, 2.0],
+    turnRate: 5.4, wanderTurn: 2.3, strideRate: 6.4, strideLift: 0.72,
+    bodyLift: 0.17, tailSway: 0.5, roam: 4.4, sniffs: false, bounds: true
+  }
+};
+
+function randomBetween([min, max]) {
+  return min + Math.random() * (max - min);
+}
+
+function ensureCritterGait(critter, gait) {
+  if (!critter.gait) {
+    critter.gait = {
+      mode: 'pause',
+      until: elapsed + randomBetween(gait.pauseFor) * Math.random(),
+      stride: Math.random() * Math.PI * 2,
+      speed: 0
+    };
+    critter.targetDirection = critter.direction;
+  }
+  return critter.gait;
+}
+
+// Poses the body for whatever speed it is currently travelling at: the legs swing
+// from their hips, the spine lifts with each bound or footfall, and the head and
+// tail keep working while the animal is standing still.
+function poseGroundCritter(critter, gait, delta, speed, paused) {
+  const state = ensureCritterGait(critter, gait);
+  const animal = critter.group;
+  const effort = clamp(speed / gait.moveSpeed, 0, 1.6);
+  state.stride += (paused ? 0 : Math.max(speed, 0.2)) * gait.strideRate * delta;
+  const stride = Math.sin(state.stride);
+  if (gait.bounds) {
+    // Each bound throws the whole body forward and up, then lands nose-first.
+    const hop = Math.max(0, stride);
+    animal.position.y = 0.42 + hop * gait.bodyLift * effort;
+    animal.rotation.x = -Math.cos(state.stride) * 0.26 * effort;
+  } else {
+    animal.position.y = 0.42 + Math.abs(stride) * gait.bodyLift * effort;
+    animal.rotation.x = stride * 0.035 * effort + (paused && gait.sniffs ? 0.05 : 0);
+  }
+  const legs = animal.userData.legs;
+  if (legs) {
+    const amplitude = gait.strideLift * Math.max(effort, paused ? 0 : 0.12);
+    for (const leg of legs) {
+      leg.pivot.rotation.x = Math.sin(state.stride + leg.phase) * amplitude;
+    }
+  }
+  const head = animal.userData.head;
+  if (head) {
+    if (paused) {
+      // Frozen and checking the field: squirrels snap their heads around, foxes
+      // drop their nose to the ground and work it slowly back and forth.
+      const scan = Math.sin(elapsed * (gait.bounds ? 3.6 : 1.4) + critter.home.x);
+      head.rotation.y = scan * (gait.bounds ? 0.62 : 0.34);
+      head.rotation.x = gait.sniffs ? 0.34 + Math.sin(elapsed * 2.4) * 0.09 : -0.16 + Math.abs(scan) * 0.1;
+    } else {
+      const ease = Math.min(1, delta * 6);
+      head.rotation.y += (Math.sin(state.stride * 0.5) * 0.06 - head.rotation.y) * ease;
+      head.rotation.x += ((gait.bounds ? -0.1 : 0.05) - head.rotation.x) * ease;
+    }
+  }
+  const tail = animal.userData.tail;
+  if (tail) {
+    if (gait.bounds) {
+      // The squirrel's tail arcs over its back on each bound and flicks when frozen.
+      tail.rotation.x = -0.2 - Math.max(0, stride) * 0.5 * effort - (paused ? Math.abs(Math.sin(elapsed * 5.4)) * 0.32 : 0);
+      tail.rotation.z = Math.sin(elapsed * 4.6 + critter.home.z) * gait.tailSway * 0.3;
+    } else {
+      // The fox's brush sways with the trot and hangs low when it stops.
+      tail.rotation.y = Math.sin(state.stride * 0.5) * gait.tailSway;
+      tail.rotation.x = paused ? 0.2 : -0.05 + stride * 0.07 * effort;
+    }
+  }
+}
+
+// Bursts of travel separated by stationary beats, rather than a constant drift.
+function updateGroundGait(critter, gait, delta) {
+  const state = ensureCritterGait(critter, gait);
+  const animal = critter.group;
+  const wary = distanceTo(animal.position) < 9 && currentNoise > 0.22;
+  if (elapsed >= state.until) {
+    if (state.mode === 'move') {
+      state.mode = 'pause';
+      state.until = elapsed + randomBetween(gait.pauseFor) * (wary ? 1.6 : 1);
+    } else {
+      state.mode = 'move';
+      state.until = elapsed + randomBetween(gait.moveFor);
+      critter.targetDirection = critter.direction + (Math.random() - 0.5) * gait.wanderTurn * 2;
+    }
+  }
+  if (animal.position.distanceTo(critter.home) > gait.roam) {
+    tempVector.subVectors(critter.home, animal.position).setY(0).normalize();
+    critter.targetDirection = Math.atan2(tempVector.x, tempVector.z);
+  }
+  steerCritterFromEdge(critter, delta);
+  let turn = (critter.targetDirection ?? critter.direction) - critter.direction;
+  while (turn > Math.PI) turn -= Math.PI * 2;
+  while (turn < -Math.PI) turn += Math.PI * 2;
+  critter.direction += clamp(turn, -gait.turnRate * delta, gait.turnRate * delta);
+  const target = state.mode === 'move' ? gait.moveSpeed * (wary ? 1.2 : 1) : 0;
+  state.speed += (target - state.speed) * Math.min(1, delta * (gait.bounds ? 11 : 4.5));
+  animal.position.x += Math.sin(critter.direction) * state.speed * delta;
+  animal.position.z += Math.cos(critter.direction) * state.speed * delta;
+  keepGroundAnimalOnLand(animal, critter);
+  poseGroundCritter(critter, gait, delta, state.speed, state.mode === 'pause' && state.speed < 0.12);
 }
 
 function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
+    const onSchedule = isSpeciesActive(critter.species);
     if (critter.hidden) {
-      if (elapsed >= critter.respawnAt) respawnCritter(critter);
+      if (onSchedule && elapsed >= critter.respawnAt) respawnCritter(critter);
+      continue;
+    }
+    // Off-hours animals slip away rather than standing around out of season.
+    if (!onSchedule) {
+      retireCritter(critter);
       continue;
     }
     const animal = critter.group;
+    const gait = GROUND_GAITS[critter.species];
     const isFlying = SPECIES[critter.species].type === 'flying' || ['butterfly', 'bee', 'dragonfly'].includes(critter.species);
-    if (isFlying) animateWings(animal, critter.home.x, SPECIES[critter.species].type === 'bug' && critter.species === 'dragonfly' ? 34 : critter.species === 'bee' ? 18 : 12);
+    if (isFlying) animateWings(animal, critter.home.x);
     critter.stateTime += delta;
     const distance = distanceTo(animal.position);
     if (critter.state === 'idle') {
@@ -4394,12 +5122,16 @@ function updateCritters(delta) {
       if (attracting) {
         tempVector.subVectors(player, animal).setY(0).normalize();
         critter.direction = Math.atan2(tempVector.x, tempVector.z);
+        if (gait) critter.targetDirection = critter.direction;
         animal.position.x += tempVector.x * delta * 0.42;
         animal.position.z += tempVector.z * delta * 0.42;
         keepGroundAnimalOnLand(animal, critter);
-        animal.position.y = 0.42 + Math.sin(elapsed * 2.4 + critter.home.x) * 0.035;
+        if (gait) poseGroundCritter(critter, gait, delta, 0.42, false);
+        else animal.position.y = 0.42 + Math.sin(elapsed * 2.4 + critter.home.x) * 0.035;
       } else if (threat) {
         scareCritter(critter);
+      } else if (gait) {
+        updateGroundGait(critter, gait, delta);
       } else {
         steerCritterFromEdge(critter, delta);
         critter.direction += Math.sin(elapsed * 0.28 + critter.home.x) * delta * 0.07;
@@ -4415,10 +5147,16 @@ function updateCritters(delta) {
       }
     } else if (critter.state === 'flee') {
       critter.fleeTime -= delta;
-      animal.position.x += Math.sin(critter.direction) * delta * 3.4;
-      animal.position.z += Math.cos(critter.direction) * delta * 3.4;
-      animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 2.6 + critter.home.x) * 0.08 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
-      if (!isFlying) keepGroundAnimalOnLand(animal, critter);
+      const fleeSpeed = gait?.fleeSpeed ?? 3.4;
+      animal.position.x += Math.sin(critter.direction) * delta * fleeSpeed;
+      animal.position.z += Math.cos(critter.direction) * delta * fleeSpeed;
+      if (gait) {
+        keepGroundAnimalOnLand(animal, critter);
+        poseGroundCritter(critter, gait, delta, fleeSpeed, false);
+      } else {
+        animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 2.6 + critter.home.x) * 0.08 : 0.42 + Math.abs(Math.sin(elapsed * 9)) * 0.1;
+        if (!isFlying) keepGroundAnimalOnLand(animal, critter);
+      }
       const bounds = ZONES[currentZone].bounds;
       if (animal.position.x < bounds.minX - 1 || animal.position.x > bounds.maxX + 1 || animal.position.z < bounds.minZ - 1 || animal.position.z > bounds.maxZ + 1) {
         world.remove(animal);
@@ -4430,6 +5168,11 @@ function updateCritters(delta) {
         critter.state = 'idle';
         critter.home.copy(animal.position);
         critter.stateTime = 0;
+        critter.targetDirection = critter.direction;
+        if (critter.gait) {
+          critter.gait.mode = 'pause';
+          critter.gait.until = elapsed + 1.2;
+        }
       }
     }
     animal.rotation.y = critter.species === 'dragonfly' ? critter.direction - Math.PI / 2 : critter.direction + Math.PI;
@@ -4446,7 +5189,12 @@ function updateBugNodes(delta) {
   for (const bug of bugNodes) {
     bug.cooldown = Math.max(0, bug.cooldown - delta);
     const near = distanceTo(bug.position) < 8.6;
-    bug.marker.visible = bug.cooldown <= 0 && (!bug.revealed || near);
+    bug.scheduled = isSpeciesActive(bug.species);
+    if (!bug.scheduled && bug.revealed) {
+      bug.revealed = false;
+      bug.bugModel.visible = false;
+    }
+    bug.marker.visible = bug.scheduled && bug.cooldown <= 0 && (!bug.revealed || near);
     if (bug.marker.visible) {
       const pulse = 1 + Math.sin(elapsed * 2.2 + bug.position.x) * 0.1;
       bug.marker.scale.setScalar(pulse);
@@ -4478,7 +5226,12 @@ function updateHotspots(delta) {
 function updateZooAnimals(delta) {
   if (currentZone !== 'zoo') return;
   for (const exhibit of zooAnimals) {
-    const angle = elapsed * exhibit.speed + exhibit.phase;
+    // Showcase animals stay on view around the clock, but they wind down to a
+    // slow shuffle outside the hours their species is actually awake.
+    const onDuty = exhibit.species ? isSpeciesActive(exhibit.species) : true;
+    exhibit.rest = (exhibit.rest ?? 1) + ((onDuty ? 1 : 0.1) - (exhibit.rest ?? 1)) * Math.min(1, delta * 0.9);
+    exhibit.travel = (exhibit.travel ?? exhibit.phase) + delta * exhibit.speed * exhibit.rest;
+    const angle = exhibit.travel;
     const nextX = exhibit.center.x + Math.cos(angle) * exhibit.radiusX;
     const nextZ = exhibit.center.z + Math.sin(angle) * exhibit.radiusZ;
     const deltaX = nextX - exhibit.group.position.x;
@@ -4502,13 +5255,16 @@ function updateZooAnimals(delta) {
         toast('A showcase duck laid an egg by the practice pond.', 'success');
       }
     } else if (exhibit.type === 'ground') {
-      exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045;
-      exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
+      // Resting animals settle onto the bedding instead of pacing the enclosure.
+      exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045 * exhibit.rest - (1 - exhibit.rest) * 0.12;
+      if (Math.hypot(deltaX, deltaZ) > 0.0001) exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
     } else {
-      exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.1 + exhibit.phase) * 0.1 + Math.cos(elapsed * 1.1 + exhibit.phase) * 0.04;
-      if (exhibit.group.userData.wings) animateWings(exhibit.group, exhibit.phase, exhibit.group.userData.wingSpeed || 12);
-      exhibit.group.rotation.y = exhibit.group.userData.wingSpeed === 34 ? Math.atan2(-deltaZ, deltaX) : Math.atan2(deltaX, -deltaZ);
-      exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16;
+      // A dozing owl drops to its perch height; an active one works the enclosure.
+      exhibit.group.position.y = exhibit.center.y - (1 - exhibit.rest) * 0.55
+        + (Math.sin(elapsed * 2.1 + exhibit.phase) * 0.1 + Math.cos(elapsed * 1.1 + exhibit.phase) * 0.04) * exhibit.rest;
+      if (exhibit.group.userData.wings) animateWings(exhibit.group, exhibit.phase, exhibit.group.userData.wingSpeed || 12, 0.12 + exhibit.rest * 0.88);
+      if (Math.hypot(deltaX, deltaZ) > 0.0001) exhibit.group.rotation.y = exhibit.group.userData.wingAxis === 'x' ? Math.atan2(-deltaZ, deltaX) : Math.atan2(deltaX, -deltaZ);
+      exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16 * exhibit.rest;
     }
   }
 }
@@ -4721,8 +5477,18 @@ function setInventoryTab(tab) {
   updateHUD();
 }
 
+// Surfaces the field clock in the topbar, so the day cycle is legible without
+// opening the journal, and dims it once the light goes.
+function updateFieldClockLabel() {
+  if (!dom.clockLabel) return;
+  const period = getDayPeriod();
+  dom.clockLabel.textContent = `${getFieldClockLabel()} ${(DAY_PERIOD_LABELS[period] || period).toUpperCase()}`;
+  dom.clockLabel.style.color = period === 'night' ? 'var(--aqua)' : period === 'day' ? 'var(--lime)' : 'var(--orange)';
+}
+
 function updateHUD() {
   dom.zoneLabel.textContent = ZONES[currentZone].label;
+  updateFieldClockLabel();
   dom.coinLabel.textContent = `${save.coins}¢`;
   const baitLabel = formatName(selectedBait);
   const lureLabel = formatName(selectedLure);
@@ -5020,6 +5786,7 @@ function closeModal(element) {
   document.querySelector('#game-shell').appendChild(feedbackHub);
   element.classList.add('is-hidden');
   modalOpen = false;
+  if (element === dom.journalModal) dom.journalToggleButton?.setAttribute('aria-expanded', 'false');
   if (element === dom.qteModal) qteState = null;
   if (element === dom.cleaningModal) {
     cleaningState = null;
@@ -5030,7 +5797,8 @@ function closeModal(element) {
 
 function closeAllModals(restore = true) {
   document.querySelector('#game-shell').appendChild(feedbackHub);
-  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal].forEach((modal) => modal.classList.add('is-hidden'));
+  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal, dom.journalModal].forEach((modal) => modal.classList.add('is-hidden'));
+  dom.journalToggleButton?.setAttribute('aria-expanded', 'false');
   modalOpen = false;
   qteState = null;
   cleaningState = null;
@@ -5082,6 +5850,144 @@ function openCollection() {
   openModal(dom.collectionModal);
 }
 
+
+// --- Field journal ------------------------------------------------------------
+// A read-only reference the player can pull up at any moment. It reads live game
+// state, so it doubles as the answer to "what is even out right now?".
+
+function formatDuration(seconds) {
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) return `${whole}s`;
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
+}
+
+function journalRow(label, value, dim = false) {
+  return `<div class="journal-row"><span>${label}</span><em class="${dim ? 'is-dim' : ''}">${value}</em></div>`;
+}
+
+function renderJournal() {
+  if (!dom.journalBody) return;
+  const phase = getDayPhase();
+  const period = getDayPeriod(phase);
+  const nextPeriod = DAY_PERIODS[(DAY_PERIODS.indexOf(period) + 1) % DAY_PERIODS.length];
+  const supplies = save.supplies || {};
+  const ingredients = save.ingredients || {};
+  const cooked = save.cooked || {};
+  const caught = save.caught || {};
+  const recordable = Object.keys(SPECIES);
+  const landSpecies = recordable.filter((key) => SPECIES[key].type !== 'fish');
+  const recorded = recordable.filter((key) => (caught[key] || 0) > 0);
+  const notes = Object.values(caught).reduce((sum, count) => sum + (count || 0), 0);
+  const outNow = listActiveSpecies(period);
+
+  const activity = Object.entries(SPECIES)
+    .filter(([, species]) => species.type !== 'fish')
+    .map(([key, species]) => {
+      const out = isSpeciesActive(key, period);
+      const count = caught[key] || 0;
+      return `<div class="journal-animal ${out ? 'is-out' : ''}">
+        <span class="journal-animal-sigil">${species.sigil}</span>
+        <span><strong>${species.label}</strong><small>${describeSpeciesActivity(key)}${count ? ` · ${count} recorded` : ''}</small></span>
+        <span class="journal-chip">${out ? 'OUT NOW' : 'RESTING'}</span>
+      </div>`;
+    }).join('');
+
+  const records = Object.values(save.records || {});
+  const habitats = zooEnclosures.length
+    ? `${zooEnclosures.filter((enclosure) => enclosure.cleaned).length} / ${zooEnclosures.length} clean`
+    : 'Visit the showcase';
+  const brynlee = serviceActive(save.brynleeCaretakerUntil)
+    ? `${Math.ceil((save.brynleeCaretakerUntil - Date.now()) / 60000)}m left`
+    : 'Off shift';
+  const brooks = serviceActive(save.brooksWatchUntil)
+    ? `${Math.ceil((save.brooksWatchUntil - Date.now()) / 60000)}m left`
+    : 'Off shift';
+
+  dom.journalBody.innerHTML = `
+    <div class="journal-clock">
+      <span class="journal-clock-time">${getFieldClockLabel(phase)}</span>
+      <span class="journal-clock-copy">
+        <strong>${(DAY_PERIOD_LABELS[period] || period).toUpperCase()} · ${ZONES[currentZone].title.toUpperCase()}</strong>
+        <span>${DAY_PERIOD_LABELS[nextPeriod]} begins in ${formatDuration(getPeriodSecondsRemaining(phase))}. ${outNow.length} of ${landSpecies.length} land species are out right now.</span>
+      </span>
+    </div>
+
+    <div class="journal-section">
+      <p class="eyebrow">FIELD RECORD</p>
+      <div class="journal-rows">
+        ${journalRow('Species recorded', `${recorded.length} / ${recordable.length}`)}
+        ${journalRow('Field notes logged', notes)}
+        ${journalRow('Coins', `${save.coins}¢`)}
+        ${journalRow('Specimens researched', save.graysonResearch || 0)}
+      </div>
+      ${records.length
+        ? `<p class="journal-note">Personal bests · ${records.map((record) => formatFishRecord(record)).join(' · ')}</p>`
+        : '<p class="journal-note">No personal bests yet. Land a fish and the record board fills in.</p>'}
+    </div>
+
+    <div class="journal-section">
+      <p class="eyebrow">ACTIVITY BOARD</p>
+      <div class="journal-species">${activity}</div>
+      <p class="journal-note">Animals keep their own hours. Off-duty species leave the field until their part of the day comes back around; showcase animals stay on view but settle down and rest.</p>
+    </div>
+
+    <div class="journal-section">
+      <p class="eyebrow">FIELD KIT</p>
+      <div class="journal-rows">
+        ${journalRow('Worms', supplies.worms || 0, !supplies.worms)}
+        ${journalRow('Grubs', supplies.grubs || 0, !supplies.grubs)}
+        ${journalRow('Nets', supplies.nets || 0, !supplies.nets)}
+        ${journalRow('Magnifying glasses', supplies.magnifiers || 0, !supplies.magnifiers)}
+        ${journalRow('Golden seeds', supplies.goldenSeeds || 0, !supplies.goldenSeeds)}
+        ${journalRow('Lantern oil', supplies.lanternOil || 0, !supplies.lanternOil)}
+      </div>
+    </div>
+
+    <div class="journal-section">
+      <p class="eyebrow">LARDER</p>
+      <div class="journal-rows">
+        ${journalRow('Carrots', ingredients.carrots || 0, !ingredients.carrots)}
+        ${journalRow('Honey', save.honey || 0, !save.honey)}
+        ${journalRow('Berries', ingredients.berries || 0, !ingredients.berries)}
+        ${journalRow('Duck eggs', ingredients.duckEggs || 0, !ingredients.duckEggs)}
+        ${journalRow('Grilled fish', cooked.grilledFish || 0, !cooked.grilledFish)}
+        ${journalRow('Glazed carrots', cooked.glazedCarrots || 0, !cooked.glazedCarrots)}
+      </div>
+    </div>
+
+    <div class="journal-section">
+      <p class="eyebrow">CONSERVATORY DUTIES</p>
+      <div class="journal-rows">
+        ${journalRow('Habitats', habitats)}
+        ${journalRow('Brynlee · caretaker', brynlee, brynlee === 'Off shift')}
+        ${journalRow('Brooks · night watch', brooks, brooks === 'Off shift')}
+        ${journalRow('On patrol now', ['brynlee', 'grayson', 'brooks'].filter((id) => isStaffOnShift(id)).map(formatName).join(', ') || 'Nobody')}
+      </div>
+    </div>
+  `;
+}
+
+function openJournal() {
+  renderJournal();
+  dom.journalToggleButton?.setAttribute('aria-expanded', 'true');
+  openModal(dom.journalModal);
+}
+
+function toggleJournal() {
+  if (!dom.journalModal) return;
+  if (!dom.journalModal.classList.contains('is-hidden')) {
+    closeModal(dom.journalModal);
+    return;
+  }
+  // The journal is checkable at any time, so it takes over from whatever else
+  // happened to be open rather than refusing to appear.
+  if (modalOpen) closeAllModals(false);
+  if (qteState) {
+    qteState = null;
+    dom.qteModal.classList.add('is-hidden');
+  }
+  openJournal();
+}
 
 function buyItem(itemKey, group) {
   const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
@@ -5193,6 +6099,10 @@ function handleInteract() {
   const target = getInteractionTarget();
   if (target?.type === 'character') {
     talkToCharacter(target.character);
+    return;
+  }
+  if (target?.type === 'visitor') {
+    greetVisitor(target.visitor);
     return;
   }
   if (target?.type === 'car') {
@@ -5412,12 +6322,20 @@ function animate() {
   updateEnclosureMarkers();
   updateHotspots(delta);
   updateZooAnimals(delta);
+  updateFieldCharacters(delta);
+  updateVisitors(delta);
   updateJenkinsLakeGate();
   updateAquarium();
   updatePollinatorGarden();
   if (elapsed > serviceCheckAt) {
     serviceCheckAt = elapsed + 3;
     updateCharacterServices();
+  }
+  // Keep the clock and the open journal ticking without redrawing every frame.
+  if (elapsed > journalRefreshAt) {
+    journalRefreshAt = elapsed + 0.5;
+    updateFieldClockLabel();
+    if (dom.journalModal && !dom.journalModal.classList.contains('is-hidden')) renderJournal();
   }
   updateQTE(delta);
   updatePrompt();
@@ -5473,6 +6391,7 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Digit2') setTool('net');
   if (event.code === 'Digit3') setTool('magnifier');
   if (event.code === 'Digit4') setTool('food');
+  if (event.code === 'KeyJ' && !event.repeat) toggleJournal();
   if (event.code === 'KeyB') cycleBait();
   if (event.code === 'KeyL') cycleLure();
   if (event.code === 'KeyF') cycleFood();
@@ -5576,6 +6495,8 @@ dom.cleaningField.addEventListener('pointerover', (event) => {
   const spot = event.target.closest('[data-cleaning-index]');
   if (spot && cleaningState?.mode === 'aquarium') clearCleaningSpot(Number(spot.dataset.cleaningIndex));
 });
+
+dom.journalToggleButton?.addEventListener('click', () => toggleJournal());
 
 dom.tipsToggleButton.addEventListener('click', () => {
   setTipsMenuOpen(dom.tipsMenu.classList.contains('is-hidden'));

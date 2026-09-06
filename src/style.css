@@ -1539,3 +1539,187 @@ h2 {
     transition-duration: 1ms !important;
   }
 }
+
+/* --- Field journal ---------------------------------------------------------
+   A reference panel the player can pull up at any time, so it favours dense,
+   scannable rows over the roomier cards used by the shop and collection. */
+
+/* The journal sits outside .topbar-meta so it survives the narrow-screen
+   collapse: it has to be reachable at any time, including on a phone. */
+.journal-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  margin-right: 12px;
+  border-color: rgba(137, 224, 199, 0.36);
+  color: var(--aqua);
+  background: rgba(38, 78, 68, 0.32);
+}
+
+.journal-toggle:hover,
+.journal-toggle[aria-expanded="true"] {
+  border-color: rgba(137, 224, 199, 0.82);
+  background: rgba(52, 105, 91, 0.58);
+}
+
+.journal-modal-card {
+  width: min(760px, 100%);
+}
+
+.journal-body {
+  display: grid;
+  gap: 16px;
+}
+
+.journal-clock {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(137, 224, 199, 0.34);
+  background: rgba(30, 58, 50, 0.55);
+}
+
+.journal-clock-time {
+  color: var(--aqua);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.journal-clock-copy strong {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+.journal-clock-copy span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.journal-section {
+  display: grid;
+  gap: 8px;
+}
+
+.journal-section > .eyebrow {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.journal-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+}
+
+.journal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(239, 241, 224, 0.07);
+  font-size: 11px;
+}
+
+.journal-row span {
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.journal-row em {
+  color: var(--ink);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.journal-row em.is-dim {
+  color: rgba(239, 241, 224, 0.34);
+}
+
+.journal-species {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.journal-animal {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid rgba(239, 241, 224, 0.1);
+  background: rgba(6, 17, 12, 0.33);
+}
+
+.journal-animal.is-out {
+  border-color: rgba(216, 239, 133, 0.4);
+  background: rgba(60, 84, 50, 0.3);
+}
+
+.journal-animal-sigil {
+  color: rgba(239, 241, 224, 0.28);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.journal-animal.is-out .journal-animal-sigil {
+  color: var(--lime);
+}
+
+.journal-animal strong {
+  display: block;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.journal-animal small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+}
+
+.journal-chip {
+  padding: 3px 6px;
+  border: 1px solid rgba(239, 241, 224, 0.16);
+  color: rgba(239, 241, 224, 0.42);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.journal-animal.is-out .journal-chip {
+  border-color: rgba(216, 239, 133, 0.5);
+  color: var(--lime);
+}
+
+.journal-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .journal-rows,
+  .journal-species { grid-template-columns: 1fr; }
+  .journal-clock { grid-template-columns: 1fr; gap: 8px; }
+}
+
+@media (max-width: 700px) {
+  .journal-toggle .key-hint { display: none; }
+}
