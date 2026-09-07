@@ -3,6 +3,10 @@ import './style.css';
 import './interaction-feedback.css';
 
 const SAVE_KEY = 'jenkins-conservatory-save-v1';
+// Save slots. Slot 1 deliberately keeps the original storage key, so anyone who
+// has already played keeps their field records without a migration step.
+const ACTIVE_SLOT_KEY = 'jenkins-conservatory-active-profile-v1';
+const SAVE_SLOTS = [1, 2, 3];
 const ZONE_ORDER = ['store', 'forest', 'zoo', 'lake'];
 const FLOWER_GROW_MS = 5 * 60 * 1000;
 const FLOWER_LIFE_MS = 2 * 60 * 60 * 1000;
@@ -19,7 +23,8 @@ const ZONES = {
     fog: 0x8e9b78,
     ground: 0x61705a,
     accent: 0xf2b268,
-    bounds: { minX: -21, maxX: 21, minZ: -22, maxZ: 18 }
+    bounds: { minX: -21, maxX: 21, minZ: -22, maxZ: 22 },
+    visualBounds: { minX: -21, maxX: 21, minZ: -22, maxZ: 36 }
   },
   forest: {
     label: 'LAKE FOREST',
@@ -29,7 +34,8 @@ const ZONES = {
     fog: 0x91aa92,
     ground: 0x46684e,
     accent: 0x8be0c3,
-    bounds: { minX: -28, maxX: 28, minZ: -40, maxZ: 20 }
+    bounds: { minX: -28, maxX: 28, minZ: -40, maxZ: 22 },
+    visualBounds: { minX: -28, maxX: 28, minZ: -40, maxZ: 36 }
   },
   zoo: {
     label: 'CONSERVATORY ZOO',
@@ -39,7 +45,8 @@ const ZONES = {
     fog: 0x7d9587,
     ground: 0x697862,
     accent: 0xd8ef85,
-    bounds: { minX: -23, maxX: 23, minZ: -64, maxZ: 18 }
+    bounds: { minX: -23, maxX: 23, minZ: -64, maxZ: 22 },
+    visualBounds: { minX: -23, maxX: 23, minZ: -64, maxZ: 36 }
   },
   lake: {
     label: 'JENKINS LAKE',
@@ -240,6 +247,11 @@ const SHOP_ITEMS = [
 ];
 
 const DEFAULT_SAVE = {
+  profileName: '',
+  savedAt: 0,
+  // Where in the day/night cycle this profile left off, so the field clock is
+  // remembered along with everything else.
+  dayPhase: null,
   tipsEnabled: true,
   coins: 120,
   supplies: {
@@ -304,6 +316,10 @@ const dom = {
   equipmentList: document.querySelector('#equipment-list'),
   inventoryTabs: document.querySelector('#inventory-tabs'),
   saveStatus: document.querySelector('#save-status'),
+  profileModal: document.querySelector('#profile-modal'),
+  profileSlots: document.querySelector('#profile-slots'),
+  profileLabel: document.querySelector('#profile-label'),
+  profileToggleButton: document.querySelector('#profile-toggle-button'),
   noiseValue: document.querySelector('#noise-value'),
   noiseMeter: document.querySelector('#noise-meter'),
   crosshair: document.querySelector('#crosshair'),
@@ -408,6 +424,9 @@ sunLight.shadow.camera.bottom = -35;
 sunLight.shadow.camera.near = 0.5;
 sunLight.shadow.camera.far = 90;
 scene.add(sunLight);
+// The shadow camera is aimed by this target, and both it and the light ride
+// along with the player so shadows stay resolved wherever the field is walked.
+scene.add(sunLight.target);
 
 const clock = new THREE.Clock();
 const raycaster = new THREE.Raycaster();
@@ -420,6 +439,7 @@ const rightDirection = new THREE.Vector3();
 const tempVector = new THREE.Vector3();
 const tempVector2 = new THREE.Vector3();
 
+let activeSlot = readActiveSlot();
 let save = loadSave();
 let currentZone = save.lastZone && ZONES[save.lastZone] ? save.lastZone : 'forest';
 let activeTool = 'rod';
@@ -524,10 +544,43 @@ const fishing = {
   invalidCast: false
 };
 
-function loadSave() {
+function slotStorageKey(slot) {
+  return slot === 1 ? SAVE_KEY : `${SAVE_KEY}::${slot}`;
+}
+
+function readActiveSlot() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(SAVE_KEY) || 'null');
-    if (!parsed) return structuredClone(DEFAULT_SAVE);
+    const stored = Number(window.localStorage.getItem(ACTIVE_SLOT_KEY));
+    return SAVE_SLOTS.includes(stored) ? stored : 1;
+  } catch (error) {
+    return 1;
+  }
+}
+
+function readRawSlot(slot) {
+  try {
+    return JSON.parse(window.localStorage.getItem(slotStorageKey(slot)) || 'null');
+  } catch (error) {
+    return null;
+  }
+}
+
+function slotHasData(slot) {
+  return Boolean(readRawSlot(slot));
+}
+
+function defaultProfileName(slot) {
+  return `Field record ${slot}`;
+}
+
+function loadSave(slot = activeSlot) {
+  try {
+    const parsed = readRawSlot(slot);
+    if (!parsed) {
+      const fresh = structuredClone(DEFAULT_SAVE);
+      fresh.profileName = defaultProfileName(slot);
+      return fresh;
+    }
     return {
       ...structuredClone(DEFAULT_SAVE),
       ...parsed,
@@ -543,18 +596,25 @@ function loadSave() {
       brynleeCaretakerUntil: Number(parsed.brynleeCaretakerUntil || 0),
       brooksWatchUntil: Number(parsed.brooksWatchUntil || 0),
       brooksAssignment: parsed.brooksAssignment || 'conservatory',
-      graysonResearch: Number(parsed.graysonResearch || 0)
+      graysonResearch: Number(parsed.graysonResearch || 0),
+      profileName: parsed.profileName || defaultProfileName(slot),
+      dayPhase: Number.isFinite(Number(parsed.dayPhase)) ? Number(parsed.dayPhase) : null
     };
   } catch (error) {
     console.warn('Save data unavailable; using a fresh field kit.', error);
-    return structuredClone(DEFAULT_SAVE);
+    const fresh = structuredClone(DEFAULT_SAVE);
+    fresh.profileName = defaultProfileName(slot);
+    return fresh;
   }
 }
 
 function saveGame() {
   try {
     save.lastZone = currentZone;
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+    save.dayPhase = getDayPhase();
+    save.savedAt = Date.now();
+    window.localStorage.setItem(slotStorageKey(activeSlot), JSON.stringify(save));
+    window.localStorage.setItem(ACTIVE_SLOT_KEY, String(activeSlot));
     dom.saveStatus.textContent = 'SAVED';
     dom.saveStatus.style.color = 'var(--aqua)';
   } catch (error) {
@@ -600,6 +660,9 @@ function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0
 function addCollider(x, z, radius, options = {}) {
   const collider = { id: colliders.length, x, z, radius, enabled: true, ...options };
   colliders.push(collider);
+  // A dressing pass registers logs, stumps and shrubs as it goes; the lookup
+  // grid has to see them so later flora does not land on top of them.
+  indexColliderForFlora(collider);
   return collider;
 }
 
@@ -997,7 +1060,9 @@ function updateDayCycleEvents() {
 }
 
 function getSkyCycleSample() {
-  const phase = (elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1;
+  // Read the same clock the field journal and the animal schedules read, so a
+  // night's sleep moves the sky along with the time it just skipped.
+  const phase = getDayPhase();
   let before = SKY_STOPS[SKY_STOPS.length - 1];
   let after = SKY_STOPS[0];
   let span = 1 - before.at;
@@ -1049,6 +1114,25 @@ function updateSkyCycle() {
   sunLight.intensity = (currentZone === 'forest' ? 3.45 : 3.05) * (0.18 + daylight * 0.82);
   sunLight.color.copy(new THREE.Color(0xb4bce0).lerp(new THREE.Color(0xffedc3), daylight));
   hemiLight.intensity = 0.62 + daylight * 1.58;
+  updateSunPosition();
+}
+
+// The sun rides an east-to-west arc across the daylight band of the cycle and
+// dips below the ridge at night, so shadows sweep and lengthen with the clock
+// instead of pointing the same way all day.
+function updateSunPosition() {
+  const phase = getDayPhase();
+  const dawn = DAY_PERIOD_BOUNDS[0].from;
+  const dusk = DAY_PERIOD_BOUNDS[DAY_PERIOD_BOUNDS.length - 1].from;
+  const arc = Math.PI * clamp((phase - dawn) / (dusk - dawn), -0.16, 1.16);
+  const height = Math.sin(arc);
+  sunLight.position.set(
+    camera.position.x - Math.cos(arc) * 30,
+    6 + Math.max(0.1, height) * 26,
+    camera.position.z + 11 - height * 4
+  );
+  sunLight.target.position.set(camera.position.x, 0, camera.position.z);
+  sunLight.target.updateMatrixWorld();
 }
 
 function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
@@ -1120,51 +1204,394 @@ function addGround(color, size = 90) {
   return addMesh(world, new THREE.PlaneGeometry(size, size), mat(color), [0, -0.08, 0], [-Math.PI / 2, 0, 0]);
 }
 
-function createParkingHub(label, accent) {
-  box(world, [17, 0.08, 14], 0x333f38, [0, 0, 10], { material: { roughness: 1 } });
-  box(world, [15.5, 0.025, 12.5], 0x4f5b4e, [0, 0.06, 10], { material: { roughness: 1 } });
-  for (let x = -6; x <= 6; x += 3) {
-    box(world, [0.12, 0.035, 4.6], 0xd4c78e, [x, 0.09, 10], { material: { roughness: 0.8 } });
+// The hub lot every destination shares: marked stalls in two rows either side of
+// a drive aisle, a service drive out to the street, and the street itself
+// running along the back. The street is out of bounds on foot — only traffic
+// uses it — so visitors arrive and leave by car rather than fading in and out.
+const PARKING_LOT = {
+  halfWidth: 15,
+  minZ: 2,
+  wallZ: 22.6,
+  driveX: 10.6,
+  driveHalfWidth: 3.2,
+  aisleZ: 15.5,
+  rowBackZ: 19.4,
+  rowFrontZ: 11.6,
+  stallPitch: 2.9,
+  streetZ: 27.4,
+  streetHalfDepth: 4.1,
+  laneZ: 25.6,
+  farLaneZ: 29.2,
+  streetMinX: -42,
+  streetMaxX: 42,
+  playerStallX: -1.5,
+  backStallX: [-13.1, -10.2, -7.3, -4.4, -1.5, 1.4, 4.3],
+  frontStallX: [-13.1, -10.2, -7.3, -4.4, 1.4, 4.3, 7.2, 10.1, 13],
+  // Where visiting cars park. Back-row stalls face the wall, front-row stalls
+  // face the footpath, and both back out into the aisle when they leave.
+  visitorStalls: [
+    { x: 4.3, z: 19.4, facing: 1 },
+    { x: 1.4, z: 19.4, facing: 1 },
+    { x: -1.5, z: 19.4, facing: 1 },
+    { x: 10.1, z: 11.6, facing: -1 },
+    { x: 7.2, z: 11.6, facing: -1 },
+    { x: -4.4, z: 19.4, facing: 1 }
+  ]
+};
+
+const HUB_ZONES = ['store', 'forest', 'zoo'];
+
+// Local forward for the car model runs down +x, so a heading of zero points the
+// nose east. This converts a direction of travel into that model rotation.
+function carHeading(dx, dz) {
+  return Math.atan2(-dz, dx);
+}
+
+function isParkingLotPosition(x, z, padding = 0) {
+  if (!HUB_ZONES.includes(currentZone)) return false;
+  const lot = PARKING_LOT;
+  const onPad = Math.abs(x) <= lot.halfWidth + padding && z >= lot.minZ - padding && z <= lot.wallZ + padding;
+  const onDrive = Math.abs(x - lot.driveX) <= lot.driveHalfWidth + padding && z >= lot.wallZ - padding && z <= lot.streetZ + padding;
+  const onStreet = z >= lot.streetZ - lot.streetHalfDepth - padding && z <= lot.streetZ + lot.streetHalfDepth + padding;
+  return onPad || onDrive || onStreet;
+}
+
+function createParkingStallLines(centerZ, stallXs, depth) {
+  const lot = PARKING_LOT;
+  const half = lot.stallPitch / 2;
+  const edges = new Set();
+  stallXs.forEach((x) => {
+    edges.add(Number((x - half).toFixed(2)));
+    edges.add(Number((x + half).toFixed(2)));
+  });
+  edges.forEach((x) => {
+    box(world, [0.12, 0.035, depth], 0xd4c78e, [x, 0.09, centerZ], { material: { roughness: 0.8 } });
+  });
+}
+
+function createLotLamp(x, z) {
+  const lamp = new THREE.Group();
+  lamp.position.set(x, 0, z);
+  cylinder(lamp, 0.28, 0.34, 0.24, 0x39443b, [0, 0.12, 0], { segments: 8 });
+  cylinder(lamp, 0.09, 0.12, 4.4, 0x4c5a4f, [0, 2.3, 0], { segments: 7 });
+  box(lamp, [0.9, 0.1, 0.34], 0x4c5a4f, [0.4, 4.48, 0]);
+  box(lamp, [0.62, 0.16, 0.42], 0xf6efc8, [0.72, 4.34, 0], {
+    material: { emissive: 0xffe6a2, emissiveIntensity: 0.55, roughness: 0.5 }
+  });
+  world.add(lamp);
+  addCollider(x, z, 0.34, { zone: currentZone });
+  return lamp;
+}
+
+// The public road past the lot. The player is walled out of it; the traffic
+// system drives visiting cars along it and off past the treeline.
+function createHubStreet() {
+  const lot = PARKING_LOT;
+  const width = lot.streetMaxX - lot.streetMinX;
+  const centerX = (lot.streetMinX + lot.streetMaxX) / 2;
+  box(world, [width, 0.09, lot.streetHalfDepth * 2], 0x3b4038, [centerX, 0.015, lot.streetZ], { material: { roughness: 1 } });
+  box(world, [width, 0.03, lot.streetHalfDepth * 2 - 0.9], 0x4a5049, [centerX, 0.06, lot.streetZ], { material: { roughness: 1 } });
+  // Centre dashes and shoulder lines.
+  for (let x = lot.streetMinX + 2; x < lot.streetMaxX - 2; x += 4.4) {
+    box(world, [2.2, 0.02, 0.16], 0xd9cf92, [x, 0.08, lot.streetZ], { material: { roughness: 0.8 } });
   }
-  box(world, [17, 0.4, 0.35], 0x26352d, [0, 0.2, 16.85]);
-  box(world, [0.35, 0.4, 14], 0x26352d, [-8.35, 0.2, 10]);
-  box(world, [0.35, 0.4, 14], 0x26352d, [8.35, 0.2, 10]);
-  addCollider(0, 16.85, 0.2, { type: 'rect', halfWidth: 8.5, halfDepth: 0.2, zone: currentZone });
-  addCollider(-8.35, 10, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: 7, zone: currentZone });
-  addCollider(8.35, 10, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: 7, zone: currentZone });
-
-  const car = createCar();
-  car.position.set(0, 0.25, 10);
-  world.add(car);
-  addCollider(0, 10, 2.1, { zone: currentZone });
-  interactables.push({ type: 'car', label: 'Open travel map', position: car.position.clone(), radius: 3.5 });
-
-  const sign = makeLabel(label, `#${new THREE.Color(accent).getHexString()}`, '#1c3025', 1.12);
-  sign.position.set(-6.8, 3.4, 8.1);
-  sign.rotation.y = 0.22;
-  world.add(sign);
-
-  for (const x of [-15, 15]) {
-    createTree(x, 11, 1.35, 0x376045, 0x6f4e39);
+  for (const edge of [-1, 1]) {
+    box(world, [width, 0.02, 0.14], 0xcfc9a4, [centerX, 0.08, lot.streetZ + edge * (lot.streetHalfDepth - 0.5)], { material: { roughness: 0.8 } });
+  }
+  // Kerb along the near verge, broken where the service drive crosses it.
+  const kerbZ = lot.streetZ - lot.streetHalfDepth - 0.5;
+  [[lot.streetMinX, lot.driveX - lot.driveHalfWidth], [lot.driveX + lot.driveHalfWidth, lot.streetMaxX]].forEach(([fromX, toX]) => {
+    box(world, [toX - fromX, 0.14, 1.1], 0x5c6350, [(fromX + toX) / 2, 0.06, kerbZ], { material: { roughness: 1 } });
+  });
+  box(world, [lot.driveHalfWidth * 2, 0.09, lot.streetZ - lot.wallZ + 2.4], 0x434a41,
+    [lot.driveX, 0.02, (lot.streetZ + lot.wallZ) / 2 - 0.6], { material: { roughness: 1 } });
+  // Hatched keep-clear paint and a sign: the drive is for traffic, not walkers.
+  for (let index = 0; index < 5; index += 1) {
+    box(world, [lot.driveHalfWidth * 1.8, 0.02, 0.18], 0xd9b063, [lot.driveX, 0.075, lot.wallZ - 1.3 + index * 0.42], {
+      rotation: [0, 0, 0],
+      material: { roughness: 0.85 }
+    });
+  }
+  for (const side of [-1, 1]) {
+    cylinder(world, 0.09, 0.11, 1.05, 0xd9a94f, [lot.driveX + side * (lot.driveHalfWidth - 0.15), 0.52, lot.wallZ - 0.4], { segments: 7 });
+    box(world, [0.16, 0.14, 0.16], 0x2f3831, [lot.driveX + side * (lot.driveHalfWidth - 0.15), 1.06, lot.wallZ - 0.4]);
+  }
+  const driveSign = makeLabel('SERVICE DRIVE · NO PEDESTRIAN ACCESS', '#f2b268', '#33291f', 0.38);
+  driveSign.position.set(lot.driveX, 1.85, lot.wallZ - 0.35);
+  world.add(driveSign);
+  // A treeline along the far verge, and a heavier screen out past each end of
+  // the road, so traffic turns out of sight instead of shrinking to a dot on
+  // open ground.
+  for (let index = 0, x = lot.streetMinX - 6; x <= lot.streetMaxX + 6; index += 1, x += 4.4) {
+    createTree(x, lot.streetZ + lot.streetHalfDepth + 2.4 + (index % 2) * 1.4, 1.1 + (index % 3) * 0.16, index % 2 ? 0x3b6446 : 0x44704b, 0x6a4c36);
+    if (index % 2 === 0) createTree(x + 2.2, lot.streetZ + lot.streetHalfDepth + 7.2 + (index % 3) * 1.8, 1.24 + (index % 2) * 0.2, 0x3f6a49, 0x63482f);
+  }
+  for (const side of [-1, 1]) {
+    for (let index = 0; index < 6; index += 1) {
+      createTree(side * (lot.streetMaxX + 4 + (index % 3) * 4.2), lot.streetZ - lot.streetHalfDepth - 3.4 - index * 3.6, 1.18 + (index % 3) * 0.16, 0x3b6446, 0x6a4c36);
+    }
   }
 }
 
-function createCar() {
+function createParkingHub(label, accent) {
+  const lot = PARKING_LOT;
+  const padDepth = lot.wallZ - lot.minZ;
+  const padCenterZ = (lot.wallZ + lot.minZ) / 2;
+  box(world, [lot.halfWidth * 2 + 0.8, 0.08, padDepth + 0.8], 0x333f38, [0, 0, padCenterZ], { material: { roughness: 1 } });
+  box(world, [lot.halfWidth * 2 - 0.6, 0.025, padDepth - 0.6], 0x4f5b4e, [0, 0.06, padCenterZ], { material: { roughness: 1 } });
+  createParkingStallLines(lot.rowBackZ, lot.backStallX, 3.9);
+  createParkingStallLines(lot.rowFrontZ, [...lot.frontStallX, lot.playerStallX], 3.9);
+  // Aisle centre dashes and the painted walkway back to the field.
+  for (let x = -lot.halfWidth + 2; x < lot.halfWidth - 1; x += 3.4) {
+    box(world, [1.8, 0.02, 0.12], 0xb9b184, [x, 0.085, lot.aisleZ], { material: { roughness: 0.85 } });
+  }
+  for (let z = lot.minZ + 0.9; z < lot.rowFrontZ - 2.4; z += 1.4) {
+    box(world, [2.6, 0.02, 0.42], 0xc9c69c, [0, 0.085, z], { material: { roughness: 0.85 } });
+  }
+
+  // Perimeter wall, with a gap where the service drive leaves for the street.
+  const gapMin = lot.driveX - lot.driveHalfWidth;
+  const gapMax = lot.driveX + lot.driveHalfWidth;
+  const wallRuns = [[-lot.halfWidth, gapMin], [gapMax, lot.halfWidth]];
+  wallRuns.forEach(([fromX, toX]) => {
+    const runWidth = toX - fromX;
+    if (runWidth <= 0.1) return;
+    box(world, [runWidth, 0.5, 0.35], 0x26352d, [(fromX + toX) / 2, 0.25, lot.wallZ]);
+    addCollider((fromX + toX) / 2, lot.wallZ, 0.2, { type: 'rect', halfWidth: runWidth / 2, halfDepth: 0.2, zone: currentZone });
+  });
+  // The drive mouth stays visually open for traffic and closed to the player.
+  addCollider(lot.driveX, lot.wallZ, 0.2, { type: 'rect', halfWidth: lot.driveHalfWidth, halfDepth: 0.2, zone: currentZone, debugLabel: 'lot-service-drive' });
+  for (const side of [-1, 1]) {
+    box(world, [0.35, 0.5, padDepth], 0x26352d, [side * lot.halfWidth, 0.25, padCenterZ]);
+    addCollider(side * lot.halfWidth, padCenterZ, 0.2, { type: 'rect', halfWidth: 0.2, halfDepth: padDepth / 2, zone: currentZone });
+  }
+
+  createLotLamp(-lot.halfWidth + 1.4, lot.aisleZ);
+  createLotLamp(lot.halfWidth - 1.4, lot.aisleZ);
+  createLotLamp(-lot.halfWidth + 1.4, lot.minZ + 2.2);
+
+  const car = createCar();
+  car.position.set(lot.playerStallX, 0.25, lot.rowFrontZ);
+  car.rotation.y = carHeading(0, -1);
+  world.add(car);
+  addCollider(lot.playerStallX, lot.rowFrontZ, 1.5, { type: 'rect', halfWidth: 1.0, halfDepth: 1.9, zone: currentZone });
+  interactables.push({ type: 'car', label: 'Open travel map', position: new THREE.Vector3(lot.playerStallX, 1.1, lot.rowFrontZ), radius: 3.5 });
+
+  const sign = makeLabel(label, `#${new THREE.Color(accent).getHexString()}`, '#1c3025', 1.12);
+  sign.position.set(-lot.halfWidth + 3.4, 3.4, lot.minZ - 1.4);
+  sign.rotation.y = 0.22;
+  world.add(sign);
+
+  createHubStreet();
+  for (const x of [-lot.halfWidth - 3.4, lot.halfWidth + 3.4]) {
+    createTree(x, lot.rowFrontZ, 1.35, 0x376045, 0x6f4e39);
+    createTree(x, lot.minZ + 0.5, 1.15, 0x3f6a49, 0x6f4e39);
+  }
+}
+
+// --- Lot traffic ---------------------------------------------------------------
+// Cars follow centripetal Catmull-Rom runs rather than turning on a point at
+// each waypoint, so corners are taken as arcs and the whole approach reads as
+// driving rather than as a sequence of snaps.
+
+let trafficCars = [];
+let passingTrafficAt = 0;
+
+const VISITOR_CAR_COLORS = [0x9aa7b4, 0xb8564a, 0x5d7f6b, 0xd0b06a, 0x6c6f8c, 0x8c9a6a, 0xc4c0b4];
+
+function createRoadRun(points, options = {}) {
+  const curve = new THREE.CatmullRomCurve3(
+    points.map(([x, z]) => new THREE.Vector3(x, 0.25, z)),
+    false,
+    'centripetal',
+    0.5
+  );
+  return {
+    curve,
+    length: Math.max(0.5, curve.getLength()),
+    reverse: Boolean(options.reverse),
+    speed: options.speed || 6.5
+  };
+}
+
+function spawnTrafficCar(legs, options = {}) {
+  const group = createCar(options.color ?? VISITOR_CAR_COLORS[Math.floor(Math.random() * VISITOR_CAR_COLORS.length)], null);
+  const start = legs[0].curve.getPointAt(0);
+  const startTangent = legs[0].curve.getTangentAt(0);
+  group.position.set(start.x, 0.25, start.z);
+  group.rotation.y = carHeading(startTangent.x, startTangent.z) + (legs[0].reverse ? Math.PI : 0);
+  world.add(group);
+  const car = {
+    group,
+    legs,
+    leg: 0,
+    distance: 0,
+    heading: group.rotation.y,
+    onFinish: options.onFinish || null,
+    onLeg: options.onLeg || null,
+    collider: null
+  };
+  trafficCars.push(car);
+  return car;
+}
+
+function retireTrafficCar(car) {
+  world.remove(car.group);
+  releaseCarCollider(car);
+  trafficCars = trafficCars.filter((entry) => entry !== car);
+}
+
+// Every visitor stall is nose-in, so a parked car is narrow across the aisle
+// and long into the bay. The collider only exists while the car is standing.
+function holdCarCollider(car, x, z) {
+  releaseCarCollider(car);
+  car.collider = addCollider(x, z, 1.5, { type: 'rect', halfWidth: 1.0, halfDepth: 1.9, zone: currentZone });
+}
+
+function releaseCarCollider(car) {
+  if (!car.collider) return;
+  car.collider.enabled = false;
+  colliders = colliders.filter((entry) => entry !== car.collider);
+  car.collider = null;
+}
+
+// Ease off the throttle at both ends of a run so cars pull away and arrive
+// smoothly instead of snapping between full speed and stopped.
+function runSpeedFactor(t) {
+  const easeIn = clamp(t / 0.16, 0, 1);
+  const easeOut = clamp((1 - t) / 0.16, 0, 1);
+  return 0.32 + 0.68 * Math.min(easeIn, easeOut);
+}
+
+function updateTrafficCars(delta) {
+  for (const car of [...trafficCars]) {
+    if (car.parked) continue;
+    const leg = car.legs[car.leg];
+    if (!leg) {
+      retireTrafficCar(car);
+      continue;
+    }
+    const progress = clamp(car.distance / leg.length, 0, 1);
+    car.distance += leg.speed * runSpeedFactor(progress) * delta;
+    const t = clamp(car.distance / leg.length, 0, 1);
+    const point = leg.curve.getPointAt(t);
+    const tangent = leg.curve.getTangentAt(t);
+    car.group.position.set(point.x, 0.25, point.z);
+    let target = carHeading(tangent.x, tangent.z) + (leg.reverse ? Math.PI : 0);
+    let turn = target - car.heading;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    car.heading += clamp(turn, -delta * 2.6, delta * 2.6);
+    car.group.rotation.y = car.heading;
+    // The wheel cylinders are already laid on their side, so their own Y axis
+    // is the axle: spinning about it rolls the wheel.
+    const wheelSpin = leg.speed * runSpeedFactor(t) * delta * (leg.reverse ? -1 : 1) / 0.34;
+    for (const wheel of car.group.userData.wheels || []) wheel.rotation.y -= wheelSpin;
+    if (t < 1) continue;
+    car.leg += 1;
+    car.distance = 0;
+    if (car.onLeg) car.onLeg(car, car.leg);
+    if (car.leg >= car.legs.length) {
+      const finish = car.onFinish;
+      if (finish) finish(car);
+      else retireTrafficCar(car);
+    }
+  }
+}
+
+// Street runs. Arrivals come in from the west on the near lane; departures take
+// the same lane east and curve away behind the treeline before they are removed.
+function lotApproachLegs(stall) {
+  const lot = PARKING_LOT;
+  const aisleApproach = stall.z > lot.aisleZ ? lot.aisleZ - 0.6 : lot.aisleZ + 0.6;
+  return [createRoadRun([
+    [lot.streetMinX - 8, lot.laneZ],
+    [lot.driveX - 16, lot.laneZ],
+    [lot.driveX - 4.5, lot.laneZ],
+    [lot.driveX + 0.4, lot.laneZ - 2.4],
+    [lot.driveX, lot.wallZ - 1.2],
+    [lot.driveX, aisleApproach],
+    [(lot.driveX + stall.x) / 2, lot.aisleZ],
+    [stall.x + (stall.x > lot.driveX ? 1.4 : -1.4), lot.aisleZ],
+    [stall.x, stall.z]
+  ], { speed: 7.4 })];
+}
+
+function lotDepartureLegs(stall) {
+  const lot = PARKING_LOT;
+  const backOutZ = stall.z > lot.aisleZ ? lot.aisleZ - 0.4 : lot.aisleZ + 0.4;
+  return [
+    createRoadRun([[stall.x, stall.z], [stall.x, (stall.z + backOutZ) / 2], [stall.x, backOutZ]], { reverse: true, speed: 2.4 }),
+    createRoadRun([
+      [stall.x, backOutZ],
+      [(stall.x + lot.driveX) / 2, lot.aisleZ],
+      [lot.driveX - 1.6, lot.aisleZ + 0.6],
+      [lot.driveX, lot.aisleZ + 4],
+      [lot.driveX, lot.wallZ + 0.8],
+      [lot.driveX + 2.6, lot.laneZ],
+      [lot.driveX + 10, lot.laneZ],
+      [lot.streetMaxX - 12, lot.laneZ],
+      [lot.streetMaxX - 2, lot.laneZ + 2.6],
+      [lot.streetMaxX + 6, lot.laneZ + 13]
+    ], { speed: 7.2 })
+  ];
+}
+
+function passingTrafficLegs(eastbound) {
+  const lot = PARKING_LOT;
+  const laneZ = eastbound ? lot.laneZ : lot.farLaneZ;
+  const from = eastbound ? lot.streetMinX - 8 : lot.streetMaxX + 8;
+  const to = eastbound ? lot.streetMaxX + 2 : lot.streetMinX - 2;
+  const away = eastbound ? 10 : -10;
+  return [createRoadRun([
+    [from, laneZ],
+    [(from + to) / 2, laneZ],
+    [to, laneZ],
+    [to + away, laneZ + (eastbound ? 3.4 : 2.6)],
+    [to + away * 1.6, laneZ + (eastbound ? 10 : 8)]
+  ], { speed: 9.2 + Math.random() * 3 })];
+}
+
+function freeVisitorStall() {
+  const taken = new Set(visitors.map((visitor) => visitor.stall).filter(Boolean));
+  for (const car of trafficCars) if (car.stall) taken.add(car.stall);
+  return PARKING_LOT.visitorStalls.find((stall) => !taken.has(stall)) || null;
+}
+
+// Nothing should turn into the drive while another car is still on the approach.
+function approachIsClear() {
+  return !trafficCars.some((car) => car.group.position.z > PARKING_LOT.wallZ - 2 && car.group.position.x < PARKING_LOT.driveX + 6);
+}
+
+function maybeSpawnPassingTraffic() {
+  if (elapsed < passingTrafficAt) return;
+  const afterHours = currentDayPeriod === 'night';
+  passingTrafficAt = elapsed + (afterHours ? 34 + Math.random() * 40 : 13 + Math.random() * 22);
+  if (trafficCars.length > 4) return;
+  spawnTrafficCar(passingTrafficLegs(Math.random() > 0.45));
+}
+
+function createCar(bodyColor = 0xd76d4d, labelText = 'TRAVEL') {
   const group = new THREE.Group();
-  const body = box(group, [3.6, 0.65, 1.7], 0xd76d4d, [0, 0.78, 0]);
-  body.castShadow = true;
+  const paint = new THREE.Color(bodyColor);
+  const body = paint.getHex();
+  const highlight = paint.clone().offsetHSL(0, -0.08, 0.12).getHex();
+  const shadow = paint.clone().offsetHSL(0, 0.04, -0.12).getHex();
+  const shell = box(group, [3.6, 0.65, 1.7], body, [0, 0.78, 0]);
+  shell.castShadow = true;
   // Baked low-poly cabin profile, with the existing X-axis wheelbase and footprint.
   const cabinShape = new THREE.Shape();
   cabinShape.moveTo(-1.15, 1.08); cabinShape.lineTo(-0.78, 1.62);
   cabinShape.lineTo(0.55, 1.62); cabinShape.lineTo(1.08, 1.08); cabinShape.closePath();
   addMesh(group, new THREE.ExtrudeGeometry(cabinShape, { depth: 1.3, bevelEnabled: false }), mat(0x344e4b, { roughness: 0.42 }), [0, 0, -0.65]);
-  box(group, [1.4, 0.085, 1.38], 0xd76d4d, [-0.12, 1.65, 0]);
+  box(group, [1.4, 0.085, 1.38], body, [-0.12, 1.65, 0]);
+  const wheels = [];
   for (const side of [-1, 1]) {
-    box(group, [0.07, 0.51, 0.045], 0xd76d4d, [-0.17, 1.34, side * 0.675]);
-    box(group, [2.08, 0.07, 0.055], 0xe49a70, [-0.04, 1.09, side * 0.69]);
+    box(group, [0.07, 0.51, 0.045], body, [-0.17, 1.34, side * 0.675]);
+    box(group, [2.08, 0.07, 0.055], highlight, [-0.04, 1.09, side * 0.69]);
     box(group, [0.21, 0.04, 0.045], 0xd8d2b7, [-0.43, 0.96, side * 0.862]);
-    box(group, [0.24, 0.12, 0.13], 0xd76d4d, [0.9, 1.13, side * 0.83]);
-    box(group, [0.03, 0.44, 0.02], 0xa1503b, [-0.18, 0.83, side * 0.858]);
+    box(group, [0.24, 0.12, 0.13], body, [0.9, 1.13, side * 0.83]);
+    box(group, [0.03, 0.44, 0.02], shadow, [-0.18, 0.83, side * 0.858]);
     box(group, [3.1, 0.09, 0.055], 0x39443b, [0, 0.52, side * 0.86]);
     for (const x of [-1.2, 1.2]) {
       cylinder(group, 0.19, 0.19, 0.035, 0xb6bba9, [x, 0.38, side * 0.877], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
@@ -1173,24 +1600,29 @@ function createCar() {
   }
   for (const end of [-1, 1]) {
     box(group, [0.1, 0.16, 1.65], 0xadb3a0, [end * 1.83, 0.53, 0]);
-    box(group, [0.08, 0.24, 1.65], 0xd76d4d, [end * 1.84, 0.8, 0]);
+    box(group, [0.08, 0.24, 1.65], body, [end * 1.84, 0.8, 0]);
     for (const side of [-1, 1]) box(group, [0.1, 0.2, 0.32], end === 1 ? 0xffe4a0 : 0xb94532, [end * 1.89, 0.83, side * 0.61]);
     box(group, [0.115, 0.12, 0.33], 0xefe3b8, [end * 1.88, 0.55, 0]);
   }
   box(group, [0.13, 0.16, 0.65], 0x34433b, [1.9, 0.8, 0]);
   for (const z of [-0.22, 0, 0.22]) box(group, [0.14, 0.11, 0.025], 0xb6bba9, [1.91, 0.8, z]);
   for (const x of [-1.2, 1.2]) {
-    cylinder(group, 0.34, 0.34, 0.22, 0x1a201c, [x, 0.38, -0.75], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
-    cylinder(group, 0.34, 0.34, 0.22, 0x1a201c, [x, 0.38, 0.75], { rotation: [Math.PI / 2, 0, 0], segments: 10 });
+    for (const side of [-1, 1]) {
+      wheels.push(cylinder(group, 0.34, 0.34, 0.22, 0x1a201c, [x, 0.38, side * 0.75], { rotation: [Math.PI / 2, 0, 0], segments: 10 }));
+    }
   }
-  const roofLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1, 1.64, -0.72), new THREE.Vector3(1, 1.64, -0.72)]),
-    new THREE.LineBasicMaterial({ color: 0xd8ef85 })
-  );
-  group.add(roofLine);
-  const label = makeLabel('TRAVEL', '#d8ef85', '#1b3024', 0.48);
-  label.position.set(0, 2.55, 0);
-  group.add(label);
+  // Wheels turn about the model's Z axis once the cylinder is laid on its side.
+  group.userData.wheels = wheels;
+  if (labelText) {
+    const roofLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1, 1.64, -0.72), new THREE.Vector3(1, 1.64, -0.72)]),
+      new THREE.LineBasicMaterial({ color: 0xd8ef85 })
+    );
+    group.add(roofLine);
+    const label = makeLabel(labelText, '#d8ef85', '#1b3024', 0.48);
+    label.position.set(0, 2.55, 0);
+    group.add(label);
+  }
   return group;
 }
 
@@ -1668,6 +2100,9 @@ function createLakeCaptain(x, z) {
   return interactable;
 }
 
+// The interior rides in the world at the car's position rather than being
+// bolted to the camera: that is what lets the player look around inside the car
+// while it drives instead of having their aim dragged around by the road.
 function createLakeCarInterior() {
   const interior = new THREE.Group();
   box(interior, [2.2, 0.12, 0.72], 0x342e2a, [0, -0.48, -0.78]);
@@ -1677,10 +2112,25 @@ function createLakeCarInterior() {
   box(interior, [2.15, 0.12, 0.12], 0x342e2a, [0, 0.76, -1.3]);
   box(interior, [0.78, 0.07, 0.78], 0x253837, [0.48, -0.24, -0.92], { material: { transparent: true, opacity: 0.78 } });
   torus(interior, 0.2, 0.035, 0x1c2422, [0.5, -0.18, -0.68], [Math.PI / 2, 0, 0], 8, 18);
-  const dashLabel = makeLabel('JENKINS LAKE TRANSIT', '#d8ef85', '#1d3027', 0.25);
-  dashLabel.position.set(0, -0.26, -1.05);
-  interior.add(dashLabel);
-  camera.add(interior);
+  // A painted dash plate rather than a billboard label: a sprite would swing to
+  // face the player every time they looked away from the road.
+  box(interior, [0.62, 0.11, 0.03], 0x1d3027, [-0.42, -0.26, -1.02]);
+  box(interior, [0.5, 0.045, 0.012], 0xd8ef85, [-0.42, -0.26, -1.035]);
+  // Now that the player can turn their head, the cabin has to exist off the
+  // windscreen axis too: doors, window frames, a roof and a rear bench.
+  box(interior, [2.3, 0.09, 2.75], 0x2b2622, [0, 0.94, -0.05]);
+  box(interior, [2.16, 0.05, 2.5], 0x3b342e, [0, 0.88, -0.05]);
+  for (const side of [-1, 1]) {
+    box(interior, [0.13, 0.66, 2.0], 0x342e2a, [side * 1.06, -0.5, -0.35]);
+    box(interior, [0.15, 0.11, 2.05], 0x4a413a, [side * 1.05, -0.14, -0.35]);
+    box(interior, [0.11, 1.2, 0.12], 0x342e2a, [side * 1.04, 0.32, 0.62]);
+    box(interior, [0.1, 0.2, 0.36], 0x595046, [side * 1.0, -0.3, -0.9]);
+    cylinder(interior, 0.035, 0.035, 0.16, 0xb6bba9, [side * 0.96, -0.3, -1.06], { segments: 6, rotation: [0, 0, Math.PI / 2] });
+  }
+  box(interior, [2.15, 0.12, 0.12], 0x342e2a, [0, 0.76, 0.72]);
+  box(interior, [1.94, 0.62, 0.14], 0x3d352f, [0, -0.2, 0.78]);
+  box(interior, [1.94, 0.16, 0.5], 0x453b34, [0, -0.5, 0.6]);
+  world.add(interior);
   return interior;
 }
 
@@ -1720,6 +2170,116 @@ function createBranchTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b
   world.add(group);
   addCollider(x, z, 0.64 * scale, { zone: currentZone });
   return group;
+}
+
+// --- Merged background forest --------------------------------------------------
+// The woods need hundreds more trunks than the road can afford as individual
+// objects. A tree the player only ever walks past does not need to be its own
+// draw call, so background trees are baked into one merged mesh per batch with
+// per-vertex colour carrying the variation the separate materials used to.
+
+const BACKGROUND_TREE_BATCH = 260;
+const backgroundForestMaterial = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.9,
+  metalness: 0,
+  flatShading: true
+});
+let backgroundForestParts = null;
+let backgroundForestMeshes = [];
+
+function getBackgroundForestParts() {
+  if (!backgroundForestParts) {
+    backgroundForestParts = {
+      trunk: new THREE.CylinderGeometry(0.25, 0.35, 2.5, 7),
+      slimTrunk: new THREE.CylinderGeometry(0.18, 0.28, 3.4, 6),
+      crownLow: new THREE.ConeGeometry(1.15, 2.3, 8),
+      crownMid: new THREE.ConeGeometry(0.9, 1.9, 8),
+      crownTop: new THREE.ConeGeometry(0.62, 1.6, 8),
+      canopy: new THREE.SphereGeometry(0.95, 8, 5),
+      canopyTop: new THREE.SphereGeometry(0.62, 8, 5)
+    };
+  }
+  return backgroundForestParts;
+}
+
+function appendMergedGeometry(batch, geometry, matrix, color) {
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+  const source = geometry.attributes.position;
+  const sourceNormal = geometry.attributes.normal;
+  const index = geometry.index;
+  const first = batch.positions.length / 3;
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  for (let vertex = 0; vertex < source.count; vertex += 1) {
+    point.fromBufferAttribute(source, vertex).applyMatrix4(matrix);
+    normal.fromBufferAttribute(sourceNormal, vertex).applyMatrix3(normalMatrix).normalize();
+    batch.positions.push(point.x, point.y, point.z);
+    batch.normals.push(normal.x * 127, normal.y * 127, normal.z * 127);
+    batch.colors.push(color.r * 255, color.g * 255, color.b * 255);
+  }
+  if (index) {
+    for (let entry = 0; entry < index.count; entry += 1) batch.indices.push(first + index.getX(entry));
+  } else {
+    for (let vertex = 0; vertex < source.count; vertex += 1) batch.indices.push(first + vertex);
+  }
+}
+
+function flushBackgroundForest(batch) {
+  if (!batch.positions.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(batch.positions, 3));
+  geometry.setAttribute('normal', new THREE.Int8BufferAttribute(batch.normals, 3, true));
+  geometry.setAttribute('color', new THREE.Uint8BufferAttribute(batch.colors, 3, true));
+  geometry.setIndex(batch.indices);
+  geometry.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geometry, backgroundForestMaterial);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  world.add(mesh);
+  backgroundForestMeshes.push(mesh);
+  return mesh;
+}
+
+function disposeBackgroundForest() {
+  for (const mesh of backgroundForestMeshes) mesh.geometry.dispose();
+  backgroundForestMeshes = [];
+}
+
+// `spots` is [x, z, scale, foliage, trunk, broadleaf].
+function createBackgroundForest(spots) {
+  const parts = getBackgroundForestParts();
+  const matrix = new THREE.Matrix4();
+  const scaleVector = new THREE.Vector3();
+  const identity = new THREE.Quaternion();
+  const place = (batch, geometry, x, y, z, scale, spin, stretch, color) => {
+    scaleVector.set(scale * stretch[0], scale * stretch[1], scale * stretch[2]);
+    matrix.compose(new THREE.Vector3(x, y * scale, z), identity.setFromAxisAngle(new THREE.Vector3(0, 1, 0), spin), scaleVector);
+    appendMergedGeometry(batch, geometry, matrix, color);
+  };
+  let batch = { positions: [], normals: [], colors: [], indices: [], trees: 0 };
+  spots.forEach(([x, z, scale = 1, foliage = 0x3f6d4b, trunk = 0x6b4e36, broadleaf = false], index) => {
+    const leaf = new THREE.Color(foliage);
+    const bark = new THREE.Color(trunk);
+    const spin = (index % 7) * 0.9;
+    if (broadleaf) {
+      place(batch, parts.slimTrunk, x, 1.7, z, scale, spin, [1, 1, 1], bark);
+      place(batch, parts.canopy, x, 3.9, z, scale, spin, [1.16, 0.6, 1.06], leaf);
+      place(batch, parts.canopyTop, x, 4.7, z, scale, spin + 0.6, [1.1, 0.66, 1.02], leaf.clone().offsetHSL(0, 0, 0.08));
+    } else {
+      place(batch, parts.trunk, x, 1.25, z, scale, spin, [1, 1, 1], bark);
+      place(batch, parts.crownLow, x, 2.65, z, scale, spin, [1, 1, 1], leaf);
+      place(batch, parts.crownMid, x, 3.8, z, scale, spin + 0.4, [1, 1, 1], leaf.clone().offsetHSL(0, 0, 0.06));
+      place(batch, parts.crownTop, x, 4.75, z, scale, spin + 0.8, [1, 1, 1], leaf.clone().offsetHSL(0, 0, 0.1));
+    }
+    addCollider(x, z, 0.68 * scale, { zone: currentZone });
+    batch.trees += 1;
+    if (batch.trees >= BACKGROUND_TREE_BATCH) {
+      flushBackgroundForest(batch);
+      batch = { positions: [], normals: [], colors: [], indices: [], trees: 0 };
+    }
+  });
+  flushBackgroundForest(batch);
 }
 
 function createBeehiveOnTree(tree, x, z, id, wild = false, mountHeight = 3.1) {
@@ -2118,7 +2678,10 @@ function createFence(x, z, width, depth, color = 0x806e53, solid = true, gate = 
 }
 
 function createMountainBoundary(zoneKey) {
-  const bounds = ZONES[zoneKey].bounds;
+  // The ring is drawn on the visual bounds where a zone has them, so the ridge
+  // sits behind the street rather than across it; the player is still held by
+  // the tighter `bounds`.
+  const bounds = ZONES[zoneKey].visualBounds || ZONES[zoneKey].bounds;
   const points = [];
   for (let x = bounds.minX + 1.5; x <= bounds.maxX - 1.5; x += 2.6) {
     points.push([x, bounds.minZ]);
@@ -2128,7 +2691,14 @@ function createMountainBoundary(zoneKey) {
     points.push([bounds.minX, z]);
     points.push([bounds.maxX, z]);
   }
+  const lot = PARKING_LOT;
+  const streetCorridor = ZONES[zoneKey].visualBounds
+    ? [lot.streetZ - lot.streetHalfDepth - 0.6, lot.streetZ + lot.streetHalfDepth + 0.6]
+    : null;
   points.forEach(([x, z], index) => {
+    // Leave a gap where the road runs out of the zone, so traffic has somewhere
+    // to drive to rather than nosing into a rock wall.
+    if (streetCorridor && z > streetCorridor[0] && z < streetCorridor[1]) return;
     const height = 2.8 + (index % 4) * 0.7;
     const radius = 1.25 + (index % 3) * 0.22;
     const mountain = addMesh(world, new THREE.DodecahedronGeometry(radius, 1), mat(index % 2 ? 0x4a5b4d : 0x596c5a), [x, height * 0.5, z], [0.12, index * 0.37, 0.08], [1.25, height / (radius * 2), 1.05]);
@@ -2572,7 +3142,7 @@ function refreshStoreRecordBoard() {
 
 function buildStore() {
   setZonePalette('store');
-  addGround(ZONES.store.ground);
+  addGround(ZONES.store.ground, 150);
   createParkingHub('FIELD DEPOT', ZONES.store.accent);
   createPath(0, 0, 7, 20, 0x9f956d);
 
@@ -2652,7 +3222,7 @@ function addSmallCrates(x, y, z) {
 
 function buildForest() {
   setZonePalette('forest');
-  addGround(ZONES.forest.ground);
+  addGround(ZONES.forest.ground, 150);
   createMountainBoundary('forest');
   createNatureScatter('forest');
   createParkingHub('LAKE FIELD', ZONES.forest.accent);
@@ -2795,6 +3365,853 @@ function createGroundFoliage(x, z, scale = 1, color = 0x4d8055) {
   return foliage;
 }
 
+// --- Individual grass blades and understory flora ------------------------------
+// Grass is drawn as real blades rather than blocky tufts: each one is a seven
+// vertex tapered strip, and every blade in a region is baked into a single
+// merged mesh, so a meadow of thousands of blades still costs one draw call.
+// A vertex shader sway keeps them moving with no per-frame CPU work, and the
+// same builder draws fern fronds, broad leaves and lake reeds.
+
+const GRASS_SWAY_UNIFORM = { value: 0 };
+// Blade level heights along the strip; the last entry is the single tip vertex.
+// Three levels is five vertices and three triangles a blade, which is what
+// keeps tens of thousands of them affordable.
+const BLADE_LEVELS = [0, 0.45, 1];
+const GRASS_BATCH_LIMIT = 40000;
+
+const GRASS_PALETTES = {
+  field: { base: 0x4c7d38, tip: 0xa6c765, height: [0.2, 0.52] },
+  meadow: { base: 0x51873a, tip: 0xbcd274, height: [0.26, 0.74] },
+  forest: { base: 0x3f6d34, tip: 0x8fb45e, height: [0.16, 0.46] },
+  shore: { base: 0x5b8340, tip: 0xc6cf78, height: [0.3, 0.9] },
+  lawn: { base: 0x53883f, tip: 0xa9cd6b, height: [0.12, 0.28] },
+  dry: { base: 0x7d7c45, tip: 0xd6c983, height: [0.22, 0.64] }
+};
+
+const grassMaterial = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  side: THREE.DoubleSide,
+  roughness: 1,
+  metalness: 0
+});
+grassMaterial.onBeforeCompile = (shader) => {
+  shader.uniforms.grassSwayTime = GRASS_SWAY_UNIFORM;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+      attribute float bladeSway;
+      attribute float bladePhase;
+      uniform float grassSwayTime;`)
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      float gust = sin(grassSwayTime * 1.15 + bladePhase) * 0.66 + sin(grassSwayTime * 2.45 + bladePhase * 1.7) * 0.34;
+      float crossBreeze = cos(grassSwayTime * 0.85 + bladePhase * 0.7);
+      transformed.x += gust * bladeSway * 0.22;
+      transformed.z += crossBreeze * bladeSway * 0.15;
+      transformed.y -= abs(gust) * bladeSway * 0.06;`);
+  // Blades are double sided, and three flips the shading normal on back faces.
+  // For an up-facing authored normal that would light half the field from
+  // below and render it black, so hold the authored normal on both sides.
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <normal_fragment_begin>',
+    `#include <normal_fragment_begin>
+      normal = normalize( vNormal );
+      nonPerturbedNormal = normal;`);
+};
+
+let bladeBatch = null;
+let grassMeshes = [];
+const bladeNormal = new THREE.Vector3();
+const bladeShade = new THREE.Color();
+
+// A small deterministic generator, so the same field lays out the same way on
+// every visit instead of reshuffling each time a zone is rebuilt.
+// A coarse bucket grid for "is anything already within r of this point?".
+// Scattering hundreds of trees or props with a plain array scan is quadratic
+// and shows up directly in zone load time.
+function makeSpacingGrid(cell = 2) {
+  const buckets = new Map();
+  const key = (cellX, cellZ) => (cellX + 1024) * 4096 + (cellZ + 1024);
+  return {
+    add(x, z) {
+      const bucketKey = key(Math.floor(x / cell), Math.floor(z / cell));
+      const bucket = buckets.get(bucketKey);
+      if (bucket) bucket.push(x, z);
+      else buckets.set(bucketKey, [x, z]);
+    },
+    occupied(x, z, radius) {
+      const reach = Math.ceil(radius / cell);
+      const cellX = Math.floor(x / cell);
+      const cellZ = Math.floor(z / cell);
+      for (let offsetX = -reach; offsetX <= reach; offsetX += 1) {
+        for (let offsetZ = -reach; offsetZ <= reach; offsetZ += 1) {
+          const bucket = buckets.get(key(cellX + offsetX, cellZ + offsetZ));
+          if (!bucket) continue;
+          for (let entry = 0; entry < bucket.length; entry += 2) {
+            if (Math.hypot(bucket[entry] - x, bucket[entry + 1] - z) < radius) return true;
+          }
+        }
+      }
+      return false;
+    }
+  };
+}
+
+function makeFieldRandom(seed = 1) {
+  let state = (Math.floor(Math.abs(seed)) * 2654435761 + 97) >>> 0 || 1;
+  return () => {
+    state ^= state << 13; state >>>= 0;
+    state ^= state >>> 17;
+    state ^= state << 5; state >>>= 0;
+    return state / 4294967296;
+  };
+}
+
+function addGrassBlade(x, z, options = {}) {
+  const {
+    height = 0.5,
+    width = 0.024,
+    angle = 0,
+    lean = 0.3,
+    baseColor,
+    tipColor,
+    stiffness = 1,
+    phase = 0,
+    y = 0,
+    arch = 0
+  } = options;
+  if (!bladeBatch) {
+    bladeBatch = { positions: [], normals: [], colors: [], sways: [], phases: [], indices: [], blades: 0 };
+  }
+  const batch = bladeBatch;
+  const first = batch.positions.length / 3;
+  const acrossX = Math.cos(angle);
+  const acrossZ = Math.sin(angle);
+  const bendX = -acrossZ;
+  const bendZ = acrossX;
+  // Blades are thin and near vertical, so a true face normal would leave them
+  // unlit. Tilting the normal towards the sky is what makes turf read as turf.
+  bladeNormal.set(bendX * 0.42, 1, bendZ * 0.42).normalize();
+  for (const t of BLADE_LEVELS) {
+    const bend = lean * height * t * t;
+    // Slightly super-linear early rise, then flattening: the usual blade arc.
+    const rise = height * (t * (1.08 - t * 0.08)) - arch * height * t * t;
+    const halfWidth = width * (1 - t * 0.94);
+    bladeShade.copy(baseColor).lerp(tipColor, clamp(t * 0.9 + 0.08, 0, 1));
+    for (const side of (t >= 1 ? [0] : [-1, 1])) {
+      batch.positions.push(
+        x + bendX * bend + acrossX * halfWidth * side,
+        y + rise,
+        z + bendZ * bend + acrossZ * halfWidth * side
+      );
+      // Normals and colours are stored as normalised bytes rather than floats:
+      // at a hundred thousand blades a zone the buffer size matters, and neither
+      // needs more precision than this.
+      batch.normals.push(bladeNormal.x * 127, bladeNormal.y * 127, bladeNormal.z * 127);
+      batch.colors.push(bladeShade.r * 255, bladeShade.g * 255, bladeShade.b * 255);
+      batch.sways.push(t * t * stiffness);
+      batch.phases.push(phase);
+    }
+  }
+  // Quads between each pair of full-width levels, then one triangle to the tip.
+  for (let level = 0; level < BLADE_LEVELS.length - 2; level += 1) {
+    const corner = first + level * 2;
+    batch.indices.push(corner, corner + 1, corner + 3, corner, corner + 3, corner + 2);
+  }
+  const lastPair = first + (BLADE_LEVELS.length - 2) * 2;
+  batch.indices.push(lastPair, lastPair + 1, lastPair + 2);
+  batch.blades += 1;
+  if (batch.blades >= GRASS_BATCH_LIMIT) flushGrassBlades();
+}
+
+function flushGrassBlades() {
+  const batch = bladeBatch;
+  bladeBatch = null;
+  if (!batch || !batch.blades) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(batch.positions, 3));
+  geometry.setAttribute('normal', new THREE.Int8BufferAttribute(batch.normals, 3, true));
+  geometry.setAttribute('color', new THREE.Uint8BufferAttribute(batch.colors, 3, true));
+  geometry.setAttribute('bladeSway', new THREE.Float32BufferAttribute(batch.sways, 1));
+  geometry.setAttribute('bladePhase', new THREE.Float32BufferAttribute(batch.phases, 1));
+  geometry.setIndex(new THREE.Uint32BufferAttribute(batch.indices, 1));
+  geometry.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geometry, grassMaterial);
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  world.add(mesh);
+  grassMeshes.push(mesh);
+  return mesh;
+}
+
+// Blade geometry is rebuilt from scratch for every zone, so the buffers the old
+// zone uploaded have to be released rather than left sitting on the GPU.
+function disposeGrassMeshes() {
+  for (const mesh of grassMeshes) mesh.geometry.dispose();
+  grassMeshes = [];
+  bladeBatch = null;
+}
+
+// Blades are laid down in clumps rather than uniformly: real turf grows in
+// tussocks, and clumping also lets each clump carry its own tint.
+function createGrassPatch(options = {}) {
+  const {
+    seed = 1,
+    count = 400,
+    minX = -1, maxX = 1, minZ = -1, maxZ = 1,
+    accept = null,
+    palette = 'field',
+    clumpRadius = 0.6,
+    bladesPerClump = 7,
+    lean = 0.3,
+    heightScale = 1
+  } = options;
+  const preset = GRASS_PALETTES[palette] || GRASS_PALETTES.field;
+  const random = makeFieldRandom(seed);
+  const paletteBase = new THREE.Color(preset.base);
+  const paletteTip = new THREE.Color(preset.tip);
+  const [minHeight, maxHeight] = preset.height;
+  const clumps = Math.max(1, Math.ceil(count / bladesPerClump));
+  let placed = 0;
+  for (let clump = 0; clump < clumps; clump += 1) {
+    let centerX = 0;
+    let centerZ = 0;
+    let found = false;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      centerX = minX + random() * (maxX - minX);
+      centerZ = minZ + random() * (maxZ - minZ);
+      if (!accept || accept(centerX, centerZ)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) continue;
+    const tint = random() * 0.18 - 0.09;
+    const clumpBase = paletteBase.clone().offsetHSL(tint * 0.14, tint * 0.1, tint * 0.8);
+    const clumpTip = paletteTip.clone().offsetHSL(tint * 0.1, tint * 0.08, tint * 0.6);
+    const blades = Math.max(2, bladesPerClump + Math.floor(random() * 5) - 2);
+    for (let index = 0; index < blades; index += 1) {
+      const spread = Math.sqrt(random()) * clumpRadius;
+      const around = random() * Math.PI * 2;
+      const bladeX = centerX + Math.cos(around) * spread;
+      const bladeZ = centerZ + Math.sin(around) * spread;
+      if (accept && !accept(bladeX, bladeZ)) continue;
+      addGrassBlade(bladeX, bladeZ, {
+        height: (minHeight + random() * (maxHeight - minHeight)) * heightScale,
+        width: 0.019 + random() * 0.017,
+        angle: random() * Math.PI * 2,
+        lean: lean * (0.45 + random() * 1.1),
+        baseColor: clumpBase,
+        tipColor: clumpTip,
+        stiffness: 0.65 + random() * 0.7,
+        phase: random() * Math.PI * 2
+      });
+      placed += 1;
+    }
+  }
+  return placed;
+}
+
+// --- Unlootable field flora ----------------------------------------------------
+// Nothing below registers an interactable or a LOOT marker. These are scenery:
+// they fill the wooded floor out so a forest reads as a forest rather than as a
+// stand of evenly spaced trunks.
+
+function createDownedLog(x, z, options = {}) {
+  const { length = 3.4, radius = 0.32, angle = 0, color = 0x6b5238, seed = 1 } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.set(0, angle, 0);
+  const bark = new THREE.Color(color);
+  cylinder(group, radius, radius * 1.06, length, color, [0, radius * 0.94, 0], {
+    segments: 9,
+    rotation: [0, 0, Math.PI / 2]
+  });
+  // Pale heartwood on the broken ends.
+  const heartwood = bark.clone().offsetHSL(0.01, -0.12, 0.24).getHex();
+  for (const end of [-1, 1]) {
+    cylinder(group, radius * 0.95, radius * 0.95, 0.06, heartwood, [end * length * 0.5, radius * 0.94, 0], {
+      segments: 9,
+      rotation: [0, 0, Math.PI / 2]
+    });
+  }
+  // Bark ridges along the top, moss cushions on the weather side, shelf fungi.
+  const ridge = bark.clone().offsetHSL(0, 0, -0.06).getHex();
+  for (let index = 0; index < 5; index += 1) {
+    box(group, [length * 0.13, 0.05, radius * 0.5], ridge,
+      [(index / 4 - 0.5) * length * 0.84, radius * 1.7, (random() - 0.5) * radius * 0.7],
+      { rotation: [0, random() * 0.5, 0] });
+  }
+  for (let index = 0; index < 3; index += 1) {
+    sphere(group, radius * (0.4 + random() * 0.3), 0x5d7f45,
+      [(random() - 0.5) * length * 0.8, radius * 1.6, (random() - 0.5) * radius * 0.9],
+      { scale: [1.5, 0.34, 1.15], widthSegments: 8, heightSegments: 5 });
+  }
+  for (let index = 0; index < 2; index += 1) {
+    cylinder(group, radius * 0.46, radius * 0.2, 0.06, 0xc7ab7c,
+      [(random() - 0.5) * length * 0.7, radius * 1.05, radius * 0.84],
+      { segments: 8, rotation: [Math.PI / 2.3, 0, 0], scale: [1, 1, 0.55] });
+  }
+  // A stub branch, so the log does not read as a plain pipe.
+  cylinder(group, 0.07, 0.1, radius * 3.4, ridge, [length * 0.22, radius * 1.5, radius * 0.7], {
+    segments: 6,
+    rotation: [0.9, 0.4, 0.5]
+  });
+  world.add(group);
+  addCollider(x, z, Math.max(radius, 0.42), {
+    type: 'rect',
+    halfWidth: Math.abs(Math.cos(angle)) * length * 0.5 + radius * 0.55,
+    halfDepth: Math.abs(Math.sin(angle)) * length * 0.5 + radius * 0.55,
+    zone: currentZone
+  });
+  return group;
+}
+
+function createTreeStump(x, z, options = {}) {
+  const { radius = 0.44, height = 0.62, color = 0x6a4f36, seed = 1, broken = false } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = random() * Math.PI;
+  const bark = new THREE.Color(color);
+  cylinder(group, radius * 0.92, radius * 1.12, height, color, [0, height * 0.5, 0], { segments: 9 });
+  const heartwood = bark.clone().offsetHSL(0.015, -0.16, 0.26).getHex();
+  if (broken) {
+    // A snapped stump: a torn crown of heartwood rather than a clean saw cut.
+    for (let index = 0; index < 4; index += 1) {
+      const spike = (index / 4) * Math.PI * 2 + random() * 0.5;
+      cone(group, radius * 0.3, height * (0.5 + random() * 0.6), heartwood,
+        [Math.cos(spike) * radius * 0.4, height + height * 0.28, Math.sin(spike) * radius * 0.4], { segments: 5 });
+    }
+  } else {
+    cylinder(group, radius * 0.88, radius * 0.88, 0.05, heartwood, [0, height + 0.02, 0], { segments: 10 });
+    for (let ring = 1; ring <= 2; ring += 1) {
+      torus(group, radius * 0.26 * ring, 0.012, bark.clone().offsetHSL(0, -0.05, 0.08).getHex(),
+        [0, height + 0.05, 0], [Math.PI / 2, 0, 0], 6, 16);
+    }
+  }
+  // Root flares spreading into the ground.
+  const rootColor = bark.clone().offsetHSL(0, 0, -0.05).getHex();
+  for (let index = 0; index < 5; index += 1) {
+    const flare = (index / 5) * Math.PI * 2 + random() * 0.4;
+    cone(group, radius * 0.28, radius * 1.5, rootColor,
+      [Math.cos(flare) * radius * 0.72, radius * 0.26, Math.sin(flare) * radius * 0.72],
+      { segments: 5, rotation: [Math.PI / 2 - 0.35, -flare, 0] });
+  }
+  for (let index = 0; index < 2; index += 1) {
+    sphere(group, radius * 0.34, 0x597c43,
+      [(random() - 0.5) * radius, height * (0.5 + random() * 0.4), (random() - 0.5) * radius],
+      { scale: [1.2, 0.42, 1.1], widthSegments: 7, heightSegments: 5 });
+  }
+  world.add(group);
+  addCollider(x, z, radius * 1.15, { zone: currentZone });
+  return group;
+}
+
+function createShrub(x, z, options = {}) {
+  const { scale = 1, color = 0x406f3f, seed = 1 } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = random() * Math.PI * 2;
+  const leaf = new THREE.Color(color);
+  // Woody stems first, so the leaf masses read as sitting on something.
+  for (let index = 0; index < 3; index += 1) {
+    const stem = (index / 3) * Math.PI * 2 + random();
+    cylinder(group, 0.022 * scale, 0.04 * scale, 0.42 * scale, 0x5c4630,
+      [Math.cos(stem) * 0.08 * scale, 0.21 * scale, Math.sin(stem) * 0.08 * scale],
+      { segments: 5, rotation: [Math.cos(stem) * 0.24, 0, -Math.sin(stem) * 0.24] });
+  }
+  const masses = 4 + Math.floor(random() * 3);
+  for (let index = 0; index < masses; index += 1) {
+    const around = (index / masses) * Math.PI * 2 + random() * 0.7;
+    const spread = (0.16 + random() * 0.26) * scale;
+    addMesh(group, new THREE.IcosahedronGeometry((0.3 + random() * 0.17) * scale, 0),
+      mat(leaf.clone().offsetHSL(random() * 0.03 - 0.015, 0, random() * 0.1 - 0.04).getHex()),
+      [Math.cos(around) * spread, (0.42 + random() * 0.38) * scale, Math.sin(around) * spread],
+      [random() * 0.6, random() * 2, random() * 0.5],
+      [1.15, 0.82, 1.1]);
+  }
+  world.add(group);
+  addCollider(x, z, 0.46 * scale, { zone: currentZone });
+  return group;
+}
+
+// Fronds are wide, heavily arched blades sharing the grass batch, so a fern
+// costs a handful of triangles and no extra draw call.
+function createFernPlant(x, z, options = {}) {
+  const { scale = 1, seed = 1, color = 0x2e5a30, tip = 0x76a24d } = options;
+  const random = makeFieldRandom(seed);
+  const base = new THREE.Color(color);
+  const crown = new THREE.Color(tip);
+  const fronds = 7 + Math.floor(random() * 6);
+  for (let index = 0; index < fronds; index += 1) {
+    const around = (index / fronds) * Math.PI * 2 + random() * 0.5;
+    addGrassBlade(x + Math.cos(around) * 0.05 * scale, z + Math.sin(around) * 0.05 * scale, {
+      height: (0.42 + random() * 0.34) * scale,
+      width: 0.09 + random() * 0.05,
+      angle: around + Math.PI / 2,
+      lean: 0.85 + random() * 0.5,
+      baseColor: base,
+      tipColor: crown,
+      stiffness: 0.5 + random() * 0.3,
+      phase: random() * Math.PI * 2,
+      arch: 0.34
+    });
+  }
+  // A few short inner fronds keep the centre of the crown from looking hollow.
+  for (let index = 0; index < 4; index += 1) {
+    addGrassBlade(x, z, {
+      height: (0.2 + random() * 0.16) * scale,
+      width: 0.055,
+      angle: random() * Math.PI * 2,
+      lean: 0.3,
+      baseColor: base,
+      tipColor: crown,
+      stiffness: 0.4,
+      phase: random() * Math.PI * 2,
+      arch: 0.12
+    });
+  }
+}
+
+function createBroadleafPlant(x, z, options = {}) {
+  const { scale = 1, seed = 1, color = 0x3a6d34, tip = 0x89b558 } = options;
+  const random = makeFieldRandom(seed);
+  const base = new THREE.Color(color);
+  const crown = new THREE.Color(tip);
+  const leaves = 5 + Math.floor(random() * 4);
+  for (let index = 0; index < leaves; index += 1) {
+    const around = (index / leaves) * Math.PI * 2 + random() * 0.6;
+    addGrassBlade(x + Math.cos(around) * 0.04 * scale, z + Math.sin(around) * 0.04 * scale, {
+      height: (0.3 + random() * 0.2) * scale,
+      width: 0.15 + random() * 0.07,
+      angle: around + Math.PI / 2,
+      lean: 1.05 + random() * 0.45,
+      baseColor: base,
+      tipColor: crown,
+      stiffness: 0.35 + random() * 0.25,
+      phase: random() * Math.PI * 2,
+      arch: 0.42
+    });
+  }
+}
+
+function createReedClump(x, z, options = {}) {
+  const { scale = 1, seed = 1, cattails = true } = options;
+  const random = makeFieldRandom(seed);
+  const base = new THREE.Color(0x466b34);
+  const tip = new THREE.Color(0xbcc06a);
+  const stalks = 7 + Math.floor(random() * 7);
+  for (let index = 0; index < stalks; index += 1) {
+    const around = random() * Math.PI * 2;
+    const spread = Math.sqrt(random()) * 0.42 * scale;
+    addGrassBlade(x + Math.cos(around) * spread, z + Math.sin(around) * spread, {
+      height: (1.05 + random() * 0.85) * scale,
+      width: 0.026 + random() * 0.016,
+      angle: random() * Math.PI * 2,
+      lean: 0.16 + random() * 0.3,
+      baseColor: base,
+      tipColor: tip,
+      stiffness: 0.55 + random() * 0.4,
+      phase: random() * Math.PI * 2,
+      arch: 0.1
+    });
+  }
+  if (!cattails) return;
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  for (let index = 0; index < 2 + Math.floor(random() * 2); index += 1) {
+    const around = random() * Math.PI * 2;
+    const spread = random() * 0.3 * scale;
+    const stemHeight = (1.25 + random() * 0.5) * scale;
+    const stemX = Math.cos(around) * spread;
+    const stemZ = Math.sin(around) * spread;
+    cylinder(group, 0.016, 0.022, stemHeight, 0x5c7c3c, [stemX, stemHeight * 0.5, stemZ], { segments: 5 });
+    cylinder(group, 0.05, 0.05, 0.3 * scale, 0x6a4a30, [stemX, stemHeight + 0.13 * scale, stemZ], { segments: 7 });
+    sphere(group, 0.05, 0x6a4a30, [stemX, stemHeight + 0.29 * scale, stemZ], { widthSegments: 7, heightSegments: 5 });
+  }
+  world.add(group);
+}
+
+function createSapling(x, z, options = {}) {
+  const { scale = 1, seed = 1, foliage = 0x466f42 } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = random() * Math.PI * 2;
+  const height = (1.3 + random() * 0.9) * scale;
+  cylinder(group, 0.035 * scale, 0.06 * scale, height, 0x6b5039, [0, height * 0.5, 0], {
+    segments: 6,
+    rotation: [0.03, 0, (random() - 0.5) * 0.1]
+  });
+  const leaf = new THREE.Color(foliage);
+  for (let index = 0; index < 4; index += 1) {
+    const around = (index / 4) * Math.PI * 2 + random() * 0.6;
+    sphere(group, 0.26 * scale, leaf.clone().offsetHSL(0, 0, index * 0.03).getHex(),
+      [Math.cos(around) * 0.2 * scale, height * (0.55 + index * 0.12), Math.sin(around) * 0.2 * scale],
+      { scale: [1.25, 0.6, 1.15], widthSegments: 8, heightSegments: 5 });
+  }
+  sphere(group, 0.22 * scale, leaf.clone().offsetHSL(0, 0, 0.1).getHex(), [0, height + 0.1 * scale, 0],
+    { scale: [1.1, 0.75, 1.1], widthSegments: 8, heightSegments: 5 });
+  world.add(group);
+  addCollider(x, z, 0.24 * scale, { zone: currentZone });
+  return group;
+}
+
+function createBrushPile(x, z, options = {}) {
+  const { scale = 1, seed = 1 } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  for (let index = 0; index < 5 + Math.floor(random() * 4); index += 1) {
+    cylinder(group, 0.028 * scale, 0.045 * scale, (0.7 + random() * 1.1) * scale, index % 2 ? 0x6f5539 : 0x866546,
+      [(random() - 0.5) * 0.5 * scale, (0.05 + random() * 0.18) * scale, (random() - 0.5) * 0.5 * scale],
+      { segments: 5, rotation: [Math.PI / 2 - random() * 0.4, random() * Math.PI * 2, random() * 0.5] });
+  }
+  for (let index = 0; index < 3; index += 1) {
+    sphere(group, 0.16 * scale, 0x4f7040,
+      [(random() - 0.5) * 0.6 * scale, 0.12 * scale, (random() - 0.5) * 0.6 * scale],
+      { scale: [1.3, 0.5, 1.2], widthSegments: 7, heightSegments: 5 });
+  }
+  world.add(group);
+  return group;
+}
+
+// Purely decorative blooms. The lootable wild flowers are createWildFlowerNode;
+// these carry no marker and no interactable, so nothing here is pickable.
+function createFieldBlooms(x, z, options = {}) {
+  const { scale = 1, seed = 1, color = 0xe4e8b0 } = options;
+  const random = makeFieldRandom(seed);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const bloom = new THREE.Color(color);
+  for (let index = 0; index < 5 + Math.floor(random() * 5); index += 1) {
+    const around = random() * Math.PI * 2;
+    const spread = Math.sqrt(random()) * 0.36 * scale;
+    const stemHeight = (0.22 + random() * 0.24) * scale;
+    const stemX = Math.cos(around) * spread;
+    const stemZ = Math.sin(around) * spread;
+    cylinder(group, 0.008, 0.012, stemHeight, 0x4f7a3d, [stemX, stemHeight * 0.5, stemZ], {
+      segments: 4,
+      rotation: [(random() - 0.5) * 0.24, 0, (random() - 0.5) * 0.24]
+    });
+    sphere(group, 0.045 * scale, bloom.clone().offsetHSL(random() * 0.05 - 0.025, 0, random() * 0.1 - 0.05).getHex(),
+      [stemX, stemHeight + 0.03 * scale, stemZ], { scale: [1, 0.6, 1], widthSegments: 6, heightSegments: 4 });
+  }
+  world.add(group);
+  return group;
+}
+
+// --- Flora scattering ----------------------------------------------------------
+
+const FLORA_KINDS = ['log', 'stump', 'broken-stump', 'shrub', 'fern', 'broadleaf', 'sapling', 'brush', 'blooms'];
+
+function placeFlora(kind, x, z, random) {
+  const seed = Math.floor(random() * 100000) + 1;
+  switch (kind) {
+    case 'log':
+      createDownedLog(x, z, {
+        length: 2.6 + random() * 2.6,
+        radius: 0.24 + random() * 0.18,
+        angle: random() * Math.PI,
+        color: random() > 0.5 ? 0x6b5238 : 0x5b4a35,
+        seed
+      });
+      return;
+    case 'stump':
+      createTreeStump(x, z, { radius: 0.36 + random() * 0.2, height: 0.42 + random() * 0.36, seed });
+      return;
+    case 'broken-stump':
+      createTreeStump(x, z, { radius: 0.34 + random() * 0.22, height: 0.7 + random() * 0.5, seed, broken: true });
+      return;
+    case 'shrub':
+      createShrub(x, z, { scale: 0.8 + random() * 0.7, color: random() > 0.5 ? 0x406f3f : 0x4c7a45, seed });
+      return;
+    case 'fern':
+      createFernPlant(x, z, { scale: 0.85 + random() * 0.6, seed });
+      return;
+    case 'broadleaf':
+      createBroadleafPlant(x, z, { scale: 0.85 + random() * 0.7, seed });
+      return;
+    case 'sapling':
+      createSapling(x, z, { scale: 0.8 + random() * 0.7, seed });
+      return;
+    case 'brush':
+      createBrushPile(x, z, { scale: 0.8 + random() * 0.6, seed });
+      return;
+    case 'reeds':
+      createReedClump(x, z, { scale: 0.8 + random() * 0.5, seed, cattails: random() > 0.45 });
+      return;
+    default:
+      createFieldBlooms(x, z, {
+        scale: 0.85 + random() * 0.6,
+        seed,
+        color: [0xe4e8b0, 0xdca7c4, 0xc9d2f0, 0xf0d089][Math.floor(random() * 4)]
+      });
+  }
+}
+
+function scatterFlora(options = {}) {
+  const {
+    seed = 1,
+    count = 30,
+    minX = -1, maxX = 1, minZ = -1, maxZ = 1,
+    accept = null,
+    kinds = FLORA_KINDS,
+    spacing = 2.1
+  } = options;
+  const random = makeFieldRandom(seed);
+  const taken = makeSpacingGrid(Math.max(1, spacing));
+  let placed = 0;
+  for (let attempt = 0; attempt < count * 9 && placed < count; attempt += 1) {
+    const x = minX + random() * (maxX - minX);
+    const z = minZ + random() * (maxZ - minZ);
+    if (accept && !accept(x, z)) continue;
+    if (taken.occupied(x, z, spacing)) continue;
+    placeFlora(kinds[Math.floor(random() * kinds.length)], x, z, random);
+    taken.add(x, z);
+    placed += 1;
+  }
+  return placed;
+}
+
+// Grass and flora are laid down after the built world, so this rejects anything
+// that would grow through a wall, a trunk, a fence post or a shop display.
+//
+// A zone can carry well over a thousand colliders and a dressing pass asks this
+// question a hundred thousand times, so during the pass the colliders are
+// bucketed into a coarse grid and only the bucket under the sample is tested.
+// Each collider is registered into every cell it reaches plus FLORA_MAX_PADDING
+// of slack, which is why a single cell lookup is enough.
+const FLORA_CELL_SIZE = 4;
+const FLORA_MAX_PADDING = 2;
+let colliderGrid = null;
+
+function floraCellKey(cellX, cellZ) {
+  return (cellX + 1024) * 4096 + (cellZ + 1024);
+}
+
+function indexColliderForFlora(collider) {
+  if (!colliderGrid) return;
+  if (collider.enabled === false || (collider.zone && collider.zone !== currentZone)) return;
+  const halfWidth = (collider.type === 'rect' ? collider.halfWidth : collider.radius) + FLORA_MAX_PADDING;
+  const halfDepth = (collider.type === 'rect' ? collider.halfDepth : collider.radius) + FLORA_MAX_PADDING;
+  const fromX = Math.floor((collider.x - halfWidth) / FLORA_CELL_SIZE);
+  const toX = Math.floor((collider.x + halfWidth) / FLORA_CELL_SIZE);
+  const fromZ = Math.floor((collider.z - halfDepth) / FLORA_CELL_SIZE);
+  const toZ = Math.floor((collider.z + halfDepth) / FLORA_CELL_SIZE);
+  for (let cellX = fromX; cellX <= toX; cellX += 1) {
+    for (let cellZ = fromZ; cellZ <= toZ; cellZ += 1) {
+      const key = floraCellKey(cellX, cellZ);
+      const bucket = colliderGrid.get(key);
+      if (bucket) bucket.push(collider);
+      else colliderGrid.set(key, [collider]);
+    }
+  }
+}
+
+function beginFloraColliderGrid() {
+  colliderGrid = new Map();
+  for (const collider of colliders) indexColliderForFlora(collider);
+}
+
+function endFloraColliderGrid() {
+  colliderGrid = null;
+}
+
+function isBlockedByCollider(x, z, padding = 0.35) {
+  const reach = Math.min(padding, FLORA_MAX_PADDING);
+  const candidates = colliderGrid
+    ? colliderGrid.get(floraCellKey(Math.floor(x / FLORA_CELL_SIZE), Math.floor(z / FLORA_CELL_SIZE)))
+    : colliders;
+  if (!candidates) return false;
+  for (const collider of candidates) {
+    if (collider.enabled === false || (collider.zone && collider.zone !== currentZone)) continue;
+    if (collider.type === 'rect') {
+      if (Math.abs(x - collider.x) < collider.halfWidth + reach && Math.abs(z - collider.z) < collider.halfDepth + reach) return true;
+      continue;
+    }
+    if (Math.hypot(x - collider.x, z - collider.z) < collider.radius + reach) return true;
+  }
+  return false;
+}
+
+// --- Per-zone ground cover -----------------------------------------------------
+// Everything above is generic; this is where each zone gets its turf and its
+// understory. It runs last in a zone build, after every collider is registered,
+// so nothing is planted through a wall, a trunk, a fence post or a display.
+
+function isOpenGroundPosition(zoneKey, x, z, padding = 0.35) {
+  const bounds = ZONES[zoneKey].bounds;
+  const outer = ZONES[zoneKey].visualBounds || bounds;
+  if (x < bounds.minX + 1.2 || x > bounds.maxX - 1.2) return false;
+  if (z < bounds.minZ + 1.2 || z > outer.maxZ - 1.6) return false;
+  if (isParkingLotPosition(x, z, 0.7)) return false;
+  if (zoneKey === 'store') {
+    if (Math.abs(x) < 4.4 && z > -9.2 && z < 5.4) return false;
+    if (Math.abs(x) < 10.2 && z < -0.2) return false;
+  } else if (zoneKey === 'zoo') {
+    if (Math.abs(x) < 3.8 && z > -16.4 && z < 11.5) return false;
+    if (Math.abs(z + 3.6) < 2.8 && (Math.abs(x + 9) < 2.1 || Math.abs(x - 9) < 2.1)) return false;
+    if (Math.hypot(x - PRACTICE_POND.centerX, z - PRACTICE_POND.centerZ) < PRACTICE_POND.waterRadius + 0.9) return false;
+  } else if (zoneKey === 'forest') {
+    if (!isGrassNaturePosition('forest', x, z)) return false;
+  } else if (zoneKey === 'lake') {
+    if (!isJenkinsLakeClearPosition(x, z, true)) return false;
+  }
+  return !isBlockedByCollider(x, z, padding);
+}
+
+function isLakeShorePosition(x, z) {
+  const water = JENKINS_LAKE_WATER;
+  const spread = ((x - water.centerX) / water.radiusX) ** 2 + ((z - water.centerZ) / water.radiusZ) ** 2;
+  if (spread < 1.0 || spread > 1.14) return false;
+  const onDock = JENKINS_LAKE_DOCKS.some((dock) => Math.abs(x - dock.x) < dock.width * 0.9);
+  return !onDock && !isBlockedByCollider(x, z, 0.4);
+}
+
+function dressZoneFlora(zoneKey) {
+  beginFloraColliderGrid();
+  const grassAccept = (x, z) => isOpenGroundPosition(zoneKey, x, z, 0.12);
+  const floraAccept = (x, z) => isOpenGroundPosition(zoneKey, x, z, 0.95);
+  const bounds = ZONES[zoneKey].bounds;
+  const outer = ZONES[zoneKey].visualBounds || bounds;
+
+  if (zoneKey === 'lake') {
+    dressJenkinsLakeFlora(grassAccept, floraAccept);
+    flushGrassBlades();
+    endFloraColliderGrid();
+    return;
+  }
+
+  createGrassPatch({
+    seed: 4101, count: zoneKey === 'zoo' ? 20000 : 17000, palette: zoneKey === 'zoo' ? 'lawn' : 'field',
+    minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: outer.maxZ,
+    accept: grassAccept, bladesPerClump: 6, clumpRadius: 0.28
+  });
+  // A rougher, longer second pass keeps the turf from reading as one flat tone.
+  createGrassPatch({
+    seed: 8807, count: zoneKey === 'zoo' ? 5200 : 6400, palette: zoneKey === 'forest' ? 'forest' : 'meadow',
+    minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: outer.maxZ,
+    accept: grassAccept, bladesPerClump: 7, clumpRadius: 0.46, lean: 0.42
+  });
+  // Dry tussocks along the street verge behind the lot.
+  createGrassPatch({
+    seed: 3312, count: 5200, palette: 'dry',
+    minX: PARKING_LOT.streetMinX + 4, maxX: PARKING_LOT.streetMaxX - 4,
+    minZ: PARKING_LOT.wallZ + 0.4, maxZ: outer.maxZ,
+    accept: (x, z) => !isParkingLotPosition(x, z, 0.5) && !isBlockedByCollider(x, z, 0.2),
+    bladesPerClump: 6, clumpRadius: 0.38
+  });
+
+  const floraCounts = { store: 24, forest: 40, zoo: 30 };
+  scatterFlora({
+    seed: 5501, count: floraCounts[zoneKey] || 24,
+    minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: outer.maxZ,
+    accept: floraAccept, spacing: 2.4
+  });
+  flushGrassBlades();
+  endFloraColliderGrid();
+}
+
+// Jenkins Lake carries the bulk of the ground cover: the woods either side of
+// the road, the three meadow compounds, the cabin lawns and the lake shore.
+function dressJenkinsLakeFlora(grassAccept, floraAccept) {
+  const meadowAccept = (x, z) => isLakeGrassCompoundPosition(x, z, 0.6) && !isBlockedByCollider(x, z, 0.12);
+  const yardAccept = (x, z) => isJenkinsLakeYardPosition(x, z, 0.6) && !isBlockedByCollider(x, z, 0.3);
+
+  // Woodland floor, road verges first and then the deep forest either side.
+  createGrassPatch({
+    seed: 1201, count: 52000, palette: 'forest',
+    minX: -46, maxX: 46, minZ: -76, maxZ: 30,
+    accept: grassAccept, bladesPerClump: 6, clumpRadius: 0.3
+  });
+  createGrassPatch({
+    seed: 1307, count: 18000, palette: 'forest',
+    minX: -92, maxX: 92, minZ: -196, maxZ: 30,
+    accept: grassAccept, bladesPerClump: 7, clumpRadius: 0.44, lean: 0.36
+  });
+  createGrassPatch({
+    seed: 1409, count: 9000, palette: 'field',
+    minX: -22, maxX: 22, minZ: -80, maxZ: 30,
+    accept: grassAccept, bladesPerClump: 5, clumpRadius: 0.26
+  });
+
+  // The three grass compounds get taller, richer meadow grass.
+  JENKINS_LAKE_GRASS_COMPOUNDS.forEach((compound, index) => {
+    createGrassPatch({
+      seed: 2200 + index * 37,
+      count: Math.round(compound.width * compound.depth * 9),
+      palette: 'meadow',
+      minX: compound.centerX - compound.width / 2,
+      maxX: compound.centerX + compound.width / 2,
+      minZ: compound.centerZ - compound.depth / 2,
+      maxZ: compound.centerZ + compound.depth / 2,
+      accept: meadowAccept,
+      bladesPerClump: 7,
+      clumpRadius: 0.36,
+      lean: 0.38
+    });
+  });
+
+  // Cabin and barn lawns are kept short.
+  JENKINS_LAKE_YARDS.forEach((yard, index) => {
+    createGrassPatch({
+      seed: 3100 + index * 53,
+      count: Math.round(yard.width * yard.depth * 9),
+      palette: 'lawn',
+      minX: yard.centerX - yard.width / 2,
+      maxX: yard.centerX + yard.width / 2,
+      minZ: yard.centerZ - yard.depth / 2,
+      maxZ: yard.centerZ + yard.depth / 2,
+      accept: yardAccept,
+      bladesPerClump: 6,
+      clumpRadius: 0.3
+    });
+  });
+
+  // Shore grass and reed beds ringing the water.
+  const water = JENKINS_LAKE_WATER;
+  const shoreRandom = makeFieldRandom(4404);
+  for (let index = 0; index < 260; index += 1) {
+    const angle = shoreRandom() * Math.PI * 2;
+    const spread = 1.005 + shoreRandom() * 0.11;
+    const x = water.centerX + Math.cos(angle) * water.radiusX * spread;
+    const z = water.centerZ + Math.sin(angle) * water.radiusZ * spread;
+    if (!isLakeShorePosition(x, z)) continue;
+    if (index % 3 === 0) {
+      createReedClump(x, z, { scale: 0.75 + shoreRandom() * 0.6, seed: 700 + index, cattails: shoreRandom() > 0.5 });
+      continue;
+    }
+    createGrassPatch({
+      seed: 5000 + index, count: 60, palette: 'shore',
+      minX: x - 1.3, maxX: x + 1.3, minZ: z - 1.3, maxZ: z + 1.3,
+      accept: isLakeShorePosition, bladesPerClump: 7, clumpRadius: 0.4
+    });
+  }
+
+  // Understory: logs, stumps, ferns and brush through the woods, then lighter
+  // flowering cover out in the open meadows.
+  scatterFlora({
+    seed: 6601, count: 120,
+    minX: -88, maxX: 88, minZ: -192, maxZ: 28,
+    accept: floraAccept, spacing: 3.4
+  });
+  scatterFlora({
+    seed: 6707, count: 46,
+    minX: -40, maxX: 40, minZ: -74, maxZ: 26,
+    accept: floraAccept, spacing: 2.6,
+    kinds: ['log', 'stump', 'broken-stump', 'fern', 'shrub', 'brush', 'broadleaf']
+  });
+  scatterFlora({
+    seed: 6809, count: 54,
+    minX: -50, maxX: 52, minZ: -120, maxZ: -78,
+    accept: (x, z) => isLakeGrassCompoundPosition(x, z, 1.4) && !isBlockedByCollider(x, z, 1),
+    spacing: 3,
+    kinds: ['shrub', 'blooms', 'broadleaf', 'fern', 'sapling', 'log', 'stump']
+  });
+}
+
 function createNatureStick(x, z, index = 0) {
   const stick = new THREE.Group();
   stick.position.set(x, 0.07, z);
@@ -2840,7 +4257,7 @@ function isGrassNaturePosition(zoneKey, x, z) {
   if (zoneKey === 'forest') {
     const inWater = Math.hypot(x - FOREST_WATER.centerX, z - FOREST_WATER.centerZ) < FOREST_WATER.waterRadius + 1.1;
     const onDock = Math.abs(x) < FOREST_DOCK.halfWidth + 0.45 && z > FOREST_DOCK.endZ - 0.6 && z < FOREST_DOCK.shoreZ + 0.8;
-    const onParkingHub = Math.abs(x) < 9.2 && z > 3.1;
+    const onParkingHub = isParkingLotPosition(x, z, 1);
     const onMainPath = Math.abs(x) < 3.2 && z > -14 && z < 4;
     return !inWater && !onDock && !onParkingHub && !onMainPath;
   }
@@ -3461,7 +4878,6 @@ const VISITOR_PALETTES = [
 const VISITOR_ROUTES = {
   zoo: {
     noun: 'visitor',
-    entry: [-5.4, 15.4],
     gate: [-3.6, 5.0],
     capacity: 4,
     interval: [11, 24],
@@ -3476,7 +4892,6 @@ const VISITOR_ROUTES = {
   },
   store: {
     noun: 'customer',
-    entry: [5.4, 15.4],
     gate: [3.4, 4.4],
     capacity: 3,
     interval: [14, 28],
@@ -3538,24 +4953,35 @@ function createVisitorModel(palette) {
   return group;
 }
 
-// `warmStart` drops someone in mid-visit, so arriving in a zone does not mean
-// staring at an empty floor for the minute it takes the first person to walk in.
+// `warmStart` drops someone in mid-visit with their car already parked, so
+// arriving in a zone does not mean staring at an empty floor for the minute it
+// takes the first person to drive in.
 function spawnVisitor(zoneKey, warmStart = false) {
   const route = VISITOR_ROUTES[zoneKey];
   if (!route) return null;
+  const stall = freeVisitorStall();
+  if (!stall) return null;
+  if (!warmStart && !approachIsClear()) return null;
   const palette = VISITOR_PALETTES[Math.floor(Math.random() * VISITOR_PALETTES.length)];
   const group = createVisitorModel(palette);
-  const entry = new THREE.Vector3(route.entry[0] + (Math.random() - 0.5) * 2.6, 0, route.entry[1] + (Math.random() - 0.5) * 1.6);
-  group.position.copy(entry);
+  const door = stallDoorPoint(stall);
+  group.position.set(door.x, 0, door.z);
+  group.visible = false;
   world.add(group);
   const gate = () => new THREE.Vector3(route.gate[0] + (Math.random() - 0.5) * 1.6, 0, route.gate[1]);
   const chosen = [...route.stops].sort(() => Math.random() - 0.5).slice(0, 2 + Math.floor(Math.random() * 3));
-  const plan = [{ point: gate(), hold: 0 }];
-  for (const [sx, sz] of chosen) {
-    plan.push({ point: new THREE.Vector3(sx + (Math.random() - 0.5) * 1.5, 0, sz + (Math.random() - 0.5) * 1.5), hold: 3.5 + Math.random() * 5.5 });
+  const plan = [
+    { point: new THREE.Vector3(stall.x, 0, PARKING_LOT.aisleZ), hold: 0 },
+    { point: new THREE.Vector3((Math.random() - 0.5) * 2.4, 0, PARKING_LOT.minZ + 3.4), hold: 0 },
+    { point: gate(), hold: 0 }
+  ];
+  for (const [stopX, stopZ] of chosen) {
+    plan.push({ point: new THREE.Vector3(stopX + (Math.random() - 0.5) * 1.5, 0, stopZ + (Math.random() - 0.5) * 1.5), hold: 3.5 + Math.random() * 5.5 });
   }
   plan.push({ point: gate(), hold: 0 });
-  plan.push({ point: entry.clone(), hold: 0 });
+  plan.push({ point: new THREE.Vector3((Math.random() - 0.5) * 2.4, 0, PARKING_LOT.minZ + 3.4), hold: 0 });
+  plan.push({ point: new THREE.Vector3(stall.x, 0, PARKING_LOT.aisleZ), hold: 0 });
+  plan.push({ point: new THREE.Vector3(door.x, 0, door.z), hold: 0 });
   const visitor = {
     group,
     plan,
@@ -3566,27 +4992,88 @@ function spawnVisitor(zoneKey, warmStart = false) {
     stride: Math.random() * Math.PI * 2,
     speed: 0,
     line: route.lines[Math.floor(Math.random() * route.lines.length)],
-    noun: route.noun
+    noun: route.noun,
+    stall,
+    state: 'driving-in',
+    car: null,
+    interactable: null
   };
-  if (warmStart && plan.length > 3) {
-    const at = 1 + Math.floor(Math.random() * (plan.length - 3));
-    group.position.copy(plan[at].point);
-    visitor.index = at + 1;
+  visitors.push(visitor);
+
+  const parkCar = (car) => {
+    // Parked, not finished: the car stays in the world with its collider until
+    // its owner walks back to it, so the traffic update has to leave it alone.
+    car.parked = true;
+    car.group.position.set(stall.x, 0.25, stall.z);
+    car.group.rotation.y = carHeading(0, stall.facing);
+    car.heading = car.group.rotation.y;
+    holdCarCollider(car, stall.x, stall.z);
+    visitor.state = 'touring';
+    visitor.group.visible = true;
+    visitor.group.position.set(door.x, 0, door.z);
+    visitor.facing = Math.atan2(0 - 0, PARKING_LOT.aisleZ - door.z);
+    visitor.group.rotation.y = visitor.facing;
+    visitor.interactable = { type: 'visitor', visitor, label: `Greet the ${route.noun}`, position: new THREE.Vector3(door.x, 1, door.z), radius: 2.4 };
+    interactables.push(visitor.interactable);
+  };
+
+  const car = spawnTrafficCar(warmStart ? [createRoadRun([[stall.x, stall.z + stall.facing * 0.4], [stall.x, stall.z]], { speed: 1 })] : lotApproachLegs(stall), {
+    onFinish: parkCar
+  });
+  car.stall = stall;
+  visitor.car = car;
+  if (warmStart) {
+    // Skip the drive and the walk in: put them somewhere in the middle of the
+    // tour with the car already standing in its bay.
+    parkCar(car);
+    const at = 3 + Math.floor(Math.random() * Math.max(1, chosen.length));
+    const step = visitor.plan[Math.min(at, visitor.plan.length - 4)];
+    visitor.index = Math.min(at + 1, visitor.plan.length - 4);
+    group.position.copy(step.point);
     visitor.holdUntil = elapsed + Math.random() * 3.5;
     visitor.facing = Math.random() * Math.PI * 2;
     visitor.browseFacing = visitor.facing;
     group.rotation.y = visitor.facing;
   }
-  visitor.interactable = { type: 'visitor', visitor, label: `Greet the ${route.noun}`, position: new THREE.Vector3(group.position.x, 1, group.position.z), radius: 2.4 };
-  interactables.push(visitor.interactable);
-  visitors.push(visitor);
   return visitor;
+}
+
+// The walk-out point sits just behind the parked car, between the bay and the
+// aisle, so people step out of the car rather than through it.
+function stallDoorPoint(stall) {
+  return {
+    x: stall.x,
+    z: stall.z + (stall.z > PARKING_LOT.aisleZ ? -2.15 : 2.15)
+  };
 }
 
 function despawnVisitor(visitor) {
   world.remove(visitor.group);
-  interactables = interactables.filter((entry) => entry !== visitor.interactable);
+  if (visitor.interactable) interactables = interactables.filter((entry) => entry !== visitor.interactable);
   visitors = visitors.filter((entry) => entry !== visitor);
+}
+
+// Leaving is a drive, not a fade: the car backs out, takes the service drive to
+// the street, runs east and turns out of sight behind the treeline.
+function sendVisitorHome(visitor) {
+  visitor.state = 'leaving';
+  visitor.group.visible = false;
+  if (visitor.interactable) {
+    interactables = interactables.filter((entry) => entry !== visitor.interactable);
+    visitor.interactable = null;
+  }
+  const car = visitor.car;
+  despawnVisitor(visitor);
+  if (!car) return;
+  releaseCarCollider(car);
+  car.parked = false;
+  car.legs = lotDepartureLegs(visitor.stall);
+  car.leg = 0;
+  car.distance = 0;
+  car.onFinish = null;
+  // Hold the bay until the car has finished backing out of it, so the next
+  // arrival is not aimed at a stall that is still occupied.
+  car.onLeg = (leaving) => { leaving.stall = null; };
 }
 
 function greetVisitor(visitor) {
@@ -3614,10 +5101,11 @@ function updateVisitors(delta) {
     visitorSpawnAt = elapsed + (afterHours ? 45 + Math.random() * 45 : min + Math.random() * (max - min));
   }
   for (const visitor of [...visitors]) {
+    if (visitor.state !== 'touring') continue;
     const group = visitor.group;
     const step = visitor.plan[visitor.index];
     if (!step) {
-      despawnVisitor(visitor);
+      sendVisitorHome(visitor);
       continue;
     }
     let moving = false;
@@ -3632,7 +5120,7 @@ function updateVisitors(delta) {
       if (tempVector.length() < 0.32) {
         visitor.index += 1;
         if (visitor.index >= visitor.plan.length) {
-          despawnVisitor(visitor);
+          sendVisitorHome(visitor);
           continue;
         }
         visitor.holdUntil = elapsed + step.hold;
@@ -3656,8 +5144,19 @@ function updateVisitors(delta) {
     for (const leg of group.userData.legs) leg.pivot.rotation.x = swing * 0.5 * leg.side;
     for (const arm of group.userData.arms) arm.pivot.rotation.x = -swing * 0.38 * arm.side;
     group.position.y = Math.abs(Math.sin(visitor.stride)) * 0.032 * clamp(visitor.speed / 1.05, 0, 1);
-    visitor.interactable.position.set(group.position.x, 1, group.position.z);
+    if (visitor.interactable) visitor.interactable.position.set(group.position.x, 1, group.position.z);
   }
+}
+
+// Traffic keeps running in every hub zone, including the forest lot, so the
+// street outside is never a dead prop.
+function updateHubTraffic(delta) {
+  if (!HUB_ZONES.includes(currentZone)) {
+    if (trafficCars.length) trafficCars = [];
+    return;
+  }
+  maybeSpawnPassingTraffic();
+  updateTrafficCars(delta);
 }
 
 // --- Brax's build yard --------------------------------------------------------
@@ -3854,19 +5353,54 @@ function updateBuildSites(delta) {
   }
 }
 
-function createJenkinsLakeRoad() {
-  for (let index = 0; index < JENKINS_LAKE_ROAD.length - 1; index += 1) {
-    const [fromX, fromZ] = JENKINS_LAKE_ROAD[index];
-    const [toX, toZ] = JENKINS_LAKE_ROAD[index + 1];
-    const dx = toX - fromX;
-    const dz = toZ - fromZ;
-    const length = Math.hypot(dx, dz);
-    const angle = Math.atan2(dx, dz);
-    const centerX = (fromX + toX) / 2;
-    const centerZ = (fromZ + toZ) / 2;
-    box(world, [4.6, 0.06, length + 1.2], 0x9a774f, [centerX, 0.01, centerZ], { rotation: [0, angle, 0] });
-    box(world, [3.7, 0.025, length + 0.9], 0xb18a59, [centerX, 0.045, centerZ], { rotation: [0, angle, 0] });
+// The forest road, and the line the car drives, are the same centripetal
+// Catmull-Rom curve: the tarmac bends the way the car does, and the car never
+// has to snap between straight segments.
+let jenkinsLakeRoadCurve = null;
+
+function getJenkinsLakeRoadCurve() {
+  if (!jenkinsLakeRoadCurve) {
+    jenkinsLakeRoadCurve = new THREE.CatmullRomCurve3(
+      JENKINS_LAKE_ROAD.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+      false,
+      'centripetal',
+      0.5
+    );
   }
+  return jenkinsLakeRoadCurve;
+}
+
+function createRoadRibbon(curve, width, color, y, segments = 120) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const point = curve.getPointAt(index / segments);
+    const tangent = curve.getTangentAt(index / segments);
+    const length = Math.hypot(tangent.x, tangent.z) || 1;
+    const sideX = -tangent.z / length * width / 2;
+    const sideZ = tangent.x / length * width / 2;
+    positions.push(point.x + sideX, y, point.z + sideZ, point.x - sideX, y, point.z - sideZ);
+    normals.push(0, 1, 0, 0, 1, 0);
+    if (index === 0) continue;
+    const corner = (index - 1) * 2;
+    indices.push(corner, corner + 1, corner + 3, corner, corner + 3, corner + 2);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geometry, mat(color, { roughness: 1, side: THREE.DoubleSide }));
+  mesh.receiveShadow = true;
+  world.add(mesh);
+  return mesh;
+}
+
+function createJenkinsLakeRoad() {
+  const curve = getJenkinsLakeRoadCurve();
+  createRoadRibbon(curve, 4.6, 0x9a774f, 0.01);
+  createRoadRibbon(curve, 3.7, 0xb18a59, 0.045);
   const roadSign = makeLabel('JENKINS LAKE ROAD', '#d8ef85', '#30442f', 0.48);
   roadSign.position.set(0, 2.8, 14.2);
   world.add(roadSign);
@@ -3946,6 +5480,35 @@ function createJenkinsLakeForest() {
       addForestTree(side * (82 + (row % 2) * 1.2), z, 0.88 + (row % 3) * 0.08, 150 + row * 2 + (side > 0 ? 1 : 0));
     }
   }
+
+  // A merged infill pass thickens the woods between the individual trees. These
+  // are background trunks: one batch of a couple of hundred is one draw call, so
+  // the forest can be dense without turning into thousands of extra objects.
+  const backdrop = [];
+  const spacing = makeSpacingGrid(2);
+  treeSpots.forEach((spot) => spacing.add(spot.x, spot.z));
+  const backdropTree = (x, z, index, scale) => {
+    if (spacing.occupied(x, z, 1.6) || !isJenkinsLakeClearPosition(x, z)) return;
+    spacing.add(x, z);
+    backdrop.push([x, z, scale, index % 3 === 0 ? 0x38644a : index % 3 === 1 ? 0x44724d : 0x4d7c52,
+      index % 2 ? 0x6b4e36 : 0x5c4634, index % 5 === 0]);
+  };
+  // Thick banks either side of the road corridor.
+  for (let row = 0, z = 28; z > -196; row += 1, z -= 3.6) {
+    for (const side of [-1, 1]) {
+      for (let layer = 0; layer < 12; layer += 1) {
+        backdropTree(side * (5.2 + layer * 3.7 + ((row + layer) % 3) * 0.9), z + ((layer % 3) * 1.1), row * 13 + layer, 0.7 + ((row + layer) % 5) * 0.09);
+      }
+    }
+  }
+  // Infill across the whole map, on a finer grid than the original stands.
+  for (let row = 0, z = 26; z > -196; row += 1, z -= 4.3) {
+    for (let column = 0, x = -90; x <= 90; column += 1, x += 4.1) {
+      if ((row + column) % 3 === 1) continue;
+      backdropTree(x + ((row % 2) * 1.5), z, row * 17 + column, 0.66 + ((row + column) % 6) * 0.08);
+    }
+  }
+  createBackgroundForest(backdrop);
 
   for (let row = 0, z = 24; z > -194; row += 1, z -= 5.2) {
     for (let column = 0, x = -86; x <= 86; column += 1, x += 6.3) {
@@ -4124,33 +5687,57 @@ function setLakeGateAccess(open) {
 }
 
 function startJenkinsLakeArrival() {
-  lakeArrival = { active: true, progress: 0, duration: 10.5 };
+  const curve = getJenkinsLakeRoadCurve();
+  const start = curve.getPointAt(0);
+  const tangent = curve.getTangentAt(0);
+  // The camera looks along (-sin yaw, -cos yaw), so this faces it down the road.
+  const heading = Math.atan2(-tangent.x, -tangent.z);
+  lakeArrival = { active: true, progress: 0, duration: 13, heading, roll: 0 };
   lakeCarInterior = createLakeCarInterior();
-  player.set(JENKINS_LAKE_ROAD[0][0], 1.72, JENKINS_LAKE_ROAD[0][1]);
-  setStatus('The car is following the winding road to Jenkins Lake.');
+  player.set(start.x, 1.72, start.z);
+  // Aim is pointed down the road once, here, and then left alone. The drive
+  // used to rewrite yaw every frame, which snatched the view back on every bend.
+  yaw = heading;
+  pitch = -0.05;
+  setStatus('The car is following the winding road to Jenkins Lake. You can look around as you ride.');
   updateJenkinsLakeArrival(0);
+}
+
+// Smooth start and stop, so the car pulls away and slows into the clearing
+// rather than travelling the whole road at one constant speed.
+function easeDriveProgress(t) {
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 function updateJenkinsLakeArrival(delta) {
   if (!lakeArrival?.active) return false;
   lakeArrival.progress = clamp(lakeArrival.progress + delta / lakeArrival.duration, 0, 1);
-  const scaled = lakeArrival.progress * (JENKINS_LAKE_ROAD.length - 1);
-  const index = Math.min(JENKINS_LAKE_ROAD.length - 2, Math.floor(scaled));
-  const blend = scaled - index;
-  const from = JENKINS_LAKE_ROAD[index];
-  const to = JENKINS_LAKE_ROAD[index + 1];
-  player.x = from[0] + (to[0] - from[0]) * blend;
-  player.z = from[1] + (to[1] - from[1]) * blend;
-  const nextX = to[0] - from[0];
-  const nextZ = to[1] - from[1];
-  // The camera looks along (-sin yaw, -cos yaw); face it down the road segment.
-  yaw = Math.atan2(-nextX, -nextZ);
-  camera.position.set(player.x, player.y, player.z);
+  const curve = getJenkinsLakeRoadCurve();
+  const along = easeDriveProgress(lakeArrival.progress);
+  const point = curve.getPointAt(along);
+  const tangent = curve.getTangentAt(along);
+  player.x = point.x;
+  player.z = point.z;
+  const heading = Math.atan2(-tangent.x, -tangent.z);
+  let turn = heading - lakeArrival.heading;
+  while (turn > Math.PI) turn -= Math.PI * 2;
+  while (turn < -Math.PI) turn += Math.PI * 2;
+  // The body lags the road slightly and banks into the lag, which is what makes
+  // a corner read as a corner instead of a step change in direction.
+  lakeArrival.heading += turn * (delta > 0 ? Math.min(1, delta * 3.2) : 1);
+  const targetRoll = clamp(turn * 1.1, -0.1, 0.1);
+  lakeArrival.roll += (targetRoll - lakeArrival.roll) * (delta > 0 ? Math.min(1, delta * 3) : 1);
+  if (lakeCarInterior) {
+    lakeCarInterior.position.set(player.x, player.y, player.z);
+    lakeCarInterior.rotation.set(0, lakeArrival.heading, lakeArrival.roll);
+  }
+  // A shallow suspension bob. The player's aim is never touched.
+  camera.position.set(player.x, player.y + Math.sin(elapsed * 2.6) * 0.014, player.z);
   if (lakeArrival.progress >= 1) {
     lakeArrival.active = false;
     lakeArrival = null;
     if (lakeCarInterior) {
-      camera.remove(lakeCarInterior);
+      world.remove(lakeCarInterior);
       lakeCarInterior = null;
     }
     if (lakeParkedCar) lakeParkedCar.visible = true;
@@ -4682,11 +6269,13 @@ function createAnimalModel(species, scale = 1) {
 
 function resetWorld() {
   clearDebugCollisionVisuals();
+  disposeGrassMeshes();
+  disposeBackgroundForest();
   while (world.children.length) {
     world.remove(world.children[0]);
   }
   if (lakeCarInterior) {
-    camera.remove(lakeCarInterior);
+    world.remove(lakeCarInterior);
     lakeCarInterior = null;
   }
   interactables = [];
@@ -4701,6 +6290,8 @@ function resetWorld() {
   visitors = [];
   visitorSpawnAt = 0;
   visitorsSeeded = false;
+  trafficCars = [];
+  passingTrafficAt = 0;
   aquariumBubbles = [];
   pollinatorFlowers = [];
   wildFlowerNodes = [];
@@ -4736,7 +6327,9 @@ function enterZone(zoneKey, announce = false) {
   resetWorld();
   currentZone = zoneKey;
   spookRisk = 0.02;
-  player.set(0, 1.72, 15);
+  // In the hub zones the lot now runs deeper, so arrive on the painted walkway
+  // in front of the stalls rather than standing in the drive aisle.
+  player.set(0, 1.72, HUB_ZONES.includes(zoneKey) ? 8 : 15);
   spawnPoint.copy(player);
   yaw = 0;
   pitch = -0.08;
@@ -4747,6 +6340,10 @@ function enterZone(zoneKey, announce = false) {
     buildJenkinsLake();
     startJenkinsLakeArrival();
   }
+  // Ground cover goes down last: it reads the finished collider list so nothing
+  // sprouts through a wall, a trunk or a shop display.
+  dressZoneFlora(zoneKey);
+  flushGrassBlades();
   if (debugCollisionVisible) rebuildDebugCollisionVisuals();
   camera.position.copy(player);
   updateCameraRotation();
@@ -6625,6 +8222,179 @@ function wakeAt(hour) {
   }, 640);
 }
 
+// --- Save slots ----------------------------------------------------------------
+// Three independent field records, each with its own kit, coins, collection,
+// builds and field clock. Switching writes the outgoing record first, so
+// nothing is lost by changing slots mid-session.
+
+let armedEraseSlot = null;
+
+function formatSavedAgo(timestamp) {
+  if (!timestamp) return 'not saved yet';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'saved moments ago';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `saved ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `saved ${hours}h ago`;
+  return `saved ${Math.round(hours / 24)}d ago`;
+}
+
+function describeSlot(slot) {
+  // The active slot reports live values, which may be ahead of what is on disk.
+  const record = slot === activeSlot ? save : readRawSlot(slot);
+  if (!record) return null;
+  return {
+    name: record.profileName || defaultProfileName(slot),
+    coins: Number(record.coins || 0),
+    caught: Object.keys(record.caught || {}).length,
+    records: Object.keys(record.records || {}).length,
+    zone: ZONES[record.lastZone]?.title || 'the field',
+    savedAt: Number(record.savedAt || 0)
+  };
+}
+
+function renderProfileSlots() {
+  if (!dom.profileSlots) return;
+  dom.profileSlots.innerHTML = SAVE_SLOTS.map((slot) => {
+    const summary = describeSlot(slot);
+    const isActive = slot === activeSlot;
+    const state = isActive ? 'In play' : summary ? 'Saved' : 'Empty';
+    const meta = summary
+      ? `${summary.coins}¢ · ${summary.caught} species · ${summary.records} fish records · ${summary.zone} · ${formatSavedAgo(summary.savedAt)}`
+      : 'No field record yet. Start one here.';
+    const armed = armedEraseSlot === slot;
+    return `<div class="profile-slot ${isActive ? 'is-active' : ''} ${summary ? '' : 'is-empty'}">
+      <div class="profile-slot-head">
+        <span class="profile-slot-index">Slot ${slot}</span>
+        <span class="profile-slot-state">${state}</span>
+      </div>
+      <input class="profile-name-input" type="text" maxlength="22" data-profile-name="${slot}"
+        value="${(summary?.name || defaultProfileName(slot)).replace(/"/g, '&quot;')}"
+        aria-label="Name for slot ${slot}" ${summary ? '' : 'disabled'} />
+      <p class="profile-slot-meta">${meta}</p>
+      <div class="profile-slot-actions">
+        <button type="button" data-profile-load="${slot}" data-profile-fresh="${summary ? 'false' : 'true'}" ${isActive ? 'disabled' : ''}>
+          ${isActive ? 'Currently loaded' : summary ? 'Continue' : 'Start here'}
+        </button>
+        <button type="button" class="is-danger ${armed ? 'is-armed' : ''}" data-profile-delete="${slot}" ${summary ? '' : 'disabled'}>
+          ${armed ? 'Confirm' : 'Erase'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openProfileMenu() {
+  armedEraseSlot = null;
+  renderProfileSlots();
+  openModal(dom.profileModal);
+}
+
+function updateProfileLabel() {
+  if (dom.profileLabel) dom.profileLabel.textContent = save.profileName || defaultProfileName(activeSlot);
+}
+
+// Line the running clock up with the phase this record was saved at. The clock
+// only ever moves forward, the same rule sleeping follows.
+function applySavedDayPhase() {
+  const saved = Number(save.dayPhase);
+  if (Number.isFinite(saved)) {
+    const running = ((elapsed / SKY_CYCLE_SECONDS + SKY_PHASE_OFFSET) % 1 + 1) % 1;
+    let delta = saved - running;
+    if (delta < 0) delta += 1;
+    dayTimeOffset = delta * SKY_CYCLE_SECONDS;
+  } else {
+    dayTimeOffset = 0;
+  }
+  // Adopt the new period silently rather than announcing a dawn that did not
+  // happen while anyone was watching.
+  currentDayPeriod = getDayPeriod();
+  updateSkyCycle();
+}
+
+function activateProfile(slot, options = {}) {
+  if (!SAVE_SLOTS.includes(slot) || (slot === activeSlot && !options.fresh)) return;
+  if (slot !== activeSlot) saveGame();
+  if (options.fresh) {
+    try {
+      window.localStorage.removeItem(slotStorageKey(slot));
+    } catch (error) {
+      console.warn('Could not clear that field record.', error);
+    }
+  }
+  activeSlot = slot;
+  try {
+    window.localStorage.setItem(ACTIVE_SLOT_KEY, String(slot));
+  } catch (error) {
+    console.warn('Could not remember the active field record.', error);
+  }
+  save = loadSave(slot);
+  window.clearTimeout(sleepTimer);
+  dom.sleepVeil?.classList.remove('is-sleeping');
+  selectedBait = 'worms';
+  selectedLure = 'spinner';
+  selectedFood = 'carrots';
+  spookRisk = 0.02;
+  currentNoise = spookRisk;
+  applySavedDayPhase();
+  closeAllModals(false);
+  setTool('rod');
+  enterZone(save.lastZone && ZONES[save.lastZone] ? save.lastZone : 'forest');
+  updateHUD();
+  updateFishingTips();
+  updateProfileLabel();
+  armedEraseSlot = null;
+  toast(`${save.profileName} loaded.`, 'success');
+  setStatus(`Field record: ${save.profileName}. Everything you gather from here is written to slot ${slot}.`);
+}
+
+function eraseProfile(slot) {
+  if (!SAVE_SLOTS.includes(slot)) return;
+  if (armedEraseSlot !== slot) {
+    armedEraseSlot = slot;
+    renderProfileSlots();
+    setStatus(`Press confirm to erase slot ${slot}. This cannot be undone.`);
+    return;
+  }
+  armedEraseSlot = null;
+  if (slot === activeSlot) {
+    // Erasing the record you are standing in restarts it rather than leaving
+    // the world running on data that no longer exists.
+    activateProfile(slot, { fresh: true });
+    openProfileMenu();
+    toast(`Slot ${slot} erased and restarted.`, 'warning');
+    return;
+  }
+  try {
+    window.localStorage.removeItem(slotStorageKey(slot));
+  } catch (error) {
+    console.warn('Could not erase that field record.', error);
+  }
+  renderProfileSlots();
+  toast(`Slot ${slot} erased.`, 'warning');
+}
+
+function renameProfile(slot, rawName) {
+  const name = String(rawName || '').trim().slice(0, 22) || defaultProfileName(slot);
+  if (slot === activeSlot) {
+    save.profileName = name;
+    saveGame();
+    updateProfileLabel();
+    renderProfileSlots();
+    return;
+  }
+  const record = readRawSlot(slot);
+  if (!record) return;
+  record.profileName = name;
+  try {
+    window.localStorage.setItem(slotStorageKey(slot), JSON.stringify(record));
+  } catch (error) {
+    console.warn('Could not rename that field record.', error);
+  }
+  renderProfileSlots();
+}
+
 function serviceActive(until) {
   return Number(until || 0) > Date.now();
 }
@@ -6959,6 +8729,7 @@ function animate() {
   elapsed += delta;
   updateCameraRotation();
   updateMovement(delta);
+  GRASS_SWAY_UNIFORM.value = elapsed;
   updateSkyCycle();
   updateHeldTool();
   updateFishing(delta);
@@ -6974,6 +8745,7 @@ function animate() {
   updateFieldCharacters(delta);
   updateBuildSites(delta);
   updateVisitors(delta);
+  updateHubTraffic(delta);
   updateJenkinsLakeGate();
   updateAquarium();
   updatePollinatorGarden();
@@ -7148,6 +8920,26 @@ dom.cleaningField.addEventListener('pointerover', (event) => {
 
 dom.journalToggleButton?.addEventListener('click', () => toggleJournal());
 
+dom.profileToggleButton?.addEventListener('click', () => {
+  if (dom.profileModal?.classList.contains('is-hidden')) openProfileMenu();
+  else closeModal(dom.profileModal);
+});
+
+dom.profileSlots?.addEventListener('click', (event) => {
+  const load = event.target.closest('[data-profile-load]');
+  if (load && !load.disabled) {
+    activateProfile(Number(load.dataset.profileLoad), { fresh: load.dataset.profileFresh === 'true' });
+    return;
+  }
+  const erase = event.target.closest('[data-profile-delete]');
+  if (erase && !erase.disabled) eraseProfile(Number(erase.dataset.profileDelete));
+});
+
+dom.profileSlots?.addEventListener('change', (event) => {
+  const input = event.target.closest('[data-profile-name]');
+  if (input) renameProfile(Number(input.dataset.profileName), input.value);
+});
+
 dom.tipsToggleButton.addEventListener('click', () => {
   setTipsMenuOpen(dom.tipsMenu.classList.contains('is-hidden'));
 });
@@ -7211,6 +9003,9 @@ document.querySelectorAll('[data-close-modal]').forEach((button) => {
 });
 
 createHeldToolModel(activeTool);
+applySavedDayPhase();
+updateProfileLabel();
+renderProfileSlots();
 enterZone(currentZone);
 updateHUD();
 setStatus('Find the car to choose a destination. The field is quiet for now.');
