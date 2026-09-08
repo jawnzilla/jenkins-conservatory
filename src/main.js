@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import './style.css';
 import './interaction-feedback.css';
 
@@ -636,14 +637,89 @@ function distanceTo(position) {
   return player.distanceTo(position);
 }
 
+// ---------------------------------------------------------------------------
+// Shared geometry and material cache.
+//
+// The world is assembled from a few hundred distinct shapes repeated thousands
+// of times: Jenkins Lake alone asks for the same pine trunk 375 times and the
+// same foliage blob 532 times. Building each one fresh gave every mesh its own
+// geometry and its own material, and so its own draw call — 6,611 of them for
+// 751k triangles, about 113 triangles a call, with the GPU idle and the CPU
+// buried in state changes. Keying both by their parameters lets every repeat
+// share one upload and one shader binding.
+//
+// Animated materials have to stay unique, or a single flickering lantern would
+// drag every mesh that happens to share its colour along with it. Every such
+// site in this file builds its material with `emissive` or `transparent` set,
+// so those keys opt a material out of the cache on their own; `unique: true`
+// forces a private material for anything that needs one in future.
+// ---------------------------------------------------------------------------
+const geometryCache = new Map();
+const materialCache = new Map();
+
+// Keys that mark a material as one somebody animates. Kept deliberately wide:
+// a material wrongly left unique costs one draw call, while one wrongly shared
+// is a rendering bug that shows up far from the code that caused it.
+const UNSHAREABLE_MATERIAL_KEYS = new Set([
+  'unique', 'emissive', 'emissiveIntensity', 'transparent', 'opacity',
+  'map', 'alphaMap', 'envMap', 'normalMap', 'bumpMap', 'emissiveMap'
+]);
+
+function cacheToken(value) {
+  return `${typeof value}:${String(value)}`;
+}
+
+function sharedGeometry(type, ...args) {
+  const key = `${type}|${args.map(cacheToken).join(',')}`;
+  let geometry = geometryCache.get(key);
+  if (!geometry) {
+    geometry = new THREE[`${type}Geometry`](...args);
+    geometry.userData.shared = true;
+    geometryCache.set(key, geometry);
+  }
+  return geometry;
+}
+
+// Returns null when the material must not be shared, which is also the signal
+// to skip the cache entirely rather than to compute a key nobody can reuse.
+function materialCacheKey(color, options) {
+  // Foliage and bark tints arrive as THREE.Color instances off `clone().offsetHSL()`,
+  // and they are the bulk of every outdoor zone. The material copies the colour into
+  // its own instance at construction, so later edits to the caller's object never
+  // reach it and hashing the hex is safe.
+  const tint = color?.isColor ? color.getHex() : color;
+  if (typeof tint !== 'number' && typeof tint !== 'string') return null;
+  const parts = [];
+  for (const name of Object.keys(options).sort()) {
+    if (UNSHAREABLE_MATERIAL_KEYS.has(name)) return null;
+    const value = options[name];
+    // Textures, colours and callbacks have no stable key and may be mutated by
+    // whoever owns them, so anything non-primitive drops out of the cache.
+    if (value !== null && (typeof value === 'object' || typeof value === 'function')) return null;
+    parts.push(`${name}=${cacheToken(value)}`);
+  }
+  return `${cacheToken(tint)}|${parts.join('|')}`;
+}
+
 function mat(color, options = {}) {
-  return new THREE.MeshStandardMaterial({
+  const key = materialCacheKey(color, options);
+  if (key !== null) {
+    const cached = materialCache.get(key);
+    if (cached) return cached;
+  }
+  const { unique, ...settings } = options;
+  const material = new THREE.MeshStandardMaterial({
     color,
     roughness: 0.88,
     metalness: 0,
     flatShading: true,
-    ...options
+    ...settings
   });
+  if (key !== null) {
+    material.userData.shared = true;
+    materialCache.set(key, material);
+  }
+  return material;
 }
 
 function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1]) {
@@ -753,19 +829,19 @@ function resolveWorldCollisions() {
 }
 
 function box(parent, size, color, position, options = {}) {
-  return addMesh(parent, new THREE.BoxGeometry(...size), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Box', ...size), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function cylinder(parent, radiusTop, radiusBottom, height, color, position, options = {}) {
-  return addMesh(parent, new THREE.CylinderGeometry(radiusTop, radiusBottom, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Cylinder', radiusTop, radiusBottom, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function sphere(parent, radius, color, position, options = {}) {
-  return addMesh(parent, new THREE.SphereGeometry(radius, options.widthSegments || 10, options.heightSegments || 7), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Sphere', radius, options.widthSegments || 10, options.heightSegments || 7), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function cone(parent, radius, height, color, position, options = {}) {
-  return addMesh(parent, new THREE.ConeGeometry(radius, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Cone', radius, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function makeLabel(text, color = '#d8ef85', background = '#1a3023', scale = 1.4) {
@@ -1136,7 +1212,7 @@ function updateSunPosition() {
 }
 
 function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
-  return addMesh(parent, new THREE.TorusGeometry(majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
+  return addMesh(parent, sharedGeometry('Torus', majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
 }
 
 function triggerToolAction(name, duration = 0.45) {
@@ -2134,6 +2210,119 @@ function createLakeCarInterior() {
   return interior;
 }
 
+
+// ---------------------------------------------------------------------------
+// Static scenery batching.
+//
+// Trees, shrubs, logs, stumps and loose rocks are the bulk of every outdoor
+// zone: Jenkins Lake alone places 774 pines and 212 branch trees. None of them
+// move, light up, or get raycast — their colliders are separate data and their
+// interaction markers are separate groups — but three.js still issues one draw
+// call per Mesh, so they cost thousands of calls however well their geometry
+// and materials are shared.
+//
+// Staging them here bakes each mesh's transform into a copy of its geometry and
+// files it under its material; the flush merges every bucket into a single mesh.
+// It is the same trick the grass blades already use, applied to the props.
+// ---------------------------------------------------------------------------
+const staticPropBatch = new Map();
+let staticPropMeshes = [];
+
+// Merging every prop of one material into a single mesh would hand the GPU one
+// object the size of the zone, which no frustum can cull — the first cut of this
+// traded 3,300 draw calls for 40k extra triangles drawn behind the camera. So the
+// batch is keyed by material *and* by a coarse grid cell: near enough to one call
+// per material for the props in view, while everything behind you still drops out.
+const STATIC_PROP_CELL = 32;
+const stagedPropPosition = new THREE.Vector3();
+
+// Always on in play. The automated visual check flips it off to render the same
+// view unbatched, which is the only way to prove the merge moved nothing.
+let staticBatchingEnabled = true;
+
+function stageStaticProp(group) {
+  if (!staticBatchingEnabled) {
+    world.add(group);
+    return group;
+  }
+  group.updateMatrixWorld(true);
+  const meshes = [];
+  group.traverse((object) => { if (object.isMesh) meshes.push(object); });
+  for (const object of meshes) {
+    // The cached source geometry stays shared and untouched; the batch owns only
+    // this transformed copy, which is what gets disposed on the way out.
+    const baked = object.geometry.clone().applyMatrix4(object.matrixWorld);
+    // clone() carries userData over, so the copy would otherwise claim to be a
+    // cached original and the teardown walk would decline to release it.
+    baked.userData.shared = false;
+    stagedPropPosition.setFromMatrixPosition(object.matrixWorld);
+    const cellX = Math.floor(stagedPropPosition.x / STATIC_PROP_CELL);
+    const cellZ = Math.floor(stagedPropPosition.z / STATIC_PROP_CELL);
+    const key = `${cellX}:${cellZ}`;
+    let cell = staticPropBatch.get(key);
+    if (!cell) {
+      cell = new Map();
+      staticPropBatch.set(key, cell);
+    }
+    let bucket = cell.get(object.material);
+    if (!bucket) {
+      bucket = [];
+      cell.set(object.material, bucket);
+    }
+    bucket.push(baked);
+  }
+  for (const object of meshes) object.removeFromParent();
+  // Sprites and lights have no geometry to merge, so a prop that carries any —
+  // a fence with a gate sign, say — keeps its group in the world for their sake.
+  // Without this the batcher would silently swallow them along with the meshes.
+  let carriesNonMesh = false;
+  group.traverse((object) => { if (object !== group && !object.isMesh) carriesNonMesh = true; });
+  if (carriesNonMesh) world.add(group);
+  return group;
+}
+
+function flushStaticProps() {
+  for (const cell of staticPropBatch.values()) {
+   for (const [material, geometries] of cell) {
+    // A single prop in a bucket has nothing to gain from merging and would only
+    // pay the copy, so it goes in as it stands.
+    const merged = geometries.length > 1 ? mergeGeometries(geometries, false) : geometries[0];
+    if (!merged) {
+      // Mismatched attribute sets cannot merge. Rather than drop the scenery,
+      // fall back to one mesh apiece and leave the draw calls on the table.
+      for (const geometry of geometries) {
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        world.add(mesh);
+        staticPropMeshes.push(mesh);
+      }
+      continue;
+    }
+    if (merged !== geometries[0]) for (const geometry of geometries) geometry.dispose();
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    world.add(mesh);
+    staticPropMeshes.push(mesh);
+   }
+  }
+  staticPropBatch.clear();
+}
+
+// Merged buffers are built per zone and owned outright, so they have to be
+// released rather than left resident when the zone is torn down.
+function disposeStaticProps() {
+  for (const mesh of staticPropMeshes) mesh.geometry.dispose();
+  staticPropMeshes = [];
+  for (const cell of staticPropBatch.values()) {
+    for (const geometries of cell.values()) {
+      for (const geometry of geometries) geometry.dispose();
+    }
+  }
+  staticPropBatch.clear();
+}
+
 function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
@@ -2142,7 +2331,7 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
   cone(group, 1.15, 2.3, foliage, [0, 2.65, 0], { segments: 8 });
   cone(group, 0.9, 1.9, new THREE.Color(foliage).offsetHSL(0, 0, 0.06), [0, 3.8, 0.1], { segments: 8 });
   cone(group, 0.62, 1.6, new THREE.Color(foliage).offsetHSL(0, 0, 0.1), [0, 4.75, 0], { segments: 8 });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.72 * scale, { zone: currentZone });
   return group;
 }
@@ -2167,7 +2356,7 @@ function createBranchTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b
   makeBranch(5.35, 2.25, 1.18, 0.74);
   sphere(group, 0.88, foliage, [0, 5.08, 0], { scale: [1.15, 0.46, 1.02], widthSegments: 9, heightSegments: 5 });
   sphere(group, 0.57, leafColor, [0.08, 5.68, 0.03], { scale: [1.12, 0.5, 0.95], widthSegments: 8, heightSegments: 5 });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.64 * scale, { zone: currentZone });
   return group;
 }
@@ -2185,6 +2374,7 @@ const backgroundForestMaterial = new THREE.MeshStandardMaterial({
   metalness: 0,
   flatShading: true
 });
+backgroundForestMaterial.userData.shared = true;
 let backgroundForestParts = null;
 let backgroundForestMeshes = [];
 
@@ -2665,7 +2855,7 @@ function createFence(x, z, width, depth, color = 0x806e53, solid = true, gate = 
     gateSign.position.set(gate.offset, 2.42, depth / 2);
     group.add(gateSign);
   }
-  world.add(group);
+  stageStaticProp(group);
   if (solid) {
     addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
     for (const [from, to] of spans) {
@@ -2956,7 +3146,11 @@ function updateAquarium() {
 }
 
 function createPath(x, z, width, length, color = 0xb3a47a) {
-  box(world, [width, 0.04, length], color, [x, 0, z]);
+  // Paths are flat slabs that share a handful of colours across a zone, so they
+  // merge almost perfectly once staged.
+  const group = new THREE.Group();
+  box(group, [width, 0.04, length], color, [x, 0, z]);
+  stageStaticProp(group);
 }
 
 function createFieldResearchBoat() {
@@ -3315,8 +3509,12 @@ function buildForest() {
 }
 
 function addRock(x, y, z, scale, color) {
-  const rock = addMesh(world, new THREE.DodecahedronGeometry(scale, 0), mat(color), [x, y, z], [0.1, 0.25, 0.08], [1.3, 0.8, 1]);
+  // Built into a staging group rather than straight into the world so the rock
+  // joins the static merge; the collider it registers is unaffected either way.
+  const group = new THREE.Group();
+  const rock = addMesh(group, sharedGeometry('Dodecahedron', scale, 0), mat(color), [x, y, z], [0.1, 0.25, 0.08], [1.3, 0.8, 1]);
   rock.castShadow = true;
+  stageStaticProp(group);
   addCollider(x, z, scale * 1.05, { zone: currentZone });
   return rock;
 }
@@ -3361,7 +3559,7 @@ function createGroundFoliage(x, z, scale = 1, color = 0x4d8055) {
     const height = (0.34 + (index % 3) * 0.16) * scale;
     cone(foliage, 0.12 * scale, height, new THREE.Color(color).offsetHSL(index * 0.015, 0, (index % 2) * 0.05), [Math.sin(index * 1.7) * 0.18 * scale, height * 0.5, Math.cos(index * 1.7) * 0.15 * scale], { segments: 5 });
   }
-  world.add(foliage);
+  stageStaticProp(foliage);
   return foliage;
 }
 
@@ -3394,6 +3592,7 @@ const grassMaterial = new THREE.MeshStandardMaterial({
   roughness: 1,
   metalness: 0
 });
+grassMaterial.userData.shared = true;
 grassMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.grassSwayTime = GRASS_SWAY_UNIFORM;
   shader.vertexShader = shader.vertexShader
@@ -3656,7 +3855,7 @@ function createDownedLog(x, z, options = {}) {
     segments: 6,
     rotation: [0.9, 0.4, 0.5]
   });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, Math.max(radius, 0.42), {
     type: 'rect',
     halfWidth: Math.abs(Math.cos(angle)) * length * 0.5 + radius * 0.55,
@@ -3702,7 +3901,7 @@ function createTreeStump(x, z, options = {}) {
       [(random() - 0.5) * radius, height * (0.5 + random() * 0.4), (random() - 0.5) * radius],
       { scale: [1.2, 0.42, 1.1], widthSegments: 7, heightSegments: 5 });
   }
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, radius * 1.15, { zone: currentZone });
   return group;
 }
@@ -3731,7 +3930,7 @@ function createShrub(x, z, options = {}) {
       [random() * 0.6, random() * 2, random() * 0.5],
       [1.15, 0.82, 1.1]);
   }
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.46 * scale, { zone: currentZone });
   return group;
 }
@@ -6267,10 +6466,33 @@ function createAnimalModel(species, scale = 1) {
   return group;
 }
 
+// Clearing the scene graph only drops JavaScript references; the buffers and
+// textures behind them stay resident on the GPU until something disposes them.
+// A full tour of the four zones used to strand 11,158 geometries and 147 label
+// textures, every tour, for as long as the tab was open — and fast travel makes
+// that tour the core loop. Anything the caches own is left alone: it is keyed,
+// bounded, and deliberately outlives the zone that first asked for it.
+function releaseZoneResources(root) {
+  root.traverse((object) => {
+    if (object.geometry && !object.geometry.userData.shared) object.geometry.dispose();
+    for (const material of [].concat(object.material || [])) {
+      if (!material || material.userData.shared) continue;
+      // Label sprites carry a CanvasTexture apiece, which is the whole of the
+      // texture growth; a material dispose does not take its maps with it.
+      for (const value of Object.values(material)) {
+        if (value && value.isTexture) value.dispose();
+      }
+      material.dispose();
+    }
+  });
+}
+
 function resetWorld() {
   clearDebugCollisionVisuals();
   disposeGrassMeshes();
+  disposeStaticProps();
   disposeBackgroundForest();
+  releaseZoneResources(world);
   while (world.children.length) {
     world.remove(world.children[0]);
   }
@@ -6344,6 +6566,9 @@ function enterZone(zoneKey, announce = false) {
   // sprouts through a wall, a trunk or a shop display.
   dressZoneFlora(zoneKey);
   flushGrassBlades();
+  // Everything staged by the scenery producers during the build above lands in
+  // the world here, as one mesh per material rather than one per prop.
+  flushStaticProps();
   if (debugCollisionVisible) rebuildDebugCollisionVisuals();
   camera.position.copy(player);
   updateCameraRotation();
@@ -9011,3 +9236,57 @@ updateHUD();
 setStatus('Find the car to choose a destination. The field is quiet for now.');
 window.setTimeout(() => dom.loadingScreen.classList.add('is-loaded'), 420);
 animate();
+
+// ---------------------------------------------------------------------------
+// Test probe.
+//
+// The automated checks need to drive zones and read renderer counters, and this
+// module deliberately exports nothing. Rather than let the checks rewrite the
+// bundle in flight — which is what they used to do, and why they could only run
+// against a hand-started dev server — the app publishes a narrow read-only
+// handle when it is asked for one. The flag has to be passed in the URL, so a
+// normal page load never attaches it.
+// ---------------------------------------------------------------------------
+if (new URLSearchParams(window.location.search).has('probe')) {
+  window.__conservatoryProbe = {
+    THREE,
+    renderer,
+    scene,
+    world,
+    camera,
+    enterZone,
+    saveGame,
+    loadSave,
+    get save() { return save; },
+    get colliders() { return colliders; },
+    get interactables() { return interactables; },
+    get currentZone() { return currentZone; },
+    caches: { geometry: geometryCache, material: materialCache },
+    setStaticBatching(enabled) { staticBatchingEnabled = enabled; },
+    // Counts what is actually resident on the GPU against what the live scene
+    // graph still references. The gap between the two is leaked memory.
+    resourceCensus() {
+      const geometries = new Set();
+      const materials = new Set();
+      const textures = new Set();
+      scene.traverse((object) => {
+        if (object.geometry) geometries.add(object.geometry);
+        for (const material of [].concat(object.material || [])) {
+          materials.add(material);
+          for (const value of Object.values(material)) {
+            if (value && value.isTexture) textures.add(value);
+          }
+        }
+      });
+      return {
+        residentGeometries: renderer.info.memory.geometries,
+        residentTextures: renderer.info.memory.textures,
+        reachableGeometries: geometries.size,
+        reachableMaterials: materials.size,
+        reachableTextures: textures.size,
+        drawCalls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles
+      };
+    }
+  };
+}

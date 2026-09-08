@@ -15,7 +15,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Pages publishes whatever this workflow uploads, so the checks gate it rather
+  # than run alongside it: a red build must not reach the public URL.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
