@@ -4,6 +4,11 @@ import {
   startAudio, resumeAudio, playCue, setZoneAmbience, setAmbienceConditions,
   updateFootsteps, setAudioSettings, getAudioSettings, isAudioReady
 } from './audio.js';
+import {
+  COMMISSIONS, commissionProgress, trackedCommission, readyToClaim,
+  openCommissions, isComplete as isCommissionComplete, isUnlocked as isCommissionUnlocked,
+  overallProgress as commissionOverall
+} from './commissions.js';
 import './style.css';
 import './interaction-feedback.css';
 
@@ -262,6 +267,10 @@ const DEFAULT_SAVE = {
   // else the player sets, and so each field record can keep its own.
   audioMuted: false,
   audioVolume: 0.7,
+  // Commissions handed in, and how far the first-run walkthrough got. Both are
+  // per record, so a second field record starts the arc over.
+  commissionsDone: [],
+  onboardingStep: 0,
   coins: 120,
   supplies: {
     worms: 6,
@@ -336,6 +345,16 @@ const dom = {
   actionHint: document.querySelector('#action-hint'),
   soundToggle: document.querySelector('#sound-toggle-button'),
   soundVolume: document.querySelector('#sound-volume'),
+  commissionCard: document.querySelector('#commission-card'),
+  commissionCount: document.querySelector('#commission-count'),
+  commissionBody: document.querySelector('#commission-body'),
+  onboarding: document.querySelector('#onboarding'),
+  onboardingTitle: document.querySelector('#onboarding-title'),
+  onboardingCopy: document.querySelector('#onboarding-copy'),
+  onboardingKeys: document.querySelector('#onboarding-keys'),
+  onboardingStep: document.querySelector('#onboarding-step'),
+  onboardingNext: document.querySelector('#onboarding-next'),
+  onboardingSkip: document.querySelector('#onboarding-skip'),
   actionDock: document.querySelector('#action-dock'),
   primaryAction: document.querySelector('#primary-action'),
   reelAction: document.querySelector('#reel-action'),
@@ -609,6 +628,8 @@ function loadSave(slot = activeSlot) {
       brooksAssignment: parsed.brooksAssignment || 'conservatory',
       graysonResearch: Number(parsed.graysonResearch || 0),
       profileName: parsed.profileName || defaultProfileName(slot),
+      commissionsDone: Array.isArray(parsed.commissionsDone) ? parsed.commissionsDone.slice() : [],
+      onboardingStep: Number(parsed.onboardingStep || 0),
       audioMuted: Boolean(parsed.audioMuted),
       audioVolume: Number.isFinite(Number(parsed.audioVolume)) ? clamp(Number(parsed.audioVolume), 0, 1) : DEFAULT_SAVE.audioVolume,
       dayPhase: Number.isFinite(Number(parsed.dayPhase)) ? Number(parsed.dayPhase) : null
@@ -2693,6 +2714,7 @@ function lootNatureResource(resource) {
   resource.group.visible = false;
   resource.marker.visible = false;
   save.ingredients[resource.resourceKey] = (save.ingredients[resource.resourceKey] || 0) + 1;
+  checkCommissions();
   saveGame();
   updateHUD();
   const label = resource.label.replace(/^Loot |^Pick |^Pick up /i, '');
@@ -6153,6 +6175,7 @@ function completeCleaning() {
   enclosure.cleaned = true;
   updateEnclosureVisual(enclosure);
   save.cleanedEnclosures[enclosure.id] = true;
+  checkCommissions();
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -6819,6 +6842,7 @@ function landFish() {
   const previous = save.records[species];
   const isRecord = !previous || record.weight > previous.weight || (record.weight === previous.weight && record.size > previous.size);
   save.caught[species] = (save.caught[species] || 0) + 1;
+  checkCommissions();
   save.ingredients[species] = (save.ingredients[species] || 0) + 1;
   save.coins += species === 'trout' ? 18 : 22;
   if (isRecord) save.records[species] = record;
@@ -6968,6 +6992,7 @@ function catchCritter(critter) {
   critter.caught = true;
   spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught[critter.species] = (save.caught[critter.species] || 0) + 1;
+  checkCommissions();
   save.coins += 15;
   world.remove(critter.group);
   saveGame();
@@ -6993,6 +7018,7 @@ function catchBug(bug) {
   bug.bugModel.visible = false;
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+  checkCommissions();
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -7095,6 +7121,7 @@ function completeBugCapture(bug) {
   bug.bugModel.visible = false;
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+  checkCommissions();
   if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
   save.coins += bug.species === 'worm' ? 4 : 8;
   saveGame();
@@ -8119,6 +8146,202 @@ function journalRow(label, value, dim = false) {
   return `<div class="journal-row"><span>${label}</span><em class="${dim ? 'is-dim' : ''}">${value}</em></div>`;
 }
 
+
+// --- Field commissions ---------------------------------------------------------
+// The commissions module only reads a save and reports progress; everything that
+// changes the world lives here. Rewards are paid on hand-in, and hand-in happens
+// automatically the moment the goals are met — there is no turn-in walk, because
+// the givers already patrol their own areas and chasing them down would punish
+// the player for finishing.
+
+function escapeText(value) {
+  return String(value).replace(/[&<>"]/g, (character) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]
+  ));
+}
+
+function grantCommissionReward(commission) {
+  const reward = commission.reward || {};
+  const lines = [];
+  if (reward.coins) {
+    save.coins += reward.coins;
+    lines.push(`${reward.coins}¢`);
+  }
+  for (const [key, amount] of Object.entries(reward.supplies || {})) {
+    save.supplies[key] = (save.supplies[key] || 0) + amount;
+    const item = SHOP_ITEMS.find((candidate) => candidate.key === key);
+    lines.push(`${amount} × ${item ? item.label.toLowerCase() : key}`);
+  }
+  return lines;
+}
+
+// Called wherever progress could have moved. Cheap enough to run on any change:
+// it reads a handful of counters and does nothing when nothing has completed.
+function checkCommissions({ announce = true } = {}) {
+  const ready = readyToClaim(save);
+  if (!ready.length) {
+    renderCommissionCard();
+    return;
+  }
+  for (const commission of ready) {
+    save.commissionsDone.push(commission.id);
+    const reward = grantCommissionReward(commission);
+    if (announce) {
+      playCue('objective');
+      const payout = reward.length ? ` Paid: ${reward.join(', ')}.` : '';
+      toast(`${commission.giver} signs off: ${commission.title}.${payout}`, 'success');
+      setStatus(`Commission complete — ${commission.title}. ${describeNextCommission()}`);
+    }
+  }
+  saveGame();
+  updateHUD();
+  renderCommissionCard();
+}
+
+function describeNextCommission() {
+  const next = trackedCommission(save);
+  if (!next) return 'Every commission is signed off. The field is yours.';
+  return `${next.giver} has something next: ${next.title}.`;
+}
+
+function renderCommissionCard() {
+  if (!dom.commissionCard) return;
+  const tracked = trackedCommission(save);
+  const totals = commissionOverall(save);
+  dom.commissionCount.textContent = `${totals.done} / ${totals.total}`;
+  if (!tracked) {
+    dom.commissionCard.classList.remove('is-hidden', 'is-ready');
+    dom.commissionBody.innerHTML = `<strong class="commission-title">Survey complete</strong>
+      <span class="commission-hint">Every commission is signed off. Keep the field as you like it.</span>`;
+    return;
+  }
+  const { goals, complete } = commissionProgress(tracked, save);
+  dom.commissionCard.classList.remove('is-hidden');
+  dom.commissionCard.classList.toggle('is-ready', complete);
+  const rows = goals.map((goal) => `
+    <div class="commission-goal ${goal.done ? 'is-done' : ''}">
+      <span class="commission-goal-label">
+        <span class="commission-goal-mark">${goal.done ? '✓' : '·'}</span>
+        <span>${escapeText(goal.label)}</span>
+      </span>
+      <span class="commission-goal-track">
+        <span class="commission-goal-bar"><span style="width:${Math.round((goal.have / goal.need) * 100)}%"></span></span>
+        <span class="commission-goal-count">${goal.have}/${goal.need}</span>
+      </span>
+    </div>`).join('');
+  dom.commissionBody.innerHTML = `
+    <span class="commission-giver">${escapeText(tracked.giver)}</span>
+    <strong class="commission-title">${escapeText(tracked.title)}</strong>
+    ${rows}
+    ${complete ? '<span class="commission-ready">READY TO SIGN OFF</span>' : `<span class="commission-hint">${escapeText(tracked.hint)}</span>`}`;
+}
+
+function renderCommissionJournal() {
+  const rows = COMMISSIONS.map((commission) => {
+    const done = isCommissionComplete(commission, save);
+    const unlocked = isCommissionUnlocked(commission, save);
+    const { goals } = commissionProgress(commission, save);
+    const summary = done
+      ? 'Signed off'
+      : unlocked
+        ? goals.map((goal) => `${escapeText(goal.label)} ${goal.have}/${goal.need}`).join(' · ')
+        : 'Locked — finish the commissions before it';
+    return `<div class="journal-commission ${unlocked ? '' : 'is-locked'}">
+      <span class="journal-commission-mark">${done ? '✓' : unlocked ? '·' : '×'}</span>
+      <span><strong>${escapeText(commission.title)}</strong><small>${escapeText(commission.giver)} · ${summary}</small></span>
+      <span class="journal-chip">${done ? 'DONE' : unlocked ? 'OPEN' : 'LOCKED'}</span>
+    </div>`;
+  }).join('');
+  const totals = commissionOverall(save);
+  return `<div class="journal-section">
+    <div class="card-heading"><span class="eyebrow">FIELD COMMISSIONS</span><span class="journal-chip">${totals.done} / ${totals.total}</span></div>
+    ${rows}
+  </div>`;
+}
+
+
+// --- First-run walkthrough -----------------------------------------------------
+// A new arrival used to land in the forest with a rod and no idea that any of
+// the other systems existed; the journal was the only place that said so, and it
+// assumes you already know what you are looking at. This introduces one thing at
+// a time and then gets out of the way — the commission chain takes over from
+// there, which is why it stops at the point the first commission can teach the
+// rest by doing.
+//
+// It deliberately does not lock the field. Reading about controls is worse than
+// using them, so the card sits above the action dock and the player can walk,
+// look and click while it is up.
+const ONBOARDING_STEPS = [
+  {
+    title: 'Welcome to the field',
+    copy: 'You are standing in it. Click once to take the mouse and look around, then walk with the keys below. Everything here runs on your own machine and saves as you go.',
+    keys: ['W A S D — move', 'Mouse — look', 'Esc — release the mouse']
+  },
+  {
+    title: 'The field kit',
+    copy: 'Three tools cover most of the work. The rod fishes, the net takes animals and insects once you are close enough, and the magnifying glass observes the small things properly before you catch them.',
+    keys: ['1 — rod', '2 — net', '3 — magnifying glass', 'Left click — use']
+  },
+  {
+    title: 'Go quietly',
+    copy: 'Animals hear you coming. Holding Shift halves your pace and your noise, and the meter on the right tells you how much of a racket you are making. Most things worth catching need it.',
+    keys: ['Shift — sneak', 'Noise meter — right rail']
+  },
+  {
+    title: 'The field keeps its own hours',
+    copy: 'Owls and raccoons come out at dusk, butterflies and squirrels work in daylight, and anything off duty leaves the field until its hours come round. Sleep in the cabin bunk to jump the clock.',
+    keys: ['J — field journal', 'E — interact', 'Clock — top bar']
+  },
+  {
+    title: 'Somewhere to start',
+    copy: 'Grayson wants one fish for the record. Your commission is tracked in the left rail — follow it, and the rest of the field introduces itself as you go.',
+    keys: ['E — talk to people', '⛁ — save records', 'M — mute audio']
+  }
+];
+
+function onboardingActive() {
+  return Number(save.onboardingStep || 0) < ONBOARDING_STEPS.length;
+}
+
+function renderOnboarding() {
+  if (!dom.onboarding) return;
+  if (!onboardingActive()) {
+    dom.onboarding.classList.add('is-hidden');
+    return;
+  }
+  const index = Number(save.onboardingStep || 0);
+  const step = ONBOARDING_STEPS[index];
+  dom.onboarding.classList.remove('is-hidden');
+  dom.onboardingTitle.textContent = step.title;
+  dom.onboardingCopy.textContent = step.copy;
+  dom.onboardingKeys.replaceChildren(...step.keys.map((key) => {
+    const item = document.createElement('li');
+    item.textContent = key;
+    return item;
+  }));
+  dom.onboardingStep.textContent = `STEP ${index + 1} OF ${ONBOARDING_STEPS.length}`;
+  dom.onboardingNext.textContent = index === ONBOARDING_STEPS.length - 1 ? 'INTO THE FIELD' : 'NEXT';
+}
+
+function advanceOnboarding(step = 1) {
+  save.onboardingStep = Math.min(ONBOARDING_STEPS.length, Number(save.onboardingStep || 0) + step);
+  playCue('ui');
+  saveGame();
+  renderOnboarding();
+  if (!onboardingActive()) setStatus(describeNextCommission());
+}
+
+function skipOnboarding() {
+  save.onboardingStep = ONBOARDING_STEPS.length;
+  playCue('ui');
+  saveGame();
+  renderOnboarding();
+  setStatus(describeNextCommission());
+}
+
+if (dom.onboardingNext) dom.onboardingNext.addEventListener('click', () => { resumeAudio(); advanceOnboarding(); });
+if (dom.onboardingSkip) dom.onboardingSkip.addEventListener('click', () => { resumeAudio(); skipOnboarding(); });
+
 function renderJournal() {
   if (!dom.journalBody) return;
   const phase = getDayPhase();
@@ -8165,6 +8388,8 @@ function renderJournal() {
         <span>${DAY_PERIOD_LABELS[nextPeriod]} begins in ${formatDuration(getPeriodSecondsRemaining(phase))}. ${outNow.length} of ${landSpecies.length} land species are out right now.</span>
       </span>
     </div>
+
+    ${renderCommissionJournal()}
 
     <div class="journal-section">
       <p class="eyebrow">FIELD RECORD</p>
@@ -8338,6 +8563,7 @@ function cookRecipe(recipeKey) {
   for (const line of lines) spendPantry(line.resolvedKey, line.amount);
   for (const output of recipe.outputs) {
     save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
+    checkCommissions();
   }
   saveGame();
   updateHUD();
@@ -8436,6 +8662,7 @@ function buildProject(projectKey) {
     save.materials[key] = Math.max(0, materialCount(key) - amount);
   }
   placeBuild(site, project.key, true);
+  checkCommissions();
   renderBuildMenu();
 }
 
@@ -8615,6 +8842,11 @@ function activateProfile(slot, options = {}) {
   spookRisk = 0.02;
   currentNoise = spookRisk;
   applySavedDayPhase();
+  // Each record carries its own audio preference, walkthrough position and
+  // commission chain, so all three follow the slot rather than the session.
+  applyAudioPreferences();
+  renderOnboarding();
+  checkCommissions({ announce: false });
   closeAllModals(false);
   setTool('rod');
   enterZone(save.lastZone && ZONES[save.lastZone] ? save.lastZone : 'forest');
@@ -9340,6 +9572,10 @@ if (dom.soundVolume) {
 createHeldToolModel(activeTool);
 applySavedDayPhase();
 applyAudioPreferences();
+renderOnboarding();
+// Counted rather than announced on boot: a returning record should not be told
+// again about work it finished last session.
+checkCommissions({ announce: false });
 updateProfileLabel();
 renderProfileSlots();
 enterZone(currentZone);
@@ -9375,6 +9611,13 @@ if (new URLSearchParams(window.location.search).has('probe')) {
     caches: { geometry: geometryCache, material: materialCache },
     setStaticBatching(enabled) { staticBatchingEnabled = enabled; },
     audio: { getAudioSettings, playCue, startAudio, isReady: () => isAudioReady() },
+    commissions: {
+      tracked: () => trackedCommission(save),
+      open: () => openCommissions(save).map((commission) => commission.id),
+      check: () => checkCommissions({ announce: false }),
+      render: () => renderCommissionCard()
+    },
+    onboarding: { active: () => onboardingActive(), advance: () => advanceOnboarding(), skip: () => skipOnboarding() },
     // Counts what is actually resident on the GPU against what the live scene
     // graph still references. The gap between the two is leaked memory.
     resourceCensus() {

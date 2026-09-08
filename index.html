@@ -46,7 +46,28 @@
               <span id="lock-label">CLICK TO ENTER FIELD MODE</span>
             </div>
           </div>
+          <div id="commission-card" class="panel commission-card is-hidden" aria-live="polite">
+            <div class="card-heading">
+              <span class="eyebrow">FIELD COMMISSION</span>
+              <span id="commission-count" class="commission-count">0 / 0</span>
+            </div>
+            <div id="commission-body"></div>
+          </div>
         </section>
+
+        <div id="onboarding" class="onboarding is-hidden" role="dialog" aria-labelledby="onboarding-title" aria-describedby="onboarding-copy">
+          <div class="panel onboarding-panel">
+            <span class="eyebrow">FIRST DAY IN THE FIELD</span>
+            <h2 id="onboarding-title"></h2>
+            <p id="onboarding-copy"></p>
+            <ul id="onboarding-keys" class="onboarding-keys"></ul>
+            <div class="onboarding-actions">
+              <span id="onboarding-step" class="onboarding-step"></span>
+              <button id="onboarding-skip" class="help-toggle" type="button">SKIP</button>
+              <button id="onboarding-next" class="help-toggle onboarding-next" type="button">NEXT</button>
+            </div>
+          </div>
+        </div>
 
         <aside id="fishing-tips" class="panel fishing-tips is-hidden" aria-live="polite">
           <div class="card-heading">

@@ -4,6 +4,9 @@ A low-poly Three.js visual slice for real-time wildlife fieldwork.
 
 ## Current slice
 
+- A chain of nine field commissions from Grayson, Brynlee, Brax, Brooks and Mara, tracked in the left rail and listed in the journal. Each one introduces a system, reads progress off work you have already done, and pays out the moment its goals are met.
+- A first-run walkthrough that introduces one thing at a time and then gets out of the way. It never locks the field.
+- Procedural audio throughout: per-zone ambience that follows the clock, water that comes up as you near a shore, birds by day and owls and frogs after dark, footsteps that quieten when you sneak, and the fishing loop sounded out beat by beat. Mute and volume are in the top bar and on `M`.
 - First-person desktop browser controls with click-to-lock pointer look.
 - Three destination zones—supply store, forest lake, and zoo showcase—each entered through its own connected parking lot: marked stalls either side of a drive aisle, and a public street running past the back that only traffic uses.
 - Car-based fast travel between every destination zone; there is no standalone parking-lot scene.
@@ -36,6 +39,28 @@ npm run dev -- --host 0.0.0.0
 
 Open the printed local URL. The `--host` flag makes the Vite server reachable from another device on the same network.
 
+## Checks
+
+```bash
+npm test
+```
+
+This builds the bundle and drives it in headless Chromium. The checks cover the
+render budget per zone, GPU resource drift across zone changes, a smoke pass
+over every zone, the audio engine and cue palette, the commission chain, and the
+progression flow end to end. `npm run test:only` skips the rebuild.
+
+The commission checks are pure and run in-process; the rest need a browser.
+Playwright's bundled browser revision moves with every release, so
+`PLAYWRIGHT_CHROMIUM_PATH` will point the checks at a Chromium you already have:
+
+```bash
+PLAYWRIGHT_CHROMIUM_PATH=/path/to/chromium npm test
+```
+
+`.github/workflows/ci.yml` runs the same command on every push and pull request,
+and the Pages deploy now waits on it — a red build does not reach the public URL.
+
 ## Build / preview
 
 ```bash
@@ -64,4 +89,5 @@ The save system intentionally uses `localStorage` for this slice. It is device/b
 - `F`: cycle held food
 - `1 / 2 / 3`: equip rod / net / magnifying glass
 - `Left click`: cast, set hook, reel, or use the equipped tool
+- `M`: mute or unmute field audio
 - `Esc`: release pointer lock or exit an active observation
