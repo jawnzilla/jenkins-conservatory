@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  startAudio, resumeAudio, playCue, setZoneAmbience, setAmbienceConditions,
+  updateFootsteps, setAudioSettings, getAudioSettings, isAudioReady
+} from './audio.js';
 import './style.css';
 import './interaction-feedback.css';
 
@@ -254,6 +258,10 @@ const DEFAULT_SAVE = {
   // remembered along with everything else.
   dayPhase: null,
   tipsEnabled: true,
+  // Audio preferences live in the save so they survive a reload like everything
+  // else the player sets, and so each field record can keep its own.
+  audioMuted: false,
+  audioVolume: 0.7,
   coins: 120,
   supplies: {
     worms: 6,
@@ -326,6 +334,8 @@ const dom = {
   crosshair: document.querySelector('#crosshair'),
   fishingCallout: document.querySelector('#fishing-callout'),
   actionHint: document.querySelector('#action-hint'),
+  soundToggle: document.querySelector('#sound-toggle-button'),
+  soundVolume: document.querySelector('#sound-volume'),
   actionDock: document.querySelector('#action-dock'),
   primaryAction: document.querySelector('#primary-action'),
   reelAction: document.querySelector('#reel-action'),
@@ -599,6 +609,8 @@ function loadSave(slot = activeSlot) {
       brooksAssignment: parsed.brooksAssignment || 'conservatory',
       graysonResearch: Number(parsed.graysonResearch || 0),
       profileName: parsed.profileName || defaultProfileName(slot),
+      audioMuted: Boolean(parsed.audioMuted),
+      audioVolume: Number.isFinite(Number(parsed.audioVolume)) ? clamp(Number(parsed.audioVolume), 0, 1) : DEFAULT_SAVE.audioVolume,
       dayPhase: Number.isFinite(Number(parsed.dayPhase)) ? Number(parsed.dayPhase) : null
     };
   } catch (error) {
@@ -4502,6 +4514,7 @@ function createNatureRock(x, z, scale, index = 0) {
 }
 
 function lootNatureRock(loot) {
+  playCue('pickup');
   if (!loot || loot.used) return;
   loot.used = true;
   loot.group.visible = false;
@@ -6573,6 +6586,7 @@ function enterZone(zoneKey, announce = false) {
   camera.position.copy(player);
   updateCameraRotation();
   save.lastZone = zoneKey;
+  setZoneAmbience(zoneKey);
   saveGame();
   updateHUD();
   // A fresh page load cannot request pointer lock without a trusted gesture.
@@ -6684,6 +6698,7 @@ function startCast() {
     return;
   }
   fishing.phase = 'charging';
+  playCue('cast');
   fishing.charge = 0;
   triggerToolAction('rod-charge', 0.38);
   setStatus('Hold to load the cast. Aim at a water disturbance before releasing.');
@@ -6698,6 +6713,7 @@ function finishCast() {
   fishing.castLure = selectedLure;
   fishing.practice = Boolean(target?.practice && currentZone === 'zoo');
   fishing.phase = 'waiting';
+  playCue('bobber');
   fishing.castTarget = target;
   fishing.castLanding = landingPoint;
   fishing.invalidCast = !target || (!fishing.practice && (target.lure !== fishing.castLure || target.bait !== fishing.castBait));
@@ -6752,6 +6768,7 @@ function completeHooking() {
     return;
   }
   fishing.phase = 'reeling';
+  playCue('hookSet');
   fishing.reelProgress = 0.18;
   fishing.reelHeld = false;
   fishing.tensionState = 'clear';
@@ -6769,6 +6786,7 @@ function failHook(message = '') {
 }
 
 function breakFishingLine() {
+  playCue('lineSnap');
   const lure = fishing.castLure;
   if (lure) save.supplies[lure] = Math.max(0, (save.supplies[lure] || 0) - 1);
   resetFishing();
@@ -6780,6 +6798,7 @@ function breakFishingLine() {
 }
 
 function landFish() {
+  playCue('catch');
   const species = fishing.fishSpecies;
   if (fishing.practice) {
     resetFishing();
@@ -6824,6 +6843,7 @@ function updateFishing(delta) {
   }
   if (fishing.phase === 'waiting' && fishing.castTarget && elapsed >= fishing.biteAt) {
     fishing.phase = 'bite';
+    playCue('bite');
     fishing.fishSpecies = fishing.castTarget.fishSpecies;
     const fishProfile = {
       trout: { size: 13.5, weightBase: 0.7, weightRange: 4.3 },
@@ -6880,6 +6900,9 @@ function updateFishing(delta) {
       return;
     }
     const weightFactor = clamp(fishing.fishWeight / 5, 0, 1);
+    // The ratchet speeds up as the fish comes in, so the fight has an audible
+    // shape rather than one flat noise until it lands.
+    if (held) playCue('reelClick', { throttleMs: 150 - fishing.reelProgress * 70 });
     const reelRate = 0.34 - weightFactor * 0.16;
     fishing.reelProgress += delta * (held ? reelRate : -0.035);
     fishing.reelProgress = clamp(fishing.reelProgress, 0, 1);
@@ -6899,6 +6922,7 @@ function updateFishing(delta) {
 }
 
 function useNet() {
+  playCue('net');
   if (!['forest', 'store', 'zoo', 'lake'].includes(currentZone) || activeTool !== 'net') return;
   triggerToolAction('net-swing', 0.42);
   const critter = getNetCritterTarget();
@@ -7556,6 +7580,27 @@ function updateMovement(delta) {
       grounded = true;
     }
   }
+  // Footfalls follow real travel rather than a timer, so the stride stops the
+  // instant you do. Sneaking gets its own quieter, slower step for the same
+  // reason the noise meter drops: the player should hear the stealth working.
+  updateFootsteps({
+    moving,
+    sneaking,
+    delta,
+    onDock: getDockSurfaceHeight(player.x, player.z) > 0.01
+  });
+  const shoreWater = getNatureWater();
+  if (shoreWater) {
+    const radiusX = shoreWater.radiusX || shoreWater.waterRadius;
+    const radiusZ = shoreWater.radiusZ || shoreWater.waterRadius;
+    // Distance to the water's edge in radii, so one number covers both the round
+    // practice pond and the elliptical lake.
+    const reach = Math.hypot((player.x - shoreWater.centerX) / radiusX, (player.z - shoreWater.centerZ) / radiusZ);
+    setAmbienceConditions({ nearWater: clamp(1.35 - reach, 0, 1) });
+  } else {
+    setAmbienceConditions({ nearWater: 0 });
+  }
+
   const riskTarget = moving ? (sneaking ? 0.06 : 0.82) : 0.02;
   const riskRate = moving ? (sneaking ? 0.8 : 0.18) : 0.42;
   spookRisk = clamp(spookRisk + (riskTarget - spookRisk) * delta * riskRate, 0.02, 1);
@@ -7844,6 +7889,9 @@ function setStatus(message) {
 function toast(message, tone = 'success') {
   // One stable location and one current result, never a growing corner stack.
   const kind = tone === 'warning' ? 'warning' : tone === 'danger' ? 'danger' : 'success';
+  // The toast already decides what kind of news this is, so the sound follows it
+  // rather than being chosen again at every call site.
+  playCue(kind === 'danger' ? 'denied' : kind === 'warning' ? 'warning' : 'success', { throttleMs: 120 });
   const current = dom.toastStack.firstElementChild;
   window.clearTimeout(feedbackTimer);
   if (!current || current.dataset.message !== message || current.dataset.tone !== kind) {
@@ -7965,6 +8013,7 @@ function cycleFood() {
 }
 
 function openModal(element) {
+  playCue('journal');
   modalOpen = true;
   element.classList.remove('is-hidden');
   element.appendChild(feedbackHub);
@@ -8205,6 +8254,7 @@ function applyPurchase(item) {
 }
 
 function buyItem(itemKey, group) {
+  playCue('coins');
   const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
   if (!item || save.coins < item.cost) return;
   applyPurchase(item);
@@ -8273,6 +8323,7 @@ function cookAtStove() {
 }
 
 function cookRecipe(recipeKey) {
+  playCue('cook');
   const recipe = COOKING_RECIPES.find((candidate) => candidate.key === recipeKey);
   if (!recipe) return;
   if ((save.supplies.pans || 0) <= 0) {
@@ -8371,6 +8422,7 @@ function openBuildMenu(site) {
 }
 
 function buildProject(projectKey) {
+  playCue('build');
   const site = activeBuildSite;
   const project = BUILD_PROJECTS.find((candidate) => candidate.key === projectKey);
   if (!site || !project) return;
@@ -8956,6 +9008,7 @@ function animate() {
   updateMovement(delta);
   GRASS_SWAY_UNIFORM.value = elapsed;
   updateSkyCycle();
+  setAmbienceConditions({ daylight: currentDaylight });
   updateHeldTool();
   updateFishing(delta);
   updateCastPreview();
@@ -9002,6 +9055,9 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  // Moving before clicking the field is a normal way to start, and a keypress is
+  // just as trusted a gesture as the click, so audio comes up either way.
+  resumeAudio();
   const normalizedKey = rememberKey(event, true);
   if (event.code === 'F3' && !event.repeat) {
     event.preventDefault();
@@ -9039,6 +9095,7 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Digit3') setTool('magnifier');
   if (event.code === 'Digit4') setTool('food');
   if (event.code === 'KeyJ' && !event.repeat) toggleJournal();
+  if (event.code === 'KeyM' && !event.repeat) toggleMute();
   if (event.code === 'KeyB') cycleBait();
   if (event.code === 'KeyL') cycleLure();
   if (event.code === 'KeyF') cycleFood();
@@ -9090,6 +9147,10 @@ window.addEventListener('pointerup', (event) => {
 });
 
 dom.canvas.addEventListener('click', () => {
+  // A browser will not open an AudioContext without a trusted gesture, so the
+  // click that puts the player into field mode is what brings the world's sound
+  // up with it.
+  resumeAudio();
   if (!pointerLocked && !modalOpen && !qteState) activateFieldMode();
 });
 
@@ -9227,8 +9288,58 @@ document.querySelectorAll('[data-close-modal]').forEach((button) => {
   });
 });
 
+
+// --- Field audio controls ------------------------------------------------------
+// The engine holds the live values and the save holds the player's preference;
+// this keeps the two in step and is the only place that writes either.
+function applyAudioPreferences() {
+  setAudioSettings({ muted: Boolean(save.audioMuted), volume: Number(save.audioVolume) });
+  const { muted, volume } = getAudioSettings();
+  if (dom.soundToggle) {
+    dom.soundToggle.setAttribute('aria-pressed', String(muted));
+    dom.soundToggle.textContent = muted ? '🔇' : volume > 0.55 ? '🔊' : '🔉';
+    const hint = document.createElement('span');
+    hint.className = 'key-hint';
+    hint.textContent = ' · M';
+    dom.soundToggle.append(hint);
+    dom.soundToggle.title = muted ? 'Field audio muted (M)' : 'Mute field audio (M)';
+  }
+  if (dom.soundVolume) dom.soundVolume.value = String(Math.round(volume * 100));
+}
+
+function toggleMute() {
+  save.audioMuted = !save.audioMuted;
+  applyAudioPreferences();
+  saveGame();
+  // The confirmation has to come after unmuting or it plays into a muted bus.
+  if (!save.audioMuted) playCue('ui');
+  toast(save.audioMuted ? 'Field audio muted.' : 'Field audio on.', 'success');
+}
+
+function setVolume(value) {
+  save.audioVolume = clamp(Number(value) / 100, 0, 1);
+  if (save.audioVolume > 0) save.audioMuted = false;
+  applyAudioPreferences();
+  saveGame();
+}
+
+if (dom.soundToggle) {
+  dom.soundToggle.addEventListener('click', () => {
+    resumeAudio();
+    toggleMute();
+  });
+}
+if (dom.soundVolume) {
+  dom.soundVolume.addEventListener('input', (event) => {
+    resumeAudio();
+    setVolume(event.target.value);
+    playCue('ui', { throttleMs: 90 });
+  });
+}
+
 createHeldToolModel(activeTool);
 applySavedDayPhase();
+applyAudioPreferences();
 updateProfileLabel();
 renderProfileSlots();
 enterZone(currentZone);
@@ -9263,6 +9374,7 @@ if (new URLSearchParams(window.location.search).has('probe')) {
     get currentZone() { return currentZone; },
     caches: { geometry: geometryCache, material: materialCache },
     setStaticBatching(enabled) { staticBatchingEnabled = enabled; },
+    audio: { getAudioSettings, playCue, startAudio, isReady: () => isAudioReady() },
     // Counts what is actually resident on the GPU against what the live scene
     // graph still references. The gap between the two is leaked memory.
     resourceCensus() {

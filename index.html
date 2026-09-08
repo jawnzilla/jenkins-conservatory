@@ -28,6 +28,14 @@
             <span id="clock-label" title="Field time. Animals keep their own hours.">05:00 DAWN</span>
             <span class="meta-divider" aria-hidden="true"></span>
             <span id="coin-label">120¢</span>
+            <span class="meta-divider" aria-hidden="true"></span>
+            <div class="sound-control">
+              <button id="sound-toggle-button" class="help-toggle sound-toggle" type="button" aria-pressed="false" title="Mute or unmute field audio (M)">🔊<span class="key-hint"> · M</span></button>
+              <label class="sound-slider">
+                <span class="visually-hidden">Field audio volume</span>
+                <input id="sound-volume" type="range" min="0" max="100" value="70" aria-label="Field audio volume">
+              </label>
+            </div>
           </div>
         </header>
 
