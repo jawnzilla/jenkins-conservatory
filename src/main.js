@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
-  startAudio, resumeAudio, playCue, setZoneAmbience, setAmbienceConditions,
-  updateFootsteps, setAudioSettings, getAudioSettings, isAudioReady
+  startAudio, resumeAudio, playCue, playCueAt, setZoneAmbience, setAmbienceConditions,
+  updateFootsteps, setAudioSettings, getAudioSettings, isAudioReady, measureMixLevel, setAmbienceEnabled, getCueCounts, resetCueCounts
 } from './audio.js';
 import {
   COMMISSIONS, commissionProgress, trackedCommission, readyToClaim,
@@ -4697,6 +4697,12 @@ function updateDucks(delta) {
       group.position.x += dx * delta * 1.45;
       group.position.z += dz * delta * 1.45;
       group.position.y = 0.24 + Math.sin(elapsed * 2.5 + duck.phase) * 0.035;
+      // Paddling only registers when the bird is actually going somewhere; a
+      // raft of roosting ducks should be quiet.
+      if (Math.hypot(dx, dz) > 0.05) {
+        duck.species = 'duck';
+        voiceMovingAnimal(duck, group.position);
+      }
       updateDuckFlightPose(duck);
       duck.direction = Math.atan2(dx, dz);
       if ((distance < 5.8 && currentNoise > 0.28) || distance < 2.1) {
@@ -4705,6 +4711,9 @@ function updateDucks(delta) {
         duck.state = 'flee';
         duck.flightStartedAt = elapsed;
         duck.fleeEndsAt = elapsed + 3.2;
+        // Water first, then the alarm: a duck leaving the surface makes both.
+        emitFieldSound('splash', group.position, { maxDistance: 60, ignoreBudget: true });
+        emitFieldSound('quack', group.position, { maxDistance: 60, ignoreBudget: true });
         toast('The ducks startled and flew toward the far shore.', 'warning');
       }
     } else {
@@ -4712,6 +4721,10 @@ function updateDucks(delta) {
       group.position.z += Math.cos(duck.direction) * delta * 5.2;
       group.position.y += delta * 1.25;
       updateDuckFlightPose(duck);
+      if (elapsed >= (duck.nextMoveSoundAt || 0)) {
+        duck.nextMoveSoundAt = elapsed + 0.42;
+        emitFieldSound('wingbeat', group.position, { maxDistance: 60 });
+      }
       const lakeDistance = ((group.position.x - water.centerX) / (water.radiusX || water.waterRadius)) ** 2 + ((group.position.z - water.centerZ) / (water.radiusZ || water.waterRadius)) ** 2;
       if (elapsed >= duck.fleeEndsAt || lakeDistance > 1.35) {
         world.remove(group);
@@ -5068,6 +5081,10 @@ function updateFieldCharacters(delta) {
         desiredFacing = Math.atan2(tempVector.x, tempVector.z);
         group.position.x += tempVector.x * cruise * delta;
         group.position.z += tempVector.z * cruise * delta;
+        if (elapsed >= (staff.nextStepSoundAt || 0)) {
+          staff.nextStepSoundAt = elapsed + (0.52 / Math.max(0.4, cruise)) * (0.9 + Math.random() * 0.2);
+          emitFieldSound('step', group.position, { maxDistance: 22, gain: 0.7 });
+        }
       }
     }
     staff.speed += ((moving ? cruise : 0) - staff.speed) * Math.min(1, delta * 5);
@@ -6792,6 +6809,8 @@ function completeHooking() {
   }
   fishing.phase = 'reeling';
   playCue('hookSet');
+  // The thrash comes from where the line actually landed, not from the player.
+  if (fishing.castLanding) emitFieldSound('splash', fishing.castLanding, { maxDistance: 40, ignoreBudget: true });
   fishing.reelProgress = 0.18;
   fishing.reelHeld = false;
   fishing.tensionState = 'clear';
@@ -7003,6 +7022,11 @@ function catchCritter(critter) {
 
 function scareCritter(critter) {
   spookRisk = clamp(spookRisk + 0.08, 0, 1);
+  if (critter.state !== 'flee') {
+    // Ignores the per-frame budget: being heard is the one moment in the stealth
+    // loop the player must never miss, however much else is going on.
+    emitFieldSound(ALARM_VOICES[critter.species] || 'spooked', critter.group.position, { maxDistance: 55, ignoreBudget: true });
+  }
   critter.state = 'flee';
   critter.fleeTime = 3.8;
   tempVector.subVectors(critter.group.position, player).setY(0).normalize();
@@ -7353,6 +7377,103 @@ function updateGroundGait(critter, gait, delta) {
   poseGroundCritter(critter, gait, delta, state.speed, state.mode === 'pause' && state.speed < 0.12);
 }
 
+
+// --- Placing wildlife in the mix -----------------------------------------------
+// Animals were visible and silent, which made the field feel like a diorama and
+// wasted the one channel that works when you are not looking at something. Each
+// sound is placed: the level falls off with distance and the pan is taken from
+// where the animal sits relative to where you are facing, so a rabbit breaking
+// cover behind your left shoulder tells you to turn that way.
+const audioListenerRight = new THREE.Vector3();
+const audioToSource = new THREE.Vector3();
+// A whole meadow of animals crossing their step thresholds on one frame would
+// be a wall of noise, so a frame emits only the few nearest sounds.
+const FIELD_SOUNDS_PER_FRAME = 5;
+let fieldSoundsThisFrame = 0;
+
+function resetFieldSoundBudget() {
+  fieldSoundsThisFrame = 0;
+}
+
+function emitFieldSound(name, position, { maxDistance = 26, gain = 1, ignoreBudget = false } = {}) {
+  if (!isAudioReady()) return false;
+  const distance = distanceTo(position);
+  if (distance >= maxDistance) return false;
+  if (!ignoreBudget && fieldSoundsThisFrame >= FIELD_SOUNDS_PER_FRAME) return false;
+  audioToSource.subVectors(position, player).setY(0);
+  if (audioToSource.lengthSq() < 0.0001) audioToSource.set(0, 0, 1);
+  audioToSource.normalize();
+  // Camera right in world space, taken from the view matrix rather than
+  // recomputed from yaw, so it stays correct while riding in the car or boat.
+  audioListenerRight.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
+  if (!ignoreBudget) fieldSoundsThisFrame += 1;
+  playCueAt(name, { distance, maxDistance, pan: audioToSource.dot(audioListenerRight) * 0.85, gain });
+  return true;
+}
+
+// Which sound a species makes as it travels, and how far apart. Ground animals
+// get a footfall cadence scaled by how fast they are actually going; fliers get
+// a wingbeat on a slower, steadier cycle because wings do not pause.
+// Ranges are sized to the zones rather than to a guess. Measured from the arrival
+// point, the nearest forest animal sits about 16m out and the nearest at Jenkins
+// Lake about 31m; the first pass at these capped out around 20m, so most of the
+// field was silent and the lake completely so. The falloff curve keeps anything
+// near the edge of its range faint, so a generous range costs nothing.
+// One entry per species: which sound it makes travelling, how far it goes
+// between footfalls, and how far off you can hear it.
+//
+// Cadence is driven by distance covered rather than by a timer. A timer makes an
+// animal that is barely drifting sound exactly like one crossing a clearing,
+// which is how the first pass produced nine noises a second in the forest — a
+// clatter with no information in it. Tied to displacement, a slow browse is
+// quiet, a bolt is a rapid patter, and the rate needs no tuning per state.
+const MOVEMENT_VOICES = {
+  rabbit: { cue: 'hop', stride: 1.15, range: 38 },
+  squirrel: { cue: 'scamper', stride: 0.85, range: 34 },
+  fox: { cue: 'rustle', stride: 1.05, range: 44 },
+  raccoon: { cue: 'rustle', stride: 0.95, range: 40 },
+  frog: { cue: 'hop', stride: 1.3, range: 28 },
+  turtle: { cue: 'rustle', stride: 0.7, range: 18 },
+  owl: { cue: 'wingbeat', stride: 2.6, range: 54 },
+  sparrow: { cue: 'flutter', stride: 1.4, range: 32 },
+  butterfly: { cue: 'flutter', stride: 1.7, range: 14, gain: 0.5 },
+  bee: { cue: 'flutter', stride: 1.6, range: 14, gain: 0.5 },
+  dragonfly: { cue: 'flutter', stride: 1.9, range: 18, gain: 0.6 },
+  duck: { cue: 'paddle', stride: 1.2, range: 40 }
+};
+
+// However fast something runs, it never machine-guns.
+const MOVEMENT_VOICE_MIN_GAP = 0.22;
+
+// The call an animal gives when it bolts. Silence would waste the moment that
+// matters most to the stealth loop: it is the feedback that you were heard.
+const ALARM_VOICES = {
+  squirrel: 'chitter',
+  rabbit: 'spooked',
+  fox: 'bark',
+  raccoon: 'chitter',
+  frog: 'croak',
+  owl: 'hoot',
+  sparrow: 'flutter',
+  duck: 'quack'
+};
+
+function voiceMovingAnimal(entity, position) {
+  const voice = MOVEMENT_VOICES[entity.species];
+  if (!voice) return;
+  if (!entity.lastVoicePosition) {
+    entity.lastVoicePosition = position.clone();
+    return;
+  }
+  // A little jitter on the stride stops a group of one species falling into
+  // lockstep and reading as a single large animal.
+  if (entity.lastVoicePosition.distanceTo(position) < voice.stride * (0.85 + Math.random() * 0.3)) return;
+  if (elapsed < (entity.nextMoveSoundAt || 0)) return;
+  entity.lastVoicePosition.copy(position);
+  entity.nextMoveSoundAt = elapsed + MOVEMENT_VOICE_MIN_GAP;
+  emitFieldSound(voice.cue, position, { maxDistance: voice.range, gain: voice.gain ?? 1 });
+}
+
 function updateCritters(delta) {
   for (const critter of critters) {
     if (critter.caught) continue;
@@ -7388,6 +7509,8 @@ function updateCritters(delta) {
         scareCritter(critter);
       } else if (gait) {
         updateGroundGait(critter, gait, delta);
+        // Only a moving animal makes travel noise; a grazing one is silent.
+        if (critter.gait?.mode === 'move') voiceMovingAnimal(critter, animal.position);
       } else {
         steerCritterFromEdge(critter, delta);
         critter.direction += Math.sin(elapsed * 0.28 + critter.home.x) * delta * 0.07;
@@ -7400,12 +7523,14 @@ function updateCritters(delta) {
         }
         if (!isFlying) keepGroundAnimalOnLand(animal, critter);
         animal.position.y = isFlying ? critter.home.y + Math.sin(elapsed * 2.1 + critter.home.x) * 0.11 + Math.cos(elapsed * 1.15 + critter.home.z) * 0.05 : 0.42 + drift;
+        voiceMovingAnimal(critter, animal.position);
       }
     } else if (critter.state === 'flee') {
       critter.fleeTime -= delta;
       const fleeSpeed = gait?.fleeSpeed ?? 3.4;
       animal.position.x += Math.sin(critter.direction) * delta * fleeSpeed;
       animal.position.z += Math.cos(critter.direction) * delta * fleeSpeed;
+      voiceMovingAnimal(critter, animal.position);
       if (gait) {
         keepGroundAnimalOnLand(animal, critter);
         poseGroundCritter(critter, gait, delta, fleeSpeed, false);
@@ -7496,6 +7621,10 @@ function updateZooAnimals(delta) {
     exhibit.group.position.z = nextZ;
     if (exhibit.type === 'fish') {
       exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 1.8 + exhibit.phase) * 0.12;
+      if (elapsed >= (exhibit.nextMoveSoundAt || 0)) {
+        exhibit.nextMoveSoundAt = elapsed + 5 + Math.random() * 9;
+        emitFieldSound('surface', exhibit.group.position, { maxDistance: 12, gain: 0.7 });
+      }
       exhibit.group.rotation.y = Math.atan2(-deltaZ, deltaX);
       if (exhibit.group.userData.fishTail) exhibit.group.userData.fishTail.rotation.y = Math.sin(elapsed * 8.5 + exhibit.phase) * 0.24;
       if (exhibit.group.userData.fishFins) exhibit.group.userData.fishFins.forEach((fin, index) => {
@@ -7504,6 +7633,7 @@ function updateZooAnimals(delta) {
       });
     } else if (exhibit.type === 'duck') {
       exhibit.group.position.y = exhibit.center.y + Math.sin(elapsed * 2.2 + exhibit.phase) * 0.035;
+      if (exhibit.rest > 0.5) voiceMovingAnimal(exhibit, exhibit.group.position);
       exhibit.group.rotation.y = Math.atan2(deltaX, deltaZ) + Math.PI;
       if (elapsed >= exhibit.nextEggAt) {
         createDuckEgg(exhibit.group.position.x + 0.32, exhibit.group.position.z + 0.18, exhibit.phase);
@@ -7514,11 +7644,15 @@ function updateZooAnimals(delta) {
       // Resting animals settle onto the bedding instead of pacing the enclosure.
       exhibit.group.position.y = exhibit.center.y + Math.abs(Math.sin(elapsed * 2.4 + exhibit.phase)) * 0.045 * exhibit.rest - (1 - exhibit.rest) * 0.12;
       if (Math.hypot(deltaX, deltaZ) > 0.0001) exhibit.group.rotation.y = Math.atan2(deltaX, -deltaZ);
+      // Pacing is audible; a dozing animal is not, which is what `rest` already
+      // encodes, so the cadence rides it rather than needing its own state.
+      if (exhibit.rest > 0.5) voiceMovingAnimal(exhibit, exhibit.group.position);
     } else {
       // A dozing owl drops to its perch height; an active one works the enclosure.
       exhibit.group.position.y = exhibit.center.y - (1 - exhibit.rest) * 0.55
         + (Math.sin(elapsed * 2.1 + exhibit.phase) * 0.1 + Math.cos(elapsed * 1.1 + exhibit.phase) * 0.04) * exhibit.rest;
       if (exhibit.group.userData.wings) animateWings(exhibit.group, exhibit.phase, exhibit.group.userData.wingSpeed || 12, 0.12 + exhibit.rest * 0.88);
+      if (exhibit.rest > 0.5) voiceMovingAnimal(exhibit, exhibit.group.position);
       if (Math.hypot(deltaX, deltaZ) > 0.0001) exhibit.group.rotation.y = exhibit.group.userData.wingAxis === 'x' ? Math.atan2(-deltaZ, deltaX) : Math.atan2(deltaX, -deltaZ);
       exhibit.group.rotation.z = Math.sin(elapsed * 3.2 + exhibit.phase) * 0.16 * exhibit.rest;
     }
@@ -7604,6 +7738,7 @@ function updateMovement(delta) {
     if (jumpOffset <= 0) {
       jumpOffset = 0;
       jumpVelocity = 0;
+      if (!grounded) playCue('land');
       grounded = true;
     }
   }
@@ -9245,6 +9380,7 @@ function animate() {
   updateFishing(delta);
   updateCastPreview();
   updateFishingVisuals(delta);
+  resetFieldSoundBudget();
   updateCritters(delta);
   updateDucks(delta);
   updateBugNodes(delta);
@@ -9310,6 +9446,7 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Space' && !event.repeat && !modalOpen && !qteState && grounded && !lakeBoatPilot?.active) {
     jumpVelocity = JUMP_VELOCITY;
     grounded = false;
+    playCue('jump');
     setStatus('Jumping. Keep moving to clear rocks, roots, and shop displays.');
   }
   if (event.code === 'Escape' || normalizedKey === 'escape') {
@@ -9610,7 +9747,7 @@ if (new URLSearchParams(window.location.search).has('probe')) {
     get currentZone() { return currentZone; },
     caches: { geometry: geometryCache, material: materialCache },
     setStaticBatching(enabled) { staticBatchingEnabled = enabled; },
-    audio: { getAudioSettings, playCue, startAudio, isReady: () => isAudioReady() },
+    audio: { getAudioSettings, playCue, playCueAt, startAudio, isReady: () => isAudioReady(), emitFieldSound, measureMixLevel, setAmbienceEnabled, getCueCounts, resetCueCounts },
     commissions: {
       tracked: () => trackedCommission(save),
       open: () => openCommissions(save).map((commission) => commission.id),
@@ -9618,6 +9755,28 @@ if (new URLSearchParams(window.location.search).has('probe')) {
       render: () => renderCommissionCard()
     },
     onboarding: { active: () => onboardingActive(), advance: () => advanceOnboarding(), skip: () => skipOnboarding() },
+    gameClock: () => elapsed,
+    // Steps the wildlife simulation without rendering. Software rendering runs
+    // this world at about two frames a second, so anything measured per
+    // game-second by waiting on frames gets a sample a fraction of a second
+    // long. This advances the clock directly, which is the only way to observe
+    // a rate rather than a rounding error.
+    stepAnimals(seconds, step = 1 / 60) {
+      const iterations = Math.max(1, Math.round(seconds / step));
+      for (let index = 0; index < iterations; index += 1) {
+        resetFieldSoundBudget();
+        elapsed += step;
+        updateCritters(step);
+        updateDucks(step);
+        updateZooAnimals(step);
+      }
+      return iterations * step;
+    },
+    critterReport: () => critters.map((c) => ({
+      species: c.species, state: c.state, hidden: c.hidden, caught: c.caught,
+      gait: c.gait?.mode || null, distance: Number(distanceTo(c.group.position).toFixed(1)),
+      voiced: Boolean(MOVEMENT_VOICES[c.species])
+    })),
     // Counts what is actually resident on the GPU against what the live scene
     // graph still references. The gap between the two is leaked memory.
     resourceCensus() {

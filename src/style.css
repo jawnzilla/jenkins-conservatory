@@ -2064,6 +2064,17 @@ h2 {
 
 .onboarding-panel {
   width: min(440px, 88vw);
+  /* The card is something to read, not something to click. Only its two buttons
+     take pointer events, so a click that lands on the copy still reaches the
+     canvas underneath and puts the player into field mode — which is precisely
+     what step one asks them to do. On a small window the card covers the middle
+     of the canvas, and taking the click there left the game unstartable. */
+  pointer-events: none;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+}
+
+.onboarding-panel button {
   pointer-events: auto;
 }
 
