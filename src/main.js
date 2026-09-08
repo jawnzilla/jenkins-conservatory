@@ -1,4 +1,14 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  startAudio, resumeAudio, playCue, setZoneAmbience, setAmbienceConditions,
+  updateFootsteps, setAudioSettings, getAudioSettings, isAudioReady
+} from './audio.js';
+import {
+  COMMISSIONS, commissionProgress, trackedCommission, readyToClaim,
+  openCommissions, isComplete as isCommissionComplete, isUnlocked as isCommissionUnlocked,
+  overallProgress as commissionOverall
+} from './commissions.js';
 import './style.css';
 import './interaction-feedback.css';
 
@@ -253,6 +263,14 @@ const DEFAULT_SAVE = {
   // remembered along with everything else.
   dayPhase: null,
   tipsEnabled: true,
+  // Audio preferences live in the save so they survive a reload like everything
+  // else the player sets, and so each field record can keep its own.
+  audioMuted: false,
+  audioVolume: 0.7,
+  // Commissions handed in, and how far the first-run walkthrough got. Both are
+  // per record, so a second field record starts the arc over.
+  commissionsDone: [],
+  onboardingStep: 0,
   coins: 120,
   supplies: {
     worms: 6,
@@ -325,6 +343,18 @@ const dom = {
   crosshair: document.querySelector('#crosshair'),
   fishingCallout: document.querySelector('#fishing-callout'),
   actionHint: document.querySelector('#action-hint'),
+  soundToggle: document.querySelector('#sound-toggle-button'),
+  soundVolume: document.querySelector('#sound-volume'),
+  commissionCard: document.querySelector('#commission-card'),
+  commissionCount: document.querySelector('#commission-count'),
+  commissionBody: document.querySelector('#commission-body'),
+  onboarding: document.querySelector('#onboarding'),
+  onboardingTitle: document.querySelector('#onboarding-title'),
+  onboardingCopy: document.querySelector('#onboarding-copy'),
+  onboardingKeys: document.querySelector('#onboarding-keys'),
+  onboardingStep: document.querySelector('#onboarding-step'),
+  onboardingNext: document.querySelector('#onboarding-next'),
+  onboardingSkip: document.querySelector('#onboarding-skip'),
   actionDock: document.querySelector('#action-dock'),
   primaryAction: document.querySelector('#primary-action'),
   reelAction: document.querySelector('#reel-action'),
@@ -598,6 +628,10 @@ function loadSave(slot = activeSlot) {
       brooksAssignment: parsed.brooksAssignment || 'conservatory',
       graysonResearch: Number(parsed.graysonResearch || 0),
       profileName: parsed.profileName || defaultProfileName(slot),
+      commissionsDone: Array.isArray(parsed.commissionsDone) ? parsed.commissionsDone.slice() : [],
+      onboardingStep: Number(parsed.onboardingStep || 0),
+      audioMuted: Boolean(parsed.audioMuted),
+      audioVolume: Number.isFinite(Number(parsed.audioVolume)) ? clamp(Number(parsed.audioVolume), 0, 1) : DEFAULT_SAVE.audioVolume,
       dayPhase: Number.isFinite(Number(parsed.dayPhase)) ? Number(parsed.dayPhase) : null
     };
   } catch (error) {
@@ -636,14 +670,89 @@ function distanceTo(position) {
   return player.distanceTo(position);
 }
 
+// ---------------------------------------------------------------------------
+// Shared geometry and material cache.
+//
+// The world is assembled from a few hundred distinct shapes repeated thousands
+// of times: Jenkins Lake alone asks for the same pine trunk 375 times and the
+// same foliage blob 532 times. Building each one fresh gave every mesh its own
+// geometry and its own material, and so its own draw call — 6,611 of them for
+// 751k triangles, about 113 triangles a call, with the GPU idle and the CPU
+// buried in state changes. Keying both by their parameters lets every repeat
+// share one upload and one shader binding.
+//
+// Animated materials have to stay unique, or a single flickering lantern would
+// drag every mesh that happens to share its colour along with it. Every such
+// site in this file builds its material with `emissive` or `transparent` set,
+// so those keys opt a material out of the cache on their own; `unique: true`
+// forces a private material for anything that needs one in future.
+// ---------------------------------------------------------------------------
+const geometryCache = new Map();
+const materialCache = new Map();
+
+// Keys that mark a material as one somebody animates. Kept deliberately wide:
+// a material wrongly left unique costs one draw call, while one wrongly shared
+// is a rendering bug that shows up far from the code that caused it.
+const UNSHAREABLE_MATERIAL_KEYS = new Set([
+  'unique', 'emissive', 'emissiveIntensity', 'transparent', 'opacity',
+  'map', 'alphaMap', 'envMap', 'normalMap', 'bumpMap', 'emissiveMap'
+]);
+
+function cacheToken(value) {
+  return `${typeof value}:${String(value)}`;
+}
+
+function sharedGeometry(type, ...args) {
+  const key = `${type}|${args.map(cacheToken).join(',')}`;
+  let geometry = geometryCache.get(key);
+  if (!geometry) {
+    geometry = new THREE[`${type}Geometry`](...args);
+    geometry.userData.shared = true;
+    geometryCache.set(key, geometry);
+  }
+  return geometry;
+}
+
+// Returns null when the material must not be shared, which is also the signal
+// to skip the cache entirely rather than to compute a key nobody can reuse.
+function materialCacheKey(color, options) {
+  // Foliage and bark tints arrive as THREE.Color instances off `clone().offsetHSL()`,
+  // and they are the bulk of every outdoor zone. The material copies the colour into
+  // its own instance at construction, so later edits to the caller's object never
+  // reach it and hashing the hex is safe.
+  const tint = color?.isColor ? color.getHex() : color;
+  if (typeof tint !== 'number' && typeof tint !== 'string') return null;
+  const parts = [];
+  for (const name of Object.keys(options).sort()) {
+    if (UNSHAREABLE_MATERIAL_KEYS.has(name)) return null;
+    const value = options[name];
+    // Textures, colours and callbacks have no stable key and may be mutated by
+    // whoever owns them, so anything non-primitive drops out of the cache.
+    if (value !== null && (typeof value === 'object' || typeof value === 'function')) return null;
+    parts.push(`${name}=${cacheToken(value)}`);
+  }
+  return `${cacheToken(tint)}|${parts.join('|')}`;
+}
+
 function mat(color, options = {}) {
-  return new THREE.MeshStandardMaterial({
+  const key = materialCacheKey(color, options);
+  if (key !== null) {
+    const cached = materialCache.get(key);
+    if (cached) return cached;
+  }
+  const { unique, ...settings } = options;
+  const material = new THREE.MeshStandardMaterial({
     color,
     roughness: 0.88,
     metalness: 0,
     flatShading: true,
-    ...options
+    ...settings
   });
+  if (key !== null) {
+    material.userData.shared = true;
+    materialCache.set(key, material);
+  }
+  return material;
 }
 
 function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1]) {
@@ -753,19 +862,19 @@ function resolveWorldCollisions() {
 }
 
 function box(parent, size, color, position, options = {}) {
-  return addMesh(parent, new THREE.BoxGeometry(...size), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Box', ...size), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function cylinder(parent, radiusTop, radiusBottom, height, color, position, options = {}) {
-  return addMesh(parent, new THREE.CylinderGeometry(radiusTop, radiusBottom, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Cylinder', radiusTop, radiusBottom, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function sphere(parent, radius, color, position, options = {}) {
-  return addMesh(parent, new THREE.SphereGeometry(radius, options.widthSegments || 10, options.heightSegments || 7), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Sphere', radius, options.widthSegments || 10, options.heightSegments || 7), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function cone(parent, radius, height, color, position, options = {}) {
-  return addMesh(parent, new THREE.ConeGeometry(radius, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
+  return addMesh(parent, sharedGeometry('Cone', radius, height, options.segments || 8), mat(color, options.material), position, options.rotation, options.scale);
 }
 
 function makeLabel(text, color = '#d8ef85', background = '#1a3023', scale = 1.4) {
@@ -1136,7 +1245,7 @@ function updateSunPosition() {
 }
 
 function torus(parent, majorRadius, tubeRadius, color, position, rotation = [0, 0, 0], radialSegments = 8, tubularSegments = 18) {
-  return addMesh(parent, new THREE.TorusGeometry(majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
+  return addMesh(parent, sharedGeometry('Torus', majorRadius, tubeRadius, radialSegments, tubularSegments), mat(color), position, rotation);
 }
 
 function triggerToolAction(name, duration = 0.45) {
@@ -2134,6 +2243,119 @@ function createLakeCarInterior() {
   return interior;
 }
 
+
+// ---------------------------------------------------------------------------
+// Static scenery batching.
+//
+// Trees, shrubs, logs, stumps and loose rocks are the bulk of every outdoor
+// zone: Jenkins Lake alone places 774 pines and 212 branch trees. None of them
+// move, light up, or get raycast — their colliders are separate data and their
+// interaction markers are separate groups — but three.js still issues one draw
+// call per Mesh, so they cost thousands of calls however well their geometry
+// and materials are shared.
+//
+// Staging them here bakes each mesh's transform into a copy of its geometry and
+// files it under its material; the flush merges every bucket into a single mesh.
+// It is the same trick the grass blades already use, applied to the props.
+// ---------------------------------------------------------------------------
+const staticPropBatch = new Map();
+let staticPropMeshes = [];
+
+// Merging every prop of one material into a single mesh would hand the GPU one
+// object the size of the zone, which no frustum can cull — the first cut of this
+// traded 3,300 draw calls for 40k extra triangles drawn behind the camera. So the
+// batch is keyed by material *and* by a coarse grid cell: near enough to one call
+// per material for the props in view, while everything behind you still drops out.
+const STATIC_PROP_CELL = 32;
+const stagedPropPosition = new THREE.Vector3();
+
+// Always on in play. The automated visual check flips it off to render the same
+// view unbatched, which is the only way to prove the merge moved nothing.
+let staticBatchingEnabled = true;
+
+function stageStaticProp(group) {
+  if (!staticBatchingEnabled) {
+    world.add(group);
+    return group;
+  }
+  group.updateMatrixWorld(true);
+  const meshes = [];
+  group.traverse((object) => { if (object.isMesh) meshes.push(object); });
+  for (const object of meshes) {
+    // The cached source geometry stays shared and untouched; the batch owns only
+    // this transformed copy, which is what gets disposed on the way out.
+    const baked = object.geometry.clone().applyMatrix4(object.matrixWorld);
+    // clone() carries userData over, so the copy would otherwise claim to be a
+    // cached original and the teardown walk would decline to release it.
+    baked.userData.shared = false;
+    stagedPropPosition.setFromMatrixPosition(object.matrixWorld);
+    const cellX = Math.floor(stagedPropPosition.x / STATIC_PROP_CELL);
+    const cellZ = Math.floor(stagedPropPosition.z / STATIC_PROP_CELL);
+    const key = `${cellX}:${cellZ}`;
+    let cell = staticPropBatch.get(key);
+    if (!cell) {
+      cell = new Map();
+      staticPropBatch.set(key, cell);
+    }
+    let bucket = cell.get(object.material);
+    if (!bucket) {
+      bucket = [];
+      cell.set(object.material, bucket);
+    }
+    bucket.push(baked);
+  }
+  for (const object of meshes) object.removeFromParent();
+  // Sprites and lights have no geometry to merge, so a prop that carries any —
+  // a fence with a gate sign, say — keeps its group in the world for their sake.
+  // Without this the batcher would silently swallow them along with the meshes.
+  let carriesNonMesh = false;
+  group.traverse((object) => { if (object !== group && !object.isMesh) carriesNonMesh = true; });
+  if (carriesNonMesh) world.add(group);
+  return group;
+}
+
+function flushStaticProps() {
+  for (const cell of staticPropBatch.values()) {
+   for (const [material, geometries] of cell) {
+    // A single prop in a bucket has nothing to gain from merging and would only
+    // pay the copy, so it goes in as it stands.
+    const merged = geometries.length > 1 ? mergeGeometries(geometries, false) : geometries[0];
+    if (!merged) {
+      // Mismatched attribute sets cannot merge. Rather than drop the scenery,
+      // fall back to one mesh apiece and leave the draw calls on the table.
+      for (const geometry of geometries) {
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        world.add(mesh);
+        staticPropMeshes.push(mesh);
+      }
+      continue;
+    }
+    if (merged !== geometries[0]) for (const geometry of geometries) geometry.dispose();
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    world.add(mesh);
+    staticPropMeshes.push(mesh);
+   }
+  }
+  staticPropBatch.clear();
+}
+
+// Merged buffers are built per zone and owned outright, so they have to be
+// released rather than left resident when the zone is torn down.
+function disposeStaticProps() {
+  for (const mesh of staticPropMeshes) mesh.geometry.dispose();
+  staticPropMeshes = [];
+  for (const cell of staticPropBatch.values()) {
+    for (const geometries of cell.values()) {
+      for (const geometry of geometries) geometry.dispose();
+    }
+  }
+  staticPropBatch.clear();
+}
+
 function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
@@ -2142,7 +2364,7 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
   cone(group, 1.15, 2.3, foliage, [0, 2.65, 0], { segments: 8 });
   cone(group, 0.9, 1.9, new THREE.Color(foliage).offsetHSL(0, 0, 0.06), [0, 3.8, 0.1], { segments: 8 });
   cone(group, 0.62, 1.6, new THREE.Color(foliage).offsetHSL(0, 0, 0.1), [0, 4.75, 0], { segments: 8 });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.72 * scale, { zone: currentZone });
   return group;
 }
@@ -2167,7 +2389,7 @@ function createBranchTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b
   makeBranch(5.35, 2.25, 1.18, 0.74);
   sphere(group, 0.88, foliage, [0, 5.08, 0], { scale: [1.15, 0.46, 1.02], widthSegments: 9, heightSegments: 5 });
   sphere(group, 0.57, leafColor, [0.08, 5.68, 0.03], { scale: [1.12, 0.5, 0.95], widthSegments: 8, heightSegments: 5 });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.64 * scale, { zone: currentZone });
   return group;
 }
@@ -2185,6 +2407,7 @@ const backgroundForestMaterial = new THREE.MeshStandardMaterial({
   metalness: 0,
   flatShading: true
 });
+backgroundForestMaterial.userData.shared = true;
 let backgroundForestParts = null;
 let backgroundForestMeshes = [];
 
@@ -2491,6 +2714,7 @@ function lootNatureResource(resource) {
   resource.group.visible = false;
   resource.marker.visible = false;
   save.ingredients[resource.resourceKey] = (save.ingredients[resource.resourceKey] || 0) + 1;
+  checkCommissions();
   saveGame();
   updateHUD();
   const label = resource.label.replace(/^Loot |^Pick |^Pick up /i, '');
@@ -2665,7 +2889,7 @@ function createFence(x, z, width, depth, color = 0x806e53, solid = true, gate = 
     gateSign.position.set(gate.offset, 2.42, depth / 2);
     group.add(gateSign);
   }
-  world.add(group);
+  stageStaticProp(group);
   if (solid) {
     addCollider(x, z - depth / 2, width / 2, { type: 'rect', halfWidth: width / 2, halfDepth: 0.18, zone: currentZone });
     for (const [from, to] of spans) {
@@ -2956,7 +3180,11 @@ function updateAquarium() {
 }
 
 function createPath(x, z, width, length, color = 0xb3a47a) {
-  box(world, [width, 0.04, length], color, [x, 0, z]);
+  // Paths are flat slabs that share a handful of colours across a zone, so they
+  // merge almost perfectly once staged.
+  const group = new THREE.Group();
+  box(group, [width, 0.04, length], color, [x, 0, z]);
+  stageStaticProp(group);
 }
 
 function createFieldResearchBoat() {
@@ -3315,8 +3543,12 @@ function buildForest() {
 }
 
 function addRock(x, y, z, scale, color) {
-  const rock = addMesh(world, new THREE.DodecahedronGeometry(scale, 0), mat(color), [x, y, z], [0.1, 0.25, 0.08], [1.3, 0.8, 1]);
+  // Built into a staging group rather than straight into the world so the rock
+  // joins the static merge; the collider it registers is unaffected either way.
+  const group = new THREE.Group();
+  const rock = addMesh(group, sharedGeometry('Dodecahedron', scale, 0), mat(color), [x, y, z], [0.1, 0.25, 0.08], [1.3, 0.8, 1]);
   rock.castShadow = true;
+  stageStaticProp(group);
   addCollider(x, z, scale * 1.05, { zone: currentZone });
   return rock;
 }
@@ -3361,7 +3593,7 @@ function createGroundFoliage(x, z, scale = 1, color = 0x4d8055) {
     const height = (0.34 + (index % 3) * 0.16) * scale;
     cone(foliage, 0.12 * scale, height, new THREE.Color(color).offsetHSL(index * 0.015, 0, (index % 2) * 0.05), [Math.sin(index * 1.7) * 0.18 * scale, height * 0.5, Math.cos(index * 1.7) * 0.15 * scale], { segments: 5 });
   }
-  world.add(foliage);
+  stageStaticProp(foliage);
   return foliage;
 }
 
@@ -3394,6 +3626,7 @@ const grassMaterial = new THREE.MeshStandardMaterial({
   roughness: 1,
   metalness: 0
 });
+grassMaterial.userData.shared = true;
 grassMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.grassSwayTime = GRASS_SWAY_UNIFORM;
   shader.vertexShader = shader.vertexShader
@@ -3656,7 +3889,7 @@ function createDownedLog(x, z, options = {}) {
     segments: 6,
     rotation: [0.9, 0.4, 0.5]
   });
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, Math.max(radius, 0.42), {
     type: 'rect',
     halfWidth: Math.abs(Math.cos(angle)) * length * 0.5 + radius * 0.55,
@@ -3702,7 +3935,7 @@ function createTreeStump(x, z, options = {}) {
       [(random() - 0.5) * radius, height * (0.5 + random() * 0.4), (random() - 0.5) * radius],
       { scale: [1.2, 0.42, 1.1], widthSegments: 7, heightSegments: 5 });
   }
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, radius * 1.15, { zone: currentZone });
   return group;
 }
@@ -3731,7 +3964,7 @@ function createShrub(x, z, options = {}) {
       [random() * 0.6, random() * 2, random() * 0.5],
       [1.15, 0.82, 1.1]);
   }
-  world.add(group);
+  stageStaticProp(group);
   addCollider(x, z, 0.46 * scale, { zone: currentZone });
   return group;
 }
@@ -4303,6 +4536,7 @@ function createNatureRock(x, z, scale, index = 0) {
 }
 
 function lootNatureRock(loot) {
+  playCue('pickup');
   if (!loot || loot.used) return;
   loot.used = true;
   loot.group.visible = false;
@@ -5941,6 +6175,7 @@ function completeCleaning() {
   enclosure.cleaned = true;
   updateEnclosureVisual(enclosure);
   save.cleanedEnclosures[enclosure.id] = true;
+  checkCommissions();
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -6267,10 +6502,33 @@ function createAnimalModel(species, scale = 1) {
   return group;
 }
 
+// Clearing the scene graph only drops JavaScript references; the buffers and
+// textures behind them stay resident on the GPU until something disposes them.
+// A full tour of the four zones used to strand 11,158 geometries and 147 label
+// textures, every tour, for as long as the tab was open — and fast travel makes
+// that tour the core loop. Anything the caches own is left alone: it is keyed,
+// bounded, and deliberately outlives the zone that first asked for it.
+function releaseZoneResources(root) {
+  root.traverse((object) => {
+    if (object.geometry && !object.geometry.userData.shared) object.geometry.dispose();
+    for (const material of [].concat(object.material || [])) {
+      if (!material || material.userData.shared) continue;
+      // Label sprites carry a CanvasTexture apiece, which is the whole of the
+      // texture growth; a material dispose does not take its maps with it.
+      for (const value of Object.values(material)) {
+        if (value && value.isTexture) value.dispose();
+      }
+      material.dispose();
+    }
+  });
+}
+
 function resetWorld() {
   clearDebugCollisionVisuals();
   disposeGrassMeshes();
+  disposeStaticProps();
   disposeBackgroundForest();
+  releaseZoneResources(world);
   while (world.children.length) {
     world.remove(world.children[0]);
   }
@@ -6344,10 +6602,14 @@ function enterZone(zoneKey, announce = false) {
   // sprouts through a wall, a trunk or a shop display.
   dressZoneFlora(zoneKey);
   flushGrassBlades();
+  // Everything staged by the scenery producers during the build above lands in
+  // the world here, as one mesh per material rather than one per prop.
+  flushStaticProps();
   if (debugCollisionVisible) rebuildDebugCollisionVisuals();
   camera.position.copy(player);
   updateCameraRotation();
   save.lastZone = zoneKey;
+  setZoneAmbience(zoneKey);
   saveGame();
   updateHUD();
   // A fresh page load cannot request pointer lock without a trusted gesture.
@@ -6459,6 +6721,7 @@ function startCast() {
     return;
   }
   fishing.phase = 'charging';
+  playCue('cast');
   fishing.charge = 0;
   triggerToolAction('rod-charge', 0.38);
   setStatus('Hold to load the cast. Aim at a water disturbance before releasing.');
@@ -6473,6 +6736,7 @@ function finishCast() {
   fishing.castLure = selectedLure;
   fishing.practice = Boolean(target?.practice && currentZone === 'zoo');
   fishing.phase = 'waiting';
+  playCue('bobber');
   fishing.castTarget = target;
   fishing.castLanding = landingPoint;
   fishing.invalidCast = !target || (!fishing.practice && (target.lure !== fishing.castLure || target.bait !== fishing.castBait));
@@ -6527,6 +6791,7 @@ function completeHooking() {
     return;
   }
   fishing.phase = 'reeling';
+  playCue('hookSet');
   fishing.reelProgress = 0.18;
   fishing.reelHeld = false;
   fishing.tensionState = 'clear';
@@ -6544,6 +6809,7 @@ function failHook(message = '') {
 }
 
 function breakFishingLine() {
+  playCue('lineSnap');
   const lure = fishing.castLure;
   if (lure) save.supplies[lure] = Math.max(0, (save.supplies[lure] || 0) - 1);
   resetFishing();
@@ -6555,6 +6821,7 @@ function breakFishingLine() {
 }
 
 function landFish() {
+  playCue('catch');
   const species = fishing.fishSpecies;
   if (fishing.practice) {
     resetFishing();
@@ -6575,6 +6842,7 @@ function landFish() {
   const previous = save.records[species];
   const isRecord = !previous || record.weight > previous.weight || (record.weight === previous.weight && record.size > previous.size);
   save.caught[species] = (save.caught[species] || 0) + 1;
+  checkCommissions();
   save.ingredients[species] = (save.ingredients[species] || 0) + 1;
   save.coins += species === 'trout' ? 18 : 22;
   if (isRecord) save.records[species] = record;
@@ -6599,6 +6867,7 @@ function updateFishing(delta) {
   }
   if (fishing.phase === 'waiting' && fishing.castTarget && elapsed >= fishing.biteAt) {
     fishing.phase = 'bite';
+    playCue('bite');
     fishing.fishSpecies = fishing.castTarget.fishSpecies;
     const fishProfile = {
       trout: { size: 13.5, weightBase: 0.7, weightRange: 4.3 },
@@ -6655,6 +6924,9 @@ function updateFishing(delta) {
       return;
     }
     const weightFactor = clamp(fishing.fishWeight / 5, 0, 1);
+    // The ratchet speeds up as the fish comes in, so the fight has an audible
+    // shape rather than one flat noise until it lands.
+    if (held) playCue('reelClick', { throttleMs: 150 - fishing.reelProgress * 70 });
     const reelRate = 0.34 - weightFactor * 0.16;
     fishing.reelProgress += delta * (held ? reelRate : -0.035);
     fishing.reelProgress = clamp(fishing.reelProgress, 0, 1);
@@ -6674,6 +6946,7 @@ function updateFishing(delta) {
 }
 
 function useNet() {
+  playCue('net');
   if (!['forest', 'store', 'zoo', 'lake'].includes(currentZone) || activeTool !== 'net') return;
   triggerToolAction('net-swing', 0.42);
   const critter = getNetCritterTarget();
@@ -6719,6 +6992,7 @@ function catchCritter(critter) {
   critter.caught = true;
   spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught[critter.species] = (save.caught[critter.species] || 0) + 1;
+  checkCommissions();
   save.coins += 15;
   world.remove(critter.group);
   saveGame();
@@ -6744,6 +7018,7 @@ function catchBug(bug) {
   bug.bugModel.visible = false;
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+  checkCommissions();
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -6846,6 +7121,7 @@ function completeBugCapture(bug) {
   bug.bugModel.visible = false;
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
+  checkCommissions();
   if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
   save.coins += bug.species === 'worm' ? 4 : 8;
   saveGame();
@@ -7331,6 +7607,27 @@ function updateMovement(delta) {
       grounded = true;
     }
   }
+  // Footfalls follow real travel rather than a timer, so the stride stops the
+  // instant you do. Sneaking gets its own quieter, slower step for the same
+  // reason the noise meter drops: the player should hear the stealth working.
+  updateFootsteps({
+    moving,
+    sneaking,
+    delta,
+    onDock: getDockSurfaceHeight(player.x, player.z) > 0.01
+  });
+  const shoreWater = getNatureWater();
+  if (shoreWater) {
+    const radiusX = shoreWater.radiusX || shoreWater.waterRadius;
+    const radiusZ = shoreWater.radiusZ || shoreWater.waterRadius;
+    // Distance to the water's edge in radii, so one number covers both the round
+    // practice pond and the elliptical lake.
+    const reach = Math.hypot((player.x - shoreWater.centerX) / radiusX, (player.z - shoreWater.centerZ) / radiusZ);
+    setAmbienceConditions({ nearWater: clamp(1.35 - reach, 0, 1) });
+  } else {
+    setAmbienceConditions({ nearWater: 0 });
+  }
+
   const riskTarget = moving ? (sneaking ? 0.06 : 0.82) : 0.02;
   const riskRate = moving ? (sneaking ? 0.8 : 0.18) : 0.42;
   spookRisk = clamp(spookRisk + (riskTarget - spookRisk) * delta * riskRate, 0.02, 1);
@@ -7619,6 +7916,9 @@ function setStatus(message) {
 function toast(message, tone = 'success') {
   // One stable location and one current result, never a growing corner stack.
   const kind = tone === 'warning' ? 'warning' : tone === 'danger' ? 'danger' : 'success';
+  // The toast already decides what kind of news this is, so the sound follows it
+  // rather than being chosen again at every call site.
+  playCue(kind === 'danger' ? 'denied' : kind === 'warning' ? 'warning' : 'success', { throttleMs: 120 });
   const current = dom.toastStack.firstElementChild;
   window.clearTimeout(feedbackTimer);
   if (!current || current.dataset.message !== message || current.dataset.tone !== kind) {
@@ -7740,6 +8040,7 @@ function cycleFood() {
 }
 
 function openModal(element) {
+  playCue('journal');
   modalOpen = true;
   element.classList.remove('is-hidden');
   element.appendChild(feedbackHub);
@@ -7845,6 +8146,202 @@ function journalRow(label, value, dim = false) {
   return `<div class="journal-row"><span>${label}</span><em class="${dim ? 'is-dim' : ''}">${value}</em></div>`;
 }
 
+
+// --- Field commissions ---------------------------------------------------------
+// The commissions module only reads a save and reports progress; everything that
+// changes the world lives here. Rewards are paid on hand-in, and hand-in happens
+// automatically the moment the goals are met — there is no turn-in walk, because
+// the givers already patrol their own areas and chasing them down would punish
+// the player for finishing.
+
+function escapeText(value) {
+  return String(value).replace(/[&<>"]/g, (character) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]
+  ));
+}
+
+function grantCommissionReward(commission) {
+  const reward = commission.reward || {};
+  const lines = [];
+  if (reward.coins) {
+    save.coins += reward.coins;
+    lines.push(`${reward.coins}¢`);
+  }
+  for (const [key, amount] of Object.entries(reward.supplies || {})) {
+    save.supplies[key] = (save.supplies[key] || 0) + amount;
+    const item = SHOP_ITEMS.find((candidate) => candidate.key === key);
+    lines.push(`${amount} × ${item ? item.label.toLowerCase() : key}`);
+  }
+  return lines;
+}
+
+// Called wherever progress could have moved. Cheap enough to run on any change:
+// it reads a handful of counters and does nothing when nothing has completed.
+function checkCommissions({ announce = true } = {}) {
+  const ready = readyToClaim(save);
+  if (!ready.length) {
+    renderCommissionCard();
+    return;
+  }
+  for (const commission of ready) {
+    save.commissionsDone.push(commission.id);
+    const reward = grantCommissionReward(commission);
+    if (announce) {
+      playCue('objective');
+      const payout = reward.length ? ` Paid: ${reward.join(', ')}.` : '';
+      toast(`${commission.giver} signs off: ${commission.title}.${payout}`, 'success');
+      setStatus(`Commission complete — ${commission.title}. ${describeNextCommission()}`);
+    }
+  }
+  saveGame();
+  updateHUD();
+  renderCommissionCard();
+}
+
+function describeNextCommission() {
+  const next = trackedCommission(save);
+  if (!next) return 'Every commission is signed off. The field is yours.';
+  return `${next.giver} has something next: ${next.title}.`;
+}
+
+function renderCommissionCard() {
+  if (!dom.commissionCard) return;
+  const tracked = trackedCommission(save);
+  const totals = commissionOverall(save);
+  dom.commissionCount.textContent = `${totals.done} / ${totals.total}`;
+  if (!tracked) {
+    dom.commissionCard.classList.remove('is-hidden', 'is-ready');
+    dom.commissionBody.innerHTML = `<strong class="commission-title">Survey complete</strong>
+      <span class="commission-hint">Every commission is signed off. Keep the field as you like it.</span>`;
+    return;
+  }
+  const { goals, complete } = commissionProgress(tracked, save);
+  dom.commissionCard.classList.remove('is-hidden');
+  dom.commissionCard.classList.toggle('is-ready', complete);
+  const rows = goals.map((goal) => `
+    <div class="commission-goal ${goal.done ? 'is-done' : ''}">
+      <span class="commission-goal-label">
+        <span class="commission-goal-mark">${goal.done ? '✓' : '·'}</span>
+        <span>${escapeText(goal.label)}</span>
+      </span>
+      <span class="commission-goal-track">
+        <span class="commission-goal-bar"><span style="width:${Math.round((goal.have / goal.need) * 100)}%"></span></span>
+        <span class="commission-goal-count">${goal.have}/${goal.need}</span>
+      </span>
+    </div>`).join('');
+  dom.commissionBody.innerHTML = `
+    <span class="commission-giver">${escapeText(tracked.giver)}</span>
+    <strong class="commission-title">${escapeText(tracked.title)}</strong>
+    ${rows}
+    ${complete ? '<span class="commission-ready">READY TO SIGN OFF</span>' : `<span class="commission-hint">${escapeText(tracked.hint)}</span>`}`;
+}
+
+function renderCommissionJournal() {
+  const rows = COMMISSIONS.map((commission) => {
+    const done = isCommissionComplete(commission, save);
+    const unlocked = isCommissionUnlocked(commission, save);
+    const { goals } = commissionProgress(commission, save);
+    const summary = done
+      ? 'Signed off'
+      : unlocked
+        ? goals.map((goal) => `${escapeText(goal.label)} ${goal.have}/${goal.need}`).join(' · ')
+        : 'Locked — finish the commissions before it';
+    return `<div class="journal-commission ${unlocked ? '' : 'is-locked'}">
+      <span class="journal-commission-mark">${done ? '✓' : unlocked ? '·' : '×'}</span>
+      <span><strong>${escapeText(commission.title)}</strong><small>${escapeText(commission.giver)} · ${summary}</small></span>
+      <span class="journal-chip">${done ? 'DONE' : unlocked ? 'OPEN' : 'LOCKED'}</span>
+    </div>`;
+  }).join('');
+  const totals = commissionOverall(save);
+  return `<div class="journal-section">
+    <div class="card-heading"><span class="eyebrow">FIELD COMMISSIONS</span><span class="journal-chip">${totals.done} / ${totals.total}</span></div>
+    ${rows}
+  </div>`;
+}
+
+
+// --- First-run walkthrough -----------------------------------------------------
+// A new arrival used to land in the forest with a rod and no idea that any of
+// the other systems existed; the journal was the only place that said so, and it
+// assumes you already know what you are looking at. This introduces one thing at
+// a time and then gets out of the way — the commission chain takes over from
+// there, which is why it stops at the point the first commission can teach the
+// rest by doing.
+//
+// It deliberately does not lock the field. Reading about controls is worse than
+// using them, so the card sits above the action dock and the player can walk,
+// look and click while it is up.
+const ONBOARDING_STEPS = [
+  {
+    title: 'Welcome to the field',
+    copy: 'You are standing in it. Click once to take the mouse and look around, then walk with the keys below. Everything here runs on your own machine and saves as you go.',
+    keys: ['W A S D — move', 'Mouse — look', 'Esc — release the mouse']
+  },
+  {
+    title: 'The field kit',
+    copy: 'Three tools cover most of the work. The rod fishes, the net takes animals and insects once you are close enough, and the magnifying glass observes the small things properly before you catch them.',
+    keys: ['1 — rod', '2 — net', '3 — magnifying glass', 'Left click — use']
+  },
+  {
+    title: 'Go quietly',
+    copy: 'Animals hear you coming. Holding Shift halves your pace and your noise, and the meter on the right tells you how much of a racket you are making. Most things worth catching need it.',
+    keys: ['Shift — sneak', 'Noise meter — right rail']
+  },
+  {
+    title: 'The field keeps its own hours',
+    copy: 'Owls and raccoons come out at dusk, butterflies and squirrels work in daylight, and anything off duty leaves the field until its hours come round. Sleep in the cabin bunk to jump the clock.',
+    keys: ['J — field journal', 'E — interact', 'Clock — top bar']
+  },
+  {
+    title: 'Somewhere to start',
+    copy: 'Grayson wants one fish for the record. Your commission is tracked in the left rail — follow it, and the rest of the field introduces itself as you go.',
+    keys: ['E — talk to people', '⛁ — save records', 'M — mute audio']
+  }
+];
+
+function onboardingActive() {
+  return Number(save.onboardingStep || 0) < ONBOARDING_STEPS.length;
+}
+
+function renderOnboarding() {
+  if (!dom.onboarding) return;
+  if (!onboardingActive()) {
+    dom.onboarding.classList.add('is-hidden');
+    return;
+  }
+  const index = Number(save.onboardingStep || 0);
+  const step = ONBOARDING_STEPS[index];
+  dom.onboarding.classList.remove('is-hidden');
+  dom.onboardingTitle.textContent = step.title;
+  dom.onboardingCopy.textContent = step.copy;
+  dom.onboardingKeys.replaceChildren(...step.keys.map((key) => {
+    const item = document.createElement('li');
+    item.textContent = key;
+    return item;
+  }));
+  dom.onboardingStep.textContent = `STEP ${index + 1} OF ${ONBOARDING_STEPS.length}`;
+  dom.onboardingNext.textContent = index === ONBOARDING_STEPS.length - 1 ? 'INTO THE FIELD' : 'NEXT';
+}
+
+function advanceOnboarding(step = 1) {
+  save.onboardingStep = Math.min(ONBOARDING_STEPS.length, Number(save.onboardingStep || 0) + step);
+  playCue('ui');
+  saveGame();
+  renderOnboarding();
+  if (!onboardingActive()) setStatus(describeNextCommission());
+}
+
+function skipOnboarding() {
+  save.onboardingStep = ONBOARDING_STEPS.length;
+  playCue('ui');
+  saveGame();
+  renderOnboarding();
+  setStatus(describeNextCommission());
+}
+
+if (dom.onboardingNext) dom.onboardingNext.addEventListener('click', () => { resumeAudio(); advanceOnboarding(); });
+if (dom.onboardingSkip) dom.onboardingSkip.addEventListener('click', () => { resumeAudio(); skipOnboarding(); });
+
 function renderJournal() {
   if (!dom.journalBody) return;
   const phase = getDayPhase();
@@ -7891,6 +8388,8 @@ function renderJournal() {
         <span>${DAY_PERIOD_LABELS[nextPeriod]} begins in ${formatDuration(getPeriodSecondsRemaining(phase))}. ${outNow.length} of ${landSpecies.length} land species are out right now.</span>
       </span>
     </div>
+
+    ${renderCommissionJournal()}
 
     <div class="journal-section">
       <p class="eyebrow">FIELD RECORD</p>
@@ -7980,6 +8479,7 @@ function applyPurchase(item) {
 }
 
 function buyItem(itemKey, group) {
+  playCue('coins');
   const item = SHOP_ITEMS.find((candidate) => candidate.key === itemKey && candidate.group === group);
   if (!item || save.coins < item.cost) return;
   applyPurchase(item);
@@ -8048,6 +8548,7 @@ function cookAtStove() {
 }
 
 function cookRecipe(recipeKey) {
+  playCue('cook');
   const recipe = COOKING_RECIPES.find((candidate) => candidate.key === recipeKey);
   if (!recipe) return;
   if ((save.supplies.pans || 0) <= 0) {
@@ -8062,6 +8563,7 @@ function cookRecipe(recipeKey) {
   for (const line of lines) spendPantry(line.resolvedKey, line.amount);
   for (const output of recipe.outputs) {
     save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
+    checkCommissions();
   }
   saveGame();
   updateHUD();
@@ -8146,6 +8648,7 @@ function openBuildMenu(site) {
 }
 
 function buildProject(projectKey) {
+  playCue('build');
   const site = activeBuildSite;
   const project = BUILD_PROJECTS.find((candidate) => candidate.key === projectKey);
   if (!site || !project) return;
@@ -8159,6 +8662,7 @@ function buildProject(projectKey) {
     save.materials[key] = Math.max(0, materialCount(key) - amount);
   }
   placeBuild(site, project.key, true);
+  checkCommissions();
   renderBuildMenu();
 }
 
@@ -8338,6 +8842,11 @@ function activateProfile(slot, options = {}) {
   spookRisk = 0.02;
   currentNoise = spookRisk;
   applySavedDayPhase();
+  // Each record carries its own audio preference, walkthrough position and
+  // commission chain, so all three follow the slot rather than the session.
+  applyAudioPreferences();
+  renderOnboarding();
+  checkCommissions({ announce: false });
   closeAllModals(false);
   setTool('rod');
   enterZone(save.lastZone && ZONES[save.lastZone] ? save.lastZone : 'forest');
@@ -8731,6 +9240,7 @@ function animate() {
   updateMovement(delta);
   GRASS_SWAY_UNIFORM.value = elapsed;
   updateSkyCycle();
+  setAmbienceConditions({ daylight: currentDaylight });
   updateHeldTool();
   updateFishing(delta);
   updateCastPreview();
@@ -8777,6 +9287,9 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  // Moving before clicking the field is a normal way to start, and a keypress is
+  // just as trusted a gesture as the click, so audio comes up either way.
+  resumeAudio();
   const normalizedKey = rememberKey(event, true);
   if (event.code === 'F3' && !event.repeat) {
     event.preventDefault();
@@ -8814,6 +9327,7 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'Digit3') setTool('magnifier');
   if (event.code === 'Digit4') setTool('food');
   if (event.code === 'KeyJ' && !event.repeat) toggleJournal();
+  if (event.code === 'KeyM' && !event.repeat) toggleMute();
   if (event.code === 'KeyB') cycleBait();
   if (event.code === 'KeyL') cycleLure();
   if (event.code === 'KeyF') cycleFood();
@@ -8865,6 +9379,10 @@ window.addEventListener('pointerup', (event) => {
 });
 
 dom.canvas.addEventListener('click', () => {
+  // A browser will not open an AudioContext without a trusted gesture, so the
+  // click that puts the player into field mode is what brings the world's sound
+  // up with it.
+  resumeAudio();
   if (!pointerLocked && !modalOpen && !qteState) activateFieldMode();
 });
 
@@ -9002,8 +9520,62 @@ document.querySelectorAll('[data-close-modal]').forEach((button) => {
   });
 });
 
+
+// --- Field audio controls ------------------------------------------------------
+// The engine holds the live values and the save holds the player's preference;
+// this keeps the two in step and is the only place that writes either.
+function applyAudioPreferences() {
+  setAudioSettings({ muted: Boolean(save.audioMuted), volume: Number(save.audioVolume) });
+  const { muted, volume } = getAudioSettings();
+  if (dom.soundToggle) {
+    dom.soundToggle.setAttribute('aria-pressed', String(muted));
+    dom.soundToggle.textContent = muted ? '🔇' : volume > 0.55 ? '🔊' : '🔉';
+    const hint = document.createElement('span');
+    hint.className = 'key-hint';
+    hint.textContent = ' · M';
+    dom.soundToggle.append(hint);
+    dom.soundToggle.title = muted ? 'Field audio muted (M)' : 'Mute field audio (M)';
+  }
+  if (dom.soundVolume) dom.soundVolume.value = String(Math.round(volume * 100));
+}
+
+function toggleMute() {
+  save.audioMuted = !save.audioMuted;
+  applyAudioPreferences();
+  saveGame();
+  // The confirmation has to come after unmuting or it plays into a muted bus.
+  if (!save.audioMuted) playCue('ui');
+  toast(save.audioMuted ? 'Field audio muted.' : 'Field audio on.', 'success');
+}
+
+function setVolume(value) {
+  save.audioVolume = clamp(Number(value) / 100, 0, 1);
+  if (save.audioVolume > 0) save.audioMuted = false;
+  applyAudioPreferences();
+  saveGame();
+}
+
+if (dom.soundToggle) {
+  dom.soundToggle.addEventListener('click', () => {
+    resumeAudio();
+    toggleMute();
+  });
+}
+if (dom.soundVolume) {
+  dom.soundVolume.addEventListener('input', (event) => {
+    resumeAudio();
+    setVolume(event.target.value);
+    playCue('ui', { throttleMs: 90 });
+  });
+}
+
 createHeldToolModel(activeTool);
 applySavedDayPhase();
+applyAudioPreferences();
+renderOnboarding();
+// Counted rather than announced on boot: a returning record should not be told
+// again about work it finished last session.
+checkCommissions({ announce: false });
 updateProfileLabel();
 renderProfileSlots();
 enterZone(currentZone);
@@ -9011,3 +9583,65 @@ updateHUD();
 setStatus('Find the car to choose a destination. The field is quiet for now.');
 window.setTimeout(() => dom.loadingScreen.classList.add('is-loaded'), 420);
 animate();
+
+// ---------------------------------------------------------------------------
+// Test probe.
+//
+// The automated checks need to drive zones and read renderer counters, and this
+// module deliberately exports nothing. Rather than let the checks rewrite the
+// bundle in flight — which is what they used to do, and why they could only run
+// against a hand-started dev server — the app publishes a narrow read-only
+// handle when it is asked for one. The flag has to be passed in the URL, so a
+// normal page load never attaches it.
+// ---------------------------------------------------------------------------
+if (new URLSearchParams(window.location.search).has('probe')) {
+  window.__conservatoryProbe = {
+    THREE,
+    renderer,
+    scene,
+    world,
+    camera,
+    enterZone,
+    saveGame,
+    loadSave,
+    get save() { return save; },
+    get colliders() { return colliders; },
+    get interactables() { return interactables; },
+    get currentZone() { return currentZone; },
+    caches: { geometry: geometryCache, material: materialCache },
+    setStaticBatching(enabled) { staticBatchingEnabled = enabled; },
+    audio: { getAudioSettings, playCue, startAudio, isReady: () => isAudioReady() },
+    commissions: {
+      tracked: () => trackedCommission(save),
+      open: () => openCommissions(save).map((commission) => commission.id),
+      check: () => checkCommissions({ announce: false }),
+      render: () => renderCommissionCard()
+    },
+    onboarding: { active: () => onboardingActive(), advance: () => advanceOnboarding(), skip: () => skipOnboarding() },
+    // Counts what is actually resident on the GPU against what the live scene
+    // graph still references. The gap between the two is leaked memory.
+    resourceCensus() {
+      const geometries = new Set();
+      const materials = new Set();
+      const textures = new Set();
+      scene.traverse((object) => {
+        if (object.geometry) geometries.add(object.geometry);
+        for (const material of [].concat(object.material || [])) {
+          materials.add(material);
+          for (const value of Object.values(material)) {
+            if (value && value.isTexture) textures.add(value);
+          }
+        }
+      });
+      return {
+        residentGeometries: renderer.info.memory.geometries,
+        residentTextures: renderer.info.memory.textures,
+        reachableGeometries: geometries.size,
+        reachableMaterials: materials.size,
+        reachableTextures: textures.size,
+        drawCalls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles
+      };
+    }
+  };
+}

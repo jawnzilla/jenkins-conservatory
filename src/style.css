@@ -1860,3 +1860,273 @@ h2 {
 .profile-slot-actions .is-danger.is-armed {
   background: rgba(224, 122, 95, 0.36);
 }
+
+/* Field audio control ------------------------------------------------------ */
+/* Sits in the top bar beside the coin count: the mute is the part people reach
+   for in a hurry, so it stays a real button, and the slider only widens on
+   hover or focus so it does not crowd the meta row at rest. */
+.sound-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sound-toggle[aria-pressed="true"] {
+  color: var(--orange, #f2b268);
+  border-color: rgba(242, 178, 104, 0.6);
+  background: rgba(90, 62, 34, 0.36);
+}
+
+.sound-slider {
+  display: flex;
+  align-items: center;
+}
+
+.sound-slider input {
+  width: 44px;
+  height: 12px;
+  accent-color: var(--lime);
+  cursor: pointer;
+  background: transparent;
+  transition: width 140ms ease;
+}
+
+.sound-control:hover .sound-slider input,
+.sound-slider input:focus-visible {
+  width: 82px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 900px) {
+  /* The slider is the first thing to go on a tablet; mute alone still works. */
+  .sound-slider {
+    display: none;
+  }
+}
+
+/* Field commissions -------------------------------------------------------- */
+/* Sits under the lock status in the left rail, where the eye already goes for
+   state. It is a tracker, not a quest log: one commission, its goals, and what
+   to do next. The full list lives in the journal. */
+.commission-card {
+  margin-top: 8px;
+  max-width: 268px;
+}
+
+.commission-count {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--lime);
+}
+
+.commission-title {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  line-height: 1.25;
+  color: #f4f7e8;
+}
+
+.commission-giver {
+  display: block;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--orange, #f2b268);
+}
+
+.commission-goal {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #c9d3bd;
+}
+
+.commission-goal-label {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  line-height: 1.3;
+}
+
+.commission-goal-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.commission-goal.is-done {
+  color: var(--lime);
+}
+
+/* The tick is the fastest read of the three, so it leads the row. */
+.commission-goal-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  font-weight: 800;
+}
+
+.commission-goal-bar {
+  flex: 1 1 auto;
+  height: 3px;
+  background: rgba(216, 239, 133, 0.16);
+  overflow: hidden;
+}
+
+.commission-goal-bar span {
+  display: block;
+  height: 100%;
+  background: var(--lime);
+  transition: width 220ms ease;
+}
+
+.commission-goal-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+}
+
+.commission-hint {
+  display: block;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(216, 239, 133, 0.16);
+  font-size: 9px;
+  line-height: 1.4;
+  color: #9fb08d;
+}
+
+.commission-card.is-ready {
+  border-color: rgba(216, 239, 133, 0.75);
+}
+
+.commission-ready {
+  display: block;
+  margin-top: 7px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--lime);
+}
+
+/* Journal commission list -------------------------------------------------- */
+.journal-commission {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(216, 239, 133, 0.1);
+}
+
+.journal-commission.is-locked {
+  opacity: 0.45;
+}
+
+.journal-commission-mark {
+  font-weight: 800;
+  color: var(--lime);
+}
+
+.journal-commission small {
+  display: block;
+  color: #9fb08d;
+}
+
+/* Onboarding --------------------------------------------------------------- */
+/* One card, one idea at a time, only on a fresh record. It deliberately does not
+   block the field: the player can walk around while it is up, because reading
+   about the controls is worse than using them. */
+.onboarding {
+  /* Top centre, under the bar. The bottom of the screen already carries the
+     toast stack, the fishing callout and the action dock, and the walkthrough
+     was landing on top of all three. */
+  position: absolute;
+  left: 50%;
+  top: 96px;
+  transform: translateX(-50%);
+  z-index: 30;
+  pointer-events: none;
+}
+
+.onboarding-panel {
+  width: min(440px, 88vw);
+  pointer-events: auto;
+}
+
+.onboarding-panel h2 {
+  margin: 6px 0 4px;
+  font-size: 15px;
+  color: #f4f7e8;
+}
+
+.onboarding-panel p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c9d3bd;
+}
+
+.onboarding-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-keys li {
+  padding: 3px 6px;
+  border: 1px solid rgba(216, 239, 133, 0.3);
+  background: rgba(67, 91, 50, 0.28);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--lime);
+}
+
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.onboarding-step {
+  flex: 1 1 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #8b9a7c;
+}
+
+.onboarding-next {
+  color: #12200f;
+  background: var(--lime);
+  border-color: var(--lime);
+}
+
+@media (max-width: 900px) {
+  .commission-card {
+    max-width: none;
+  }
+
+  .onboarding {
+    top: auto;
+    bottom: 148px;
+  }
+}
