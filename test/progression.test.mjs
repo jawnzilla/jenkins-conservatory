@@ -59,6 +59,31 @@ const doubled = await page.evaluate(() => {
 });
 if (doubled !== 0) failures.push(`re-checking paid another ${doubled} coins`);
 
+// The card sits over the middle of the canvas on a small window, so it must not
+// swallow the click that enters field mode — step one of the walkthrough asks
+// for exactly that click. Only its buttons may take pointer events.
+const clickThrough = await page.evaluate(() => {
+  const panel = document.querySelector('.onboarding-panel');
+  const copy = document.querySelector('#onboarding-copy');
+  const next = document.querySelector('#onboarding-next');
+  return {
+    panel: getComputedStyle(panel).pointerEvents,
+    copy: getComputedStyle(copy).pointerEvents,
+    next: getComputedStyle(next).pointerEvents
+  };
+});
+if (clickThrough.panel !== 'none') failures.push(`onboarding panel takes pointer events (${clickThrough.panel}); it would block entering field mode`);
+if (clickThrough.next !== 'auto') failures.push(`onboarding next button cannot be clicked (${clickThrough.next})`);
+
+// And the buttons still have to work at a small window size.
+await page.setViewportSize({ width: 480, height: 320 });
+await page.waitForTimeout(200);
+await page.click('#onboarding-next');
+const advanced = await page.evaluate(() => window.__conservatoryProbe.save.onboardingStep);
+if (advanced < 1) failures.push('onboarding did not advance when its button was clicked at 480x320');
+await page.click('canvas');
+await page.waitForTimeout(200);
+
 // The walkthrough has to finish and stay finished across a save round-trip.
 const walkthrough = await page.evaluate(() => {
   const P = window.__conservatoryProbe;
