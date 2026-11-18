@@ -329,6 +329,10 @@ const DEFAULT_SAVE = {
   },
   materials: { sticks: 0, stones: 0 },
   builds: {},
+  // Specimens placed on public display in the showcase: the aquarium fish and
+  // the pollinator pedestal. One species per slot; a display is a choice about
+  // what the public sees, never a spend of the catch itself.
+  showcase: { fish: null, bug: null },
   honey: 0,
   records: {},
   caught: {},
@@ -392,6 +396,10 @@ const dom = {
   shopItems: document.querySelector('#shop-items'),
   shopRecord: document.querySelector('#shop-record'),
   stoveModal: document.querySelector('#stove-modal'),
+  showcaseModal: document.querySelector('#showcase-modal'),
+  showcaseTitle: document.querySelector('#showcase-title'),
+  showcaseCopy: document.querySelector('#showcase-copy'),
+  showcaseOptions: document.querySelector('#showcase-options'),
   stoveRecipes: document.querySelector('#stove-recipes'),
   qteModal: document.querySelector('#qte-modal'),
   qteCursor: document.querySelector('.qte-cursor'),
@@ -535,6 +543,10 @@ let zooAnimals = [];
 let zooEnclosures = [];
 let fieldCharacters = [];
 let buildSites = [];
+// The two living-collection displays the player curates: the aquarium fish
+// and the pollinator pedestal. Each holds { model, plaque } or null; rebuilt
+// from save.showcase on every zoo build, cleared with the zone.
+let showcaseDisplays = { fish: null, bug: null };
 let visitors = [];
 let visitorSpawnAt = 0;
 let visitorsSeeded = false;
@@ -643,6 +655,7 @@ function loadSave(slot = activeSlot) {
       cooked: { ...DEFAULT_SAVE.cooked, ...(parsed.cooked || {}) },
       materials: { ...DEFAULT_SAVE.materials, ...(parsed.materials || {}) },
       builds: { ...(parsed.builds || {}) },
+      showcase: { ...DEFAULT_SAVE.showcase, ...(parsed.showcase || {}) },
       honey: Number(parsed.honey || 0),
       records: { ...(parsed.records || {}) },
       caught: { ...(parsed.caught || {}) },
@@ -3250,6 +3263,146 @@ function createPath(x, z, width, length, color = 0xb3a47a) {
   stageStaticProp(group);
 }
 
+// --- Living collection displays ---------------------------------------------
+// The showcase has an aquarium and a pollinator garden, but nothing the
+// player brings back ever went on show: a conservatory that never conserves
+// anything you catch. Each stand takes one species from the caught record —
+// the fish swims with the tank's own circuit, the bug perches on the pedestal
+// — and visitors who tour past a display leave a small coin. The payout stays
+// modest next to fieldwork: it rewards curating, not idling.
+const SHOWCASE_FISH = ['trout', 'sunfish', 'bass', 'crappie'];
+const SHOWCASE_BUGS = ['butterfly', 'bee', 'dragonfly', 'caterpillar', 'spider', 'worm'];
+const SHOWCASE_FISH_STAND = { x: -4.6, z: -19.15 };
+const SHOWCASE_BUG_STAND = { x: 5.2, z: -9.8 };
+
+function createShowcaseStand(x, z, slot, name) {
+  const stand = new THREE.Group();
+  cylinder(stand, 0.34, 0.42, 0.12, 0x45564b, [0, 0.06, 0], { segments: 10 });
+  cylinder(stand, 0.05, 0.065, 0.92, 0x6d5b42, [0, 0.56, 0], { segments: 8 });
+  cylinder(stand, 0.3, 0.3, 0.06, 0x77685a, [0, 1.04, 0], { segments: 10 });
+  const ring = addMesh(stand, new THREE.TorusGeometry(0.26, 0.03, 6, 18), mat(0xd8ef85, { emissive: 0x9aad4b, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }), [0, 1.1, 0], [-Math.PI / 2, 0, 0]);
+  ring.castShadow = false;
+  const sign = makeLabel(name, '#d8ef85', '#30442f', 0.4);
+  sign.position.set(0, 1.62, 0);
+  stand.add(sign);
+  stand.position.set(x, 0, z);
+  world.add(stand);
+  interactables.push({
+    type: 'showcase',
+    slot,
+    label: slot === 'fish' ? 'Review the aquarium display stand' : 'Review the specimen pedestal',
+    position: new THREE.Vector3(x, 1.0, z),
+    radius: 2.4
+  });
+}
+
+function addShowcaseFish() {
+  const key = save.showcase.fish;
+  if (!key || !SPECIES[key]) return;
+  // A touch larger than the tank's ambient fish, so a visitor can tell the
+  // conservatory's own specimen from the display catch.
+  const fish = createAnimalModel(key, 1.14);
+  fish.position.set(0, 2.0, -21.8);
+  fish.userData.zooFish = true;
+  world.add(fish);
+  zooAnimals.push({ group: fish, type: 'fish', center: fish.position.clone(), phase: Math.random() * Math.PI * 2, radiusX: 1.35, radiusZ: 0.75, speed: 0.3 });
+  const plaque = makeLabel(`${SPECIES[key].label} · YOUR CATCH`, '#8be0c3', '#183d3c', 0.5);
+  plaque.position.set(0, 4.45, -19.82);
+  world.add(plaque);
+  showcaseDisplays.fish = { model: fish, plaque };
+}
+
+function addShowcaseBug() {
+  const key = save.showcase.bug;
+  if (!key || !SPECIES[key]) return;
+  const flying = ['butterfly', 'bee', 'dragonfly'].includes(key);
+  const bug = createAnimalModel(key, 1.2);
+  bug.position.set(SHOWCASE_BUG_STAND.x, flying ? 1.68 : 1.24, SHOWCASE_BUG_STAND.z);
+  world.add(bug);
+  if (flying) zooAnimals.push({ group: bug, type: 'flying', center: bug.position.clone(), phase: Math.random() * Math.PI * 2, radiusX: 0.34, radiusZ: 0.26, speed: 0.5 });
+  const plaque = makeLabel(`${SPECIES[key].label} · ON DISPLAY`, '#d8ef85', '#30442f', 0.34);
+  plaque.position.set(SHOWCASE_BUG_STAND.x + 1.0, 1.7, SHOWCASE_BUG_STAND.z + 0.3);
+  world.add(plaque);
+  showcaseDisplays.bug = { model: bug, plaque };
+}
+
+// Rebuilds both displays from save.showcase. Swapping a specimen mid-session
+// removes the old model (shared geometry, so a plain removal) and disposes the
+// old plaque's canvas texture, which is unique.
+function refreshShowcaseDisplays() {
+  for (const slot of ['fish', 'bug']) {
+    const display = showcaseDisplays[slot];
+    if (!display) continue;
+    if (display.model) {
+      world.remove(display.model);
+      const index = zooAnimals.findIndex((entry) => entry.group === display.model);
+      if (index >= 0) zooAnimals.splice(index, 1);
+    }
+    if (display.plaque) {
+      display.plaque.material.map?.dispose();
+      display.plaque.material.dispose();
+      world.remove(display.plaque);
+    }
+  }
+  showcaseDisplays = { fish: null, bug: null };
+  addShowcaseFish();
+  addShowcaseBug();
+}
+
+function showcaseCandidates(slot) {
+  const pool = slot === 'fish' ? SHOWCASE_FISH : SHOWCASE_BUGS;
+  return pool.filter((key) => (save.caught[key] || 0) > 0);
+}
+
+function openShowcaseMenu(slot) {
+  const occupied = save.showcase[slot];
+  const candidates = showcaseCandidates(slot);
+  dom.showcaseTitle.textContent = slot === 'fish' ? 'The aquarium display' : 'The pollinator pedestal';
+  dom.showcaseCopy.textContent = occupied
+    ? `${SPECIES[occupied].label} is on display. Choose another specimen from your record, or retire the display to leave the spot open.`
+    : candidates.length
+      ? 'Choose a specimen from your record. One species per display, and it can be swapped at any time.'
+      : 'Nothing eligible yet: land a fish or catch one of the small things, and this stand will take it on display.';
+  const options = candidates.map((key) => {
+    const active = occupied === key;
+    return `<button class="recipe-option ${active ? 'is-complete' : ''}" type="button" data-showcase-key="${key}">
+      <span class="recipe-copy">
+        <span class="recipe-name">${SPECIES[key].label}</span>
+        <span class="recipe-note">${SPECIES[key].note}</span>
+      </span>
+      <span class="recipe-status">${active ? 'ON DISPLAY' : 'PLACE'}</span>
+    </button>`;
+  });
+  if (occupied) {
+    options.push(`<button class="recipe-option" type="button" data-showcase-key="__retire">
+      <span class="recipe-copy">
+        <span class="recipe-name">Retire the display</span>
+        <span class="recipe-note">Leave the spot open for another specimen.</span>
+      </span>
+      <span class="recipe-status">RETIRE</span>
+    </button>`);
+  }
+  dom.showcaseOptions.innerHTML = options.join('');
+  dom.showcaseOptions.querySelectorAll('[data-showcase-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.showcaseKey;
+      if (key === '__retire') {
+        save.showcase[slot] = null;
+        toast('The display is open again.', 'info');
+      } else if (key !== save.showcase[slot]) {
+        save.showcase[slot] = key;
+        playCue('success');
+        toast(`${SPECIES[key].label} is on display for the visitors.`, 'success');
+        setStatus('A specimen on display draws visitors to the glass. They leave a small coin for the conservatory.');
+      }
+      saveGame();
+      refreshShowcaseDisplays();
+      closeModal(dom.showcaseModal);
+    });
+  });
+  openModal(dom.showcaseModal);
+}
+
 function createFieldResearchBoat() {
   const group = createResearchSkiffModel();
   // Float beyond the end rail, not intersecting the dock planks.
@@ -3409,9 +3562,11 @@ function createShopDisplay(item, x, z, row = 0, rotation = 0) {
 function createStoreRecordBoard() {
   const board = new THREE.Group();
   board.position.set(-5.45, 2.1, -8.95);
-  box(board, [3.0, 2.0, 0.16], 0x314b39, [0, 0, 0]);
+  // Taller than it was: the wall now holds one row per species rather than a
+  // single best-overall label, so a season of records has somewhere to live.
+  box(board, [3.0, 2.7, 0.16], 0x314b39, [0, 0, 0]);
   const label = makeLabel('RECORD FISH', '#f2c84b', '#2f3a2c', 0.4);
-  label.position.set(0, 0.56, -0.12);
+  label.position.set(0, 0.86, -0.12);
   board.add(label);
   world.add(board);
   storeRecordBoard = board;
@@ -3420,18 +3575,42 @@ function createStoreRecordBoard() {
 
 function refreshStoreRecordBoard() {
   if (!storeRecordBoard) return;
-  if (storeRecordBoard.userData.details) storeRecordBoard.remove(storeRecordBoard.userData.details);
+  if (storeRecordBoard.userData.details) {
+    // Plaque sprites carry unique canvas textures: dispose them on rebuild so
+    // the board never eats a texture per visit.
+    storeRecordBoard.userData.details.forEach((label) => {
+      label.material.map?.dispose();
+      label.material.dispose();
+      storeRecordBoard.remove(label);
+    });
+  }
   // A record is only trustworthy if its species exists and its weight is a
   // number. This board runs inside buildStore, and nothing catches zone-build
   // errors, so one drifted record would otherwise hang the store forever.
-  const records = Object.values(save.records || {})
+  const valid = Object.values(save.records || {})
     .filter((record) => record && SPECIES[record.species] && Number.isFinite(Number(record.weight)));
-  const best = records.sort((a, b) => Number(b.weight) - Number(a.weight))[0];
-  if (!best) return;
-  const details = makeLabel(`${SPECIES[best.species].label} · ${best.weight}LB`, '#f0eccf', '#3f5c48', 0.25);
-  details.position.set(0, -0.22, -0.12);
-  storeRecordBoard.add(details);
-  storeRecordBoard.userData.details = details;
+  const bySpecies = new Map();
+  for (const record of valid) {
+    const held = bySpecies.get(record.species);
+    if (!held || Number(record.weight) > Number(held.weight)) bySpecies.set(record.species, record);
+  }
+  const ordered = [...bySpecies.values()].sort((a, b) => Number(b.weight) - Number(a.weight));
+  const rows = [];
+  let y = 0.24;
+  for (const record of ordered.slice(0, 4)) {
+    const row = makeLabel(`${SPECIES[record.species].label} · ${record.weight}LB BEST`, '#f0eccf', '#3f5c48', 0.24);
+    row.position.set(0, y, -0.12);
+    storeRecordBoard.add(row);
+    rows.push(row);
+    y -= 0.5;
+  }
+  if (!rows.length) {
+    const empty = makeLabel('LAND A FISH TO SET THE FIRST RECORD', '#9fc3ad', '#3f5c48', 0.24);
+    empty.position.set(0, -0.2, -0.12);
+    storeRecordBoard.add(empty);
+    rows.push(empty);
+  }
+  storeRecordBoard.userData.details = rows;
 }
 
 
@@ -4868,6 +5047,10 @@ function buildZoo() {
   createShowcaseGarden();
   createShowcaseCabin(13.8, 4.2);
   createRearShowcaseGreenSpace();
+  // The two living-collection stands, and whatever the record has on display.
+  createShowcaseStand(SHOWCASE_FISH_STAND.x, SHOWCASE_FISH_STAND.z, 'fish', 'AQUARIUM DISPLAY');
+  createShowcaseStand(SHOWCASE_BUG_STAND.x, SHOWCASE_BUG_STAND.z, 'bug', 'SPECIMEN PEDESTAL');
+  refreshShowcaseDisplays();
 
   const record = new THREE.Group();
   record.position.set(0, 0, -4.2);
@@ -5379,6 +5562,22 @@ function sendVisitorHome(visitor) {
   if (visitor.interactable) {
     interactables = interactables.filter((entry) => entry !== visitor.interactable);
     visitor.interactable = null;
+  }
+  // A visitor who toured the showcase past a display leaves a small coin for
+  // the conservatory: one display pays 3, both pay 4. Deliberately modest —
+  // a minute of fishing outearns it; this rewards curating, not idling.
+  if (currentZone === 'zoo') {
+    const labels = [save.showcase.fish, save.showcase.bug]
+      .filter((key) => key && SPECIES[key])
+      .map((key) => SPECIES[key].label.toLowerCase());
+    if (labels.length) {
+      const tip = 2 + labels.length;
+      save.coins += tip;
+      playCue('coins', { throttleMs: 6000 });
+      toast(`A visitor admired the ${labels.join(' and ')} on display. +${tip}¢.`, 'success');
+      saveGame();
+      updateHUD();
+    }
   }
   const car = visitor.car;
   despawnVisitor(visitor);
@@ -6646,6 +6845,7 @@ function resetWorld() {
   lakeGateNotified = false;
   lakeCabinBoundaryNotified = false;
   storeRecordBoard = null;
+  showcaseDisplays = { fish: null, bug: null };
   cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
   removeFishingVisuals();
@@ -8302,7 +8502,7 @@ function closeModal(element) {
 
 function closeAllModals(restore = true) {
   document.querySelector('#game-shell').appendChild(feedbackHub);
-  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal, dom.journalModal, dom.buildModal, dom.sleepModal].forEach((modal) => modal.classList.add('is-hidden'));
+  [dom.travelModal, dom.shopModal, dom.stoveModal, dom.qteModal, dom.cleaningModal, dom.collectionModal, dom.journalModal, dom.buildModal, dom.sleepModal, dom.showcaseModal].forEach((modal) => modal.classList.add('is-hidden'));
   dom.journalToggleButton?.setAttribute('aria-expanded', 'false');
   modalOpen = false;
   qteState = null;
@@ -8622,6 +8822,7 @@ function renderJournal() {
         ${journalRow('Field notes logged', notes)}
         ${journalRow('Coins', `${save.coins}¢`)}
         ${journalRow('Specimens researched', save.graysonResearch || 0)}
+        ${journalRow('On display', [save.showcase.fish, save.showcase.bug].filter((key) => key && SPECIES[key]).map((key) => SPECIES[key].label).join(' · ') || 'None yet')}
       </div>
       ${records.length
         ? `<p class="journal-note">Personal bests · ${records.map((record) => formatFishRecord(record)).join(' · ')}</p>`
@@ -9281,6 +9482,10 @@ function handleInteract() {
   }
   if (target?.type === 'collection') {
     openCollection();
+    return;
+  }
+  if (target?.type === 'showcase') {
+    openShowcaseMenu(target.slot);
     return;
   }
   if (target?.type === 'tree') {
