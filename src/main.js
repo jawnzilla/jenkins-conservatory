@@ -41,7 +41,7 @@ const ZONES = {
     visualBounds: { minX: -21, maxX: 21, minZ: -22, maxZ: 36 }
   },
   forest: {
-    label: 'LAKE FOREST',
+    label: 'NORTHWATER FIELD',
     title: 'Northwater Field',
     note: 'Disturbances mark the lake hot spots.',
     background: 0x91aa92,
@@ -276,8 +276,12 @@ const DEFAULT_SAVE = {
   profileName: '',
   savedAt: 0,
   // Where in the day/night cycle this profile left off, so the field clock is
-  // remembered along with everything else.
-  dayPhase: null,
+  // remembered along with everything else. A fresh record wakes at 09:00 —
+  // phase 5/24 plus the 4-hour readout offset — because the first frame a new
+  // player sees should be the field in daylight, and night is something the
+  // day eases into rather than the cold open. Returning records keep the time
+  // they actually left at, as saved by saveGame.
+  dayPhase: 5 / 24,
   tipsEnabled: true,
   // Audio preferences live in the save so they survive a reload like everything
   // else the player sets, and so each field record can keep its own.
@@ -484,6 +488,10 @@ const forwardDirection = new THREE.Vector3();
 const rightDirection = new THREE.Vector3();
 const tempVector = new THREE.Vector3();
 const tempVector2 = new THREE.Vector3();
+// Scratch colours for the sky loop, which runs every frame forever: six
+// allocations a frame was ~360 colours a second doing identical work.
+const tempColor = new THREE.Color();
+const tempColor2 = new THREE.Color();
 
 let activeSlot = readActiveSlot();
 let save = loadSave();
@@ -780,6 +788,33 @@ function addMesh(parent, geometry, material, position = [0, 0, 0], rotation = [0
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+// Bakes a shore-to-deep tint into a water disc's vertices, so a lake reads as
+// depth rather than one flat colour — the review's "near-uniform turquoise" —
+// at no extra draw call: the disc keeps a single mesh and a shared material,
+// the water itself carries the variation.
+function applyWaterDepthColors(geometry, deep, shore) {
+  const positions = geometry.attributes.position;
+  const count = positions.count;
+  const colors = new Float32Array(count * 3);
+  const deepColor = new THREE.Color(deep);
+  const shoreColor = new THREE.Color(shore);
+  const scratch = new THREE.Color();
+  let maxRadius = 0;
+  for (let index = 0; index < count; index += 1) {
+    maxRadius = Math.max(maxRadius, Math.hypot(positions.getX(index), positions.getY(index)));
+  }
+  for (let index = 0; index < count; index += 1) {
+    // Ease the blend so the shallows stay light and the drop-off reads quickly.
+    const depth = Math.pow(Math.min(1, Math.hypot(positions.getX(index), positions.getY(index)) / maxRadius), 0.8);
+    scratch.copy(shoreColor).lerp(deepColor, depth);
+    colors[index * 3] = scratch.r;
+    colors[index * 3 + 1] = scratch.g;
+    colors[index * 3 + 2] = scratch.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
 }
 
 function addCollider(x, z, radius, options = {}) {
@@ -1213,11 +1248,15 @@ function getSkyCycleSample() {
 function updateSkyCycle() {
   if (!skybox) return;
   const { before, after, blend } = getSkyCycleSample();
-  const topColor = new THREE.Color(before.top).lerp(new THREE.Color(after.top), blend);
-  const horizonColor = new THREE.Color(before.horizon).lerp(new THREE.Color(after.horizon), blend);
-  const lowerColor = new THREE.Color(before.lower).lerp(new THREE.Color(after.lower), blend);
+  const topColor = tempColor.set(before.top).lerp(tempColor2.set(after.top), blend);
   skyUniforms.topColor.value.copy(topColor);
+  const horizonColor = tempColor.set(before.horizon).lerp(tempColor2.set(after.horizon), blend);
   skyUniforms.horizonColor.value.copy(horizonColor);
+  // Fog takes the sky's own horizon colour, so distant ground dissolves into
+  // the sky behind it at every hour of the clock. A fixed per-zone fog colour
+  // only matched midday: dawn, dusk and night all hard-cut against it.
+  if (scene.fog) scene.fog.color.copy(horizonColor);
+  const lowerColor = tempColor.set(before.lower).lerp(tempColor2.set(after.lower), blend);
   skyUniforms.lowerColor.value.copy(lowerColor);
   const daylight = THREE.MathUtils.lerp(before.daylight, after.daylight, blend);
   currentDaylight = daylight;
@@ -1233,11 +1272,11 @@ function updateSkyCycle() {
     }
   }
   if (skyCloudMaterial) {
-    skyCloudMaterial.color.copy(new THREE.Color(0x777d93).lerp(new THREE.Color(0xf4f0e2), daylight));
+    skyCloudMaterial.color.copy(tempColor.set(0x777d93).lerp(tempColor2.set(0xf4f0e2), daylight));
     skyCloudMaterial.opacity = 0.16 + daylight * 0.46;
   }
   sunLight.intensity = (currentZone === 'forest' ? 3.45 : 3.05) * (0.18 + daylight * 0.82);
-  sunLight.color.copy(new THREE.Color(0xb4bce0).lerp(new THREE.Color(0xffedc3), daylight));
+  sunLight.color.copy(tempColor.set(0xb4bce0).lerp(tempColor2.set(0xffedc3), daylight));
   hemiLight.intensity = 0.62 + daylight * 1.58;
   updateSunPosition();
 }
@@ -3241,7 +3280,7 @@ function createPondDock() {
 function createPracticePond() {
   const centerX = -15.2;
   const centerZ = -20.8;
-  addMesh(world, new THREE.CircleGeometry(4.35, 40), mat(0x3d94a0, { roughness: 0.2, transparent: true, opacity: 0.88 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
+  addMesh(world, applyWaterDepthColors(new THREE.CircleGeometry(4.35, 40), 0x2a6b76, 0x5cb0ba), mat(0xffffff, { vertexColors: true, roughness: 0.2, transparent: true, opacity: 0.88 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
   addMesh(world, new THREE.RingGeometry(4.38, 4.62, 40), mat(0x8da36f, { roughness: 1 }), [centerX, 0.07, centerZ], [-Math.PI / 2, 0, 0]);
   const practiceLabel = makeLabel('PRACTICE POND', '#8be0c3', '#183d3c', 0.52);
   practiceLabel.position.set(centerX, 2.55, centerZ - 0.2);
@@ -3478,7 +3517,7 @@ function buildForest() {
   createPath(0, -1.7, 5.5, 25, 0x9d946e);
   box(world, [5.5, 0.07, 7], 0x7f815e, [0, 0, -10], { rotation: [0, 0, 0.04] });
 
-  const water = addMesh(world, new THREE.CircleGeometry(10, 48), mat(0x2f8291, { roughness: 0.24, metalness: 0.05, transparent: true, opacity: 0.9 }), [0, 0.08, -17], [-Math.PI / 2, 0, 0]);
+  const water = addMesh(world, applyWaterDepthColors(new THREE.CircleGeometry(10, 48), 0x215c6a, 0x52a3ad), mat(0xffffff, { vertexColors: true, roughness: 0.24, metalness: 0.05, transparent: true, opacity: 0.9 }), [0, 0.08, -17], [-Math.PI / 2, 0, 0]);
   water.receiveShadow = true;
   const shoreline = addMesh(world, new THREE.RingGeometry(10.1, 10.45, 48), mat(0x8da36f, { roughness: 1 }), [0, 0.07, -17], [-Math.PI / 2, 0, 0]);
   shoreline.receiveShadow = true;
@@ -5811,7 +5850,7 @@ function createJenkinsLakeForest() {
 
 function createJenkinsLakeWater() {
   const { centerX, centerZ, radiusX, radiusZ } = JENKINS_LAKE_WATER;
-  const water = addMesh(world, new THREE.CircleGeometry(31, 72), mat(0x2f8291, { roughness: 0.2, transparent: true, opacity: 0.9 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
+  const water = addMesh(world, applyWaterDepthColors(new THREE.CircleGeometry(31, 72), 0x1d5260, 0x4d98a2), mat(0xffffff, { vertexColors: true, roughness: 0.2, transparent: true, opacity: 0.9 }), [centerX, 0.08, centerZ], [-Math.PI / 2, 0, 0]);
   water.scale.set(radiusX / 31, radiusZ / 31, 1);
   const shoreline = addMesh(world, new THREE.RingGeometry(31.05, 31.75, 72), mat(0x8da36f, { roughness: 1 }), [centerX, 0.07, centerZ], [-Math.PI / 2, 0, 0]);
   shoreline.scale.set(radiusX / 31, radiusZ / 31, 1);
