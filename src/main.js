@@ -18,6 +18,10 @@ const SAVE_KEY = 'jenkins-conservatory-save-v1';
 const ACTIVE_SLOT_KEY = 'jenkins-conservatory-active-profile-v1';
 const SAVE_SLOTS = [1, 2, 3];
 const ZONE_ORDER = ['store', 'forest', 'zoo', 'lake'];
+// The three destination zones where the field tools work. The store is a shop,
+// not a field. This list used to be re-typed at ~20 call sites, so adding a
+// zone meant hunting every one of them down.
+const FIELD_TOOL_ZONES = ['forest', 'zoo', 'lake'];
 const FLOWER_GROW_MS = 5 * 60 * 1000;
 const FLOWER_LIFE_MS = 2 * 60 * 60 * 1000;
 const PLAYER_RADIUS = 0.46;
@@ -102,6 +106,18 @@ const JENKINS_LAKE_DOCKS = [
   { x: -33, shoreZ: -121.7, endZ: -134.5, width: 3.2 },
   { x: 0, shoreZ: -120.7, endZ: -133.8, width: 3.4 },
   { x: 29, shoreZ: -123.2, endZ: -136.2, width: 3.2 }
+];
+
+// The four lake buildings, as one table. The footprint (width/depth) is what
+// keeps flora off the floors, and it used to live a second time, by hand, in
+// isJenkinsLakeClearPosition — the two copies drifted at the first edit. The
+// builders are function declarations, so the references hoist fine up here.
+const JENKINS_LAKE_BUILDINGS = [
+  { x: -18, z: -28, width: 18, depth: 12, build: createLakeBarn },
+  { x: 17, z: -31, width: 12, depth: 10, build: createLakeShack },
+  { x: -9.5, z: -72, width: 14, depth: 14, build: createLakeCabin },
+  { x: -34, z: -96, width: 14, depth: 12, build: createLakeCabin },
+  { x: -25, z: -108, width: 8.5, depth: 7.2, build: createLakeGarage, label: 'WEST GARAGE · CLOSED' }
 ];
 
 const JENKINS_LAKE_YARDS = [
@@ -214,7 +230,7 @@ const SPECIES = {
   sunfish: { label: 'Bluegill sunfish', type: 'fish', sigil: '◌', color: 0x70a6be, note: 'Feather + grubs', activity: ALWAYS_ACTIVE },
   bass: { label: 'Largemouth bass', type: 'fish', sigil: '◒', color: 0x688c5a, note: 'Spinner + worms · lily pads', activity: ALWAYS_ACTIVE },
   crappie: { label: 'Black crappie', type: 'fish', sigil: '◍', color: 0x8994a3, note: 'Spinner + worms · deep lake', activity: ALWAYS_ACTIVE },
-  rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◒', color: 0xe6d7bf, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
+  rabbit: { label: 'Cottontail rabbit', type: 'ground', sigil: '◔', color: 0xe6d7bf, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
   squirrel: { label: 'Red squirrel', type: 'ground', sigil: '◓', color: 0xb56843, note: 'Sneak + net', activity: ['dawn', 'day'] },
   fox: { label: 'Red fox', type: 'ground', sigil: '◇', color: 0xc96c3e, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
   frog: { label: 'Green frog', type: 'ground', sigil: '◉', color: 0x6fb36d, note: 'Sneak + net', activity: ['dawn', 'dusk', 'night'] },
@@ -222,12 +238,12 @@ const SPECIES = {
   owl: { label: 'Tawny owl', type: 'flying', sigil: '◎', color: 0xb79a70, note: 'Sneak + net', activity: ['dusk', 'night'] },
   raccoon: { label: 'Raccoon', type: 'ground', sigil: '◐', color: 0x899291, note: 'Sneak + net', activity: ['dusk', 'night'] },
   sparrow: { label: 'House sparrow', type: 'flying', sigil: '⌁', color: 0x9a8064, note: 'Sneak + net', activity: ['dawn', 'day'] },
-  duck: { label: 'Mallard duck', type: 'water', sigil: '◒', color: 0x587a61, note: 'Floats on the lake', activity: ['dawn', 'day', 'dusk'] },
+  duck: { label: 'Mallard duck', type: 'water', sigil: '◑', color: 0x587a61, note: 'Floats on the lake', activity: ['dawn', 'day', 'dusk'] },
   butterfly: { label: 'Painted butterfly', type: 'bug', sigil: '✦', color: 0xf0a4c1, note: 'Catch with net', activity: ['day'] },
   bee: { label: 'Meadow bee', type: 'bug', sigil: '✧', color: 0xf2c84b, note: 'Catch with net', activity: ['dawn', 'day'] },
-  dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌁', color: 0x83cfe7, note: 'Catch with net', activity: ['day', 'dusk'] }
-  ,caterpillar: { label: 'Monarch caterpillar', type: 'bug', sigil: '◍', color: 0xd59c3a, note: 'Magnify on flowers', activity: ['dawn', 'day'] }
-  ,worm: { label: 'Earthworm', type: 'bug', sigil: '≈', color: 0xb7775b, note: 'Magnify on plants · fishing lure', activity: ['dawn', 'dusk', 'night'] }
+  dragonfly: { label: 'Blue dragonfly', type: 'bug', sigil: '⌇', color: 0x83cfe7, note: 'Catch with net', activity: ['day', 'dusk'] }
+  ,caterpillar: { label: 'Monarch caterpillar', type: 'bug', sigil: '✾', color: 0xd59c3a, note: 'Magnify on flowers', activity: ['dawn', 'day'] }
+  ,worm: { label: 'Earthworm', type: 'bug', sigil: '〜', color: 0xb7775b, note: 'Magnify on plants · fishing lure', activity: ['dawn', 'dusk', 'night'] }
   ,spider: { label: 'Garden spider', type: 'bug', sigil: '✣', color: 0x81768c, note: 'Magnify near webs', activity: ['dawn', 'dusk', 'night'] }
 };
 
@@ -2769,6 +2785,7 @@ function updateGardenPlotMarkers() {
 }
 
 function updateBeehives() {
+  if (!beehives.length) return;
   const flowerCount = pollinatorFlowers.filter((flower) => flower.record ? flower.record.bloomsAt <= Date.now() : true).length;
   const beeCount = 3 + (save.caught.bee || 0);
   for (const hive of beehives) {
@@ -3358,8 +3375,12 @@ function createStoreRecordBoard() {
 function refreshStoreRecordBoard() {
   if (!storeRecordBoard) return;
   if (storeRecordBoard.userData.details) storeRecordBoard.remove(storeRecordBoard.userData.details);
-  const records = Object.values(save.records || {});
-  const best = records.sort((a, b) => b.weight - a.weight)[0];
+  // A record is only trustworthy if its species exists and its weight is a
+  // number. This board runs inside buildStore, and nothing catches zone-build
+  // errors, so one drifted record would otherwise hang the store forever.
+  const records = Object.values(save.records || {})
+    .filter((record) => record && SPECIES[record.species] && Number.isFinite(Number(record.weight)));
+  const best = records.sort((a, b) => Number(b.weight) - Number(a.weight))[0];
   if (!best) return;
   const details = makeLabel(`${SPECIES[best.species].label} · ${best.weight}LB`, '#f0eccf', '#3f5c48', 0.25);
   details.position.set(0, -0.22, -0.12);
@@ -5664,14 +5685,7 @@ function isJenkinsLakeClearPosition(x, z, allowMeadow = false) {
   const inMeadow = Math.abs(x) < 15.2 && z > -120 && z < -78;
   const rightOfShackBarrier = x > 25.5 && z > -44 && z < -18;
   const inCabinYard = isJenkinsLakeYardPosition(x, z);
-  const buildings = [
-    [-18, -28, 18, 12],
-    [17, -31, 12, 10],
-    [-9.5, -72, 14, 14],
-    [-34, -96, 14, 12],
-    [-25, -108, 8.5, 7.2]
-  ];
-  const inBuilding = buildings.some(([centerX, centerZ, width, depth]) => Math.abs(x - centerX) < width / 2 + 1.1 && Math.abs(z - centerZ) < depth / 2 + 1.1);
+  const inBuilding = JENKINS_LAKE_BUILDINGS.some(({ x: bx, z: bz, width, depth }) => Math.abs(x - bx) < width / 2 + 1.1 && Math.abs(z - bz) < depth / 2 + 1.1);
   const bounds = ZONES.lake.bounds;
   return x > bounds.minX + 2.5 && x < bounds.maxX - 2.5 && z > bounds.minZ + 2.5 && z < bounds.maxZ - 2.5
     && waterDistance >= 1 && !onRoad && !inBuilding && !inCabinYard && !rightOfShackBarrier && (!inMeadow || allowMeadow);
@@ -5896,11 +5910,7 @@ function buildJenkinsLake() {
   createJenkinsLakeMeadow();
   createJenkinsLakeWater();
   createJenkinsLakeYards();
-  createLakeBarn(-18, -28);
-  createLakeShack(17, -31);
-  createLakeCabin(-9.5, -72);
-  createLakeCabin(-34, -96);
-  createLakeGarage(-25, -108, 'WEST GARAGE · CLOSED');
+  JENKINS_LAKE_BUILDINGS.forEach(({ x, z, build, label }) => build(x, z, label));
   lakeParkedCar = createCar();
   lakeParkedCar.position.set(0, 0.25, -63.5);
   lakeParkedCar.visible = false;
@@ -6608,26 +6618,36 @@ function enterZone(zoneKey, announce = false) {
   spawnPoint.copy(player);
   yaw = 0;
   pitch = -0.08;
-  if (zoneKey === 'store') buildStore();
-  if (zoneKey === 'forest') buildForest();
-  if (zoneKey === 'zoo') buildZoo();
-  if (zoneKey === 'lake') {
-    buildJenkinsLake();
-    startJenkinsLakeArrival();
+  // A throw anywhere in a builder used to bubble up uncaught: at boot that
+  // left the loading screen up forever, and on travel it dropped the modal
+  // with no explanation. Catch it, keep the save, and tell the player.
+  try {
+    if (zoneKey === 'store') buildStore();
+    if (zoneKey === 'forest') buildForest();
+    if (zoneKey === 'zoo') buildZoo();
+    if (zoneKey === 'lake') {
+      buildJenkinsLake();
+      startJenkinsLakeArrival();
+    }
+    // Ground cover goes down last: it reads the finished collider list so nothing
+    // sprouts through a wall, a trunk or a shop display.
+    dressZoneFlora(zoneKey);
+    flushGrassBlades();
+    // Everything staged by the scenery producers during the build above lands in
+    // the world here, as one mesh per material rather than one per prop.
+    flushStaticProps();
+    if (debugCollisionVisible) rebuildDebugCollisionVisuals();
+    camera.position.copy(player);
+    updateCameraRotation();
+    save.lastZone = zoneKey;
+    setZoneAmbience(zoneKey);
+    saveGame();
+  } catch (error) {
+    console.error(`Zone build failed: ${zoneKey}`, error);
+    if (dom.loadingScreen) dom.loadingScreen.classList.add('is-loaded');
+    setStatus(`The ${ZONES[zoneKey].title.toLowerCase()} failed to build. Your field record is safe — reload the page to try again.`);
+    toast('The field failed to build. The browser console has the detail.', 'warning');
   }
-  // Ground cover goes down last: it reads the finished collider list so nothing
-  // sprouts through a wall, a trunk or a shop display.
-  dressZoneFlora(zoneKey);
-  flushGrassBlades();
-  // Everything staged by the scenery producers during the build above lands in
-  // the world here, as one mesh per material rather than one per prop.
-  flushStaticProps();
-  if (debugCollisionVisible) rebuildDebugCollisionVisuals();
-  camera.position.copy(player);
-  updateCameraRotation();
-  save.lastZone = zoneKey;
-  setZoneAmbience(zoneKey);
-  saveGame();
   updateHUD();
   // A fresh page load cannot request pointer lock without a trusted gesture.
   // Travel buttons are trusted gestures, so only that path restores field mode here.
@@ -6731,7 +6751,7 @@ function updateFishingVisuals(delta = 0) {
 }
 
 function startCast() {
-  if (!['forest', 'zoo', 'lake'].includes(currentZone) || activeTool !== 'rod') return;
+  if (!FIELD_TOOL_ZONES.includes(currentZone) || activeTool !== 'rod') return;
   if (fishing.phase !== 'idle') return;
   if (['forest', 'lake'].includes(currentZone) && (save.supplies[selectedBait] || 0) <= 0) {
     toast(`No ${selectedBait} left. Visit the field store.`, 'warning');
@@ -7051,7 +7071,7 @@ function catchBug(bug) {
 }
 
 function startBugObservation() {
-  if (!['forest', 'zoo', 'lake'].includes(currentZone) || activeTool !== 'magnifier') return;
+  if (!FIELD_TOOL_ZONES.includes(currentZone) || activeTool !== 'magnifier') return;
   const bug = getAimBug(false);
   if (!bug) {
     toast('Aim at the subtle pulse on the plant branch before inspecting.', 'warning');
@@ -7799,7 +7819,7 @@ function updatePrompt() {
   const target = getInteractionTarget();
   let label = '';
   if (target) label = target.label;
-  const aimedBug = ['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier' ? getAimBug(false) : null;
+  const aimedBug = FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier' ? getAimBug(false) : null;
   if (!target && aimedBug && distanceTo(aimedBug.focusPoint) < 7.2 && !aimedBug.revealed) {
     label = 'Hold lens on pulsing plant section';
   }
@@ -7831,9 +7851,9 @@ function getInteractionTarget() {
 
 function updateCrosshair() {
   let targeted = false;
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') targeted = Boolean(getAimBug(false));
   dom.crosshair.classList.toggle('is-targeted', targeted);
 }
 
@@ -7924,7 +7944,7 @@ function updateHUD() {
 }
 
 function updateFishingTips() {
-  const visible = save.tipsEnabled !== false && ['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod';
+  const visible = save.tipsEnabled !== false && FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod';
   dom.fishingTips.classList.toggle('is-hidden', !visible);
   if (!visible) {
     dom.actionHint.textContent = '';
@@ -7955,14 +7975,14 @@ function updateFishingTips() {
 function updateFishingCallout() {
   const liveState = fishing.phase === 'reeling' ? `${fishing.phase}:${fishing.tensionState}` : fishing.phase;
   const previousState = feedbackHub.dataset.fishingState;
-  feedbackHub.dataset.fishingActive = String(['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState && !lakeBoatPilot?.active && fishing.phase !== 'idle');
+  feedbackHub.dataset.fishingActive = String(FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState && !lakeBoatPilot?.active && fishing.phase !== 'idle');
   feedbackHub.dataset.fishingState = liveState;
   if (previousState && previousState !== liveState && dom.toastStack.firstElementChild?.dataset.fishingState === previousState) {
     window.clearTimeout(feedbackTimer);
     feedbackTimer = null;
     dom.toastStack.replaceChildren();
   }
-  const visible = ['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState;
+  const visible = FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod' && !modalOpen && !qteState;
   dom.fishingCallout.classList.toggle('is-hidden', !visible || lakeBoatPilot?.active);
   if (!visible || lakeBoatPilot?.active) return;
   let message = 'AIM FOR A WATER HOT SPOT';
@@ -7983,7 +8003,7 @@ function updateFishingCallout() {
 }
 
 function updateActionDock() {
-  const fishingActive = ['forest', 'zoo', 'lake'].includes(currentZone) && ['charging', 'waiting', 'bite', 'hooking', 'returning', 'reeling'].includes(fishing.phase);
+  const fishingActive = FIELD_TOOL_ZONES.includes(currentZone) && ['charging', 'waiting', 'bite', 'hooking', 'returning', 'reeling'].includes(fishing.phase);
   if (modalOpen || qteState) {
     dom.actionDock.classList.add('is-hidden');
     return;
@@ -8025,9 +8045,9 @@ function updateActionDock() {
     dom.primaryAction.textContent = 'CLICK TO ENTER FIELD';
   } else if (fishing.phase === 'charging') {
     dom.primaryAction.textContent = `RELEASE CAST ${Math.round(fishing.charge * 100)}%`;
-  } else if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod') {
+  } else if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod') {
     dom.primaryAction.textContent = 'HOLD TO CAST';
-  } else if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier') {
+  } else if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') {
     dom.primaryAction.textContent = 'INSPECT TRACE';
   } else if (['forest', 'store', 'zoo', 'lake'].includes(currentZone) && activeTool === 'net') {
     dom.primaryAction.textContent = 'USE NET';
@@ -9044,12 +9064,17 @@ function serviceActive(until) {
 }
 
 function setAllHabitatsClean(cleaned) {
+  // updateCharacterServices runs this every three seconds for the whole shift.
+  // Writing only when a value actually flips keeps the caretaker shift from
+  // stringifying and storing the save ~300 times with nothing changing.
+  let changed = false;
   zooEnclosures.forEach((enclosure) => {
+    if (enclosure.cleaned !== cleaned) changed = true;
     enclosure.cleaned = cleaned;
     updateEnclosureVisual(enclosure);
     save.cleanedEnclosures[enclosure.id] = cleaned;
   });
-  saveGame();
+  if (changed) saveGame();
 }
 
 function updateCharacterServices() {
@@ -9250,7 +9275,7 @@ function handleInteract() {
     setStatus('A tidy desk overlooks the showcase. It is decorative for now.');
     return;
   }
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier') startBugObservation();
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') startBugObservation();
 }
 
 function handlePrimaryDown() {
@@ -9265,7 +9290,7 @@ function handlePrimaryDown() {
     pullWildCarrot(target);
     return;
   }
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod') {
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod') {
     if (fishing.phase === 'idle') startCast();
     else if (fishing.phase === 'bite') setHook();
     else if (fishing.phase === 'hooking') setHook();
@@ -9273,7 +9298,7 @@ function handlePrimaryDown() {
     else if (fishing.phase === 'reeling') fishing.reelHeld = true;
   } else if (['forest', 'store', 'zoo', 'lake'].includes(currentZone) && activeTool === 'net') {
     useNet();
-  } else if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier') {
+  } else if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') {
     startBugObservation();
   }
 }
@@ -9310,9 +9335,9 @@ function handleActionDown() {
     activateFieldMode();
     return;
   }
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'rod') startCast();
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod') startCast();
   if (['forest', 'store', 'zoo', 'lake'].includes(currentZone) && activeTool === 'net') useNet();
-  if (['forest', 'zoo', 'lake'].includes(currentZone) && activeTool === 'magnifier') startBugObservation();
+  if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') startBugObservation();
 }
 
 function handleActionUp() {
@@ -9385,6 +9410,9 @@ function animate() {
   updateDucks(delta);
   updateBugNodes(delta);
   updateTreeInteractions();
+  // The hive updater was written and then never called, which quietly killed
+  // honey respawns (lootHive hides the drip; only this restores it).
+  updateBeehives();
   updateEnclosureMarkers();
   updateHotspots(delta);
   updateZooAnimals(delta);
