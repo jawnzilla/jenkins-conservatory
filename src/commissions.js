@@ -223,3 +223,93 @@ export function readyToClaim(save = {}) {
 export function overallProgress(save = {}) {
   return { done: completedIds(save).size, total: COMMISSIONS.length };
 }
+
+// ---------------------------------------------------------------------------
+// The winter survey.
+//
+// The commission chain is the tutorial; the survey is what is left when the
+// tutorial is over. A board is five goals drawn from the field's own verbs —
+// fish, species, materials, cooking, cleaning, building — and every goal counts
+// work done while that board is up, never lifetime totals, so a finished
+// record cannot claim boards it did not play. Completing a board pays once and
+// posts the next one; the tracker in the left rail never goes quiet again.
+// ---------------------------------------------------------------------------
+
+const SURVEY_REWARD = 240;
+const SURVEY_GOAL_BONUS = 20;
+
+const SURVEY_TEMPLATES = [
+  { kind: 'fish', need: [3, 4, 5], label: 'Land fish', event: 'fish' },
+  { kind: 'bugs', need: [2, 3, 4], label: 'Catch small things', event: 'bug' },
+  { kind: 'distinctSpecies', need: [2, 3, 4], label: 'Record distinct species', event: 'species' },
+  { kind: 'materialSticks', need: [4, 6, 8], label: 'Gather fallen sticks', event: 'stick' },
+  { kind: 'materialStones', need: [3, 5, 7], label: 'Gather field stones', event: 'stone' },
+  { kind: 'cooked', need: [1, 2], label: 'Cook dishes', event: 'cooked' },
+  { kind: 'cleaned', need: [1, 2], label: 'Clean enclosures', event: 'cleaned' },
+  { kind: 'builds', need: [1, 2], label: 'Raise builds in the yard', event: 'build' }
+];
+
+function seededRandom(seed) {
+  let state = (Math.imul(seed, 0x9e3779b1) >>> 0) || 1;
+  return () => {
+    state = (Math.imul(state ^ (state >>> 15), 0x85ebca6b) >>> 0);
+    state = (Math.imul(state ^ (state >>> 13), 0xc2b2ae35) >>> 0);
+    return ((state >>> 0) % 10000) / 10000;
+  };
+}
+
+export function startSurvey(save = {}) {
+  const count = Number(save.surveyCount || 0);
+  const random = seededRandom(count + 1);
+  // Five distinct templates out of the pool, in a seeded order, so board N is
+  // the same board for every player but no two boards repeat the mix.
+  const pool = SURVEY_TEMPLATES.slice();
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1));
+    [pool[index], pool[swap]] = [pool[swap], pool[index]];
+  }
+  const goals = pool.slice(0, 5).map((template) => {
+    const need = template.need[Math.floor(random() * template.need.length)];
+    return { kind: template.kind, event: template.event, need, have: 0, seen: [], label: `${template.label} · ${need}` };
+  });
+  save.survey = { count, goals, reward: SURVEY_REWARD + goals.length * SURVEY_GOAL_BONUS };
+  return save.survey;
+}
+
+export function surveyProgress(survey) {
+  if (!survey) return { goals: [], complete: false };
+  const goals = survey.goals.map((goal) => ({ label: goal.label, have: Math.min(goal.have, goal.need), need: goal.need, done: goal.have >= goal.need }));
+  return { goals, complete: goals.every((goal) => goal.done) };
+}
+
+// Records one field event against the active board. Returns the board when
+// this event completed it (so the caller can pay out and post the next one),
+// and null otherwise — including when no board is up or the board was already
+// reported complete by an earlier event.
+export function recordSurveyEvent(save = {}, event, key = null) {
+  const survey = save.survey;
+  if (!survey) return null;
+  let completedNow = false;
+  for (const goal of survey.goals) {
+    if (goal.have >= goal.need) continue;
+    if (goal.event !== event) continue;
+    if (event === 'species') {
+      // Distinct this board: track which keys already counted.
+      if (!Array.isArray(goal.seen)) goal.seen = [];
+      if (goal.seen.includes(key)) continue;
+      goal.seen.push(key);
+    }
+    goal.have += 1;
+    if (goal.have >= goal.need && surveyProgress(survey).complete) completedNow = true;
+  }
+  return completedNow ? survey : null;
+}
+
+export function claimSurvey(save = {}) {
+  const survey = save.survey;
+  if (!survey || !surveyProgress(survey).complete) return null;
+  save.coins = Number(save.coins || 0) + survey.reward;
+  save.surveyCount = Number(save.surveyCount || 0) + 1;
+  save.survey = null;
+  return { reward: survey.reward };
+}

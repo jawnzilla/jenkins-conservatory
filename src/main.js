@@ -7,7 +7,8 @@ import {
 import {
   COMMISSIONS, commissionProgress, trackedCommission, readyToClaim,
   openCommissions, isComplete as isCommissionComplete, isUnlocked as isCommissionUnlocked,
-  overallProgress as commissionOverall
+  overallProgress as commissionOverall,
+  startSurvey, recordSurveyEvent, surveyProgress, claimSurvey
 } from './commissions.js';
 import './style.css';
 import './interaction-feedback.css';
@@ -333,6 +334,10 @@ const DEFAULT_SAVE = {
   // the pollinator pedestal. One species per slot; a display is a choice about
   // what the public sees, never a spend of the catch itself.
   showcase: { fish: null, bug: null },
+  // The winter survey: a repeatable five-goal board that starts once the nine
+  // commissions are signed off. Null until then, and between claim and the
+  // next board being posted.
+  survey: null,
   honey: 0,
   records: {},
   caught: {},
@@ -656,6 +661,7 @@ function loadSave(slot = activeSlot) {
       materials: { ...DEFAULT_SAVE.materials, ...(parsed.materials || {}) },
       builds: { ...(parsed.builds || {}) },
       showcase: { ...DEFAULT_SAVE.showcase, ...(parsed.showcase || {}) },
+      survey: parsed.survey || null,
       honey: Number(parsed.honey || 0),
       records: { ...(parsed.records || {}) },
       caught: { ...(parsed.caught || {}) },
@@ -4756,6 +4762,7 @@ function lootNatureStick(loot) {
   loot.marker.visible = false;
   save.coins += 2;
   save.materials.sticks = (save.materials.sticks || 0) + 1;
+  reportSurvey('stick');
   saveGame();
   updateHUD();
   toast(`Fallen stick looted. +1 stick · +2¢ (${save.materials.sticks} sticks)`, 'success');
@@ -4789,6 +4796,7 @@ function lootNatureRock(loot) {
   loot.marker.visible = false;
   save.coins += 3;
   save.materials.stones = (save.materials.stones || 0) + 1;
+  reportSurvey('stone');
   saveGame();
   updateHUD();
   toast(`Field stone gathered. +1 stone · +3¢ (${save.materials.stones} stones)`, 'success');
@@ -5802,6 +5810,7 @@ function placeBuild(site, projectKey, announce = true) {
   site.ring.material.opacity = 0.12;
   site.pad.material.opacity = 0.38;
   if (announce) {
+    reportSurvey('build');
     saveGame();
     updateHUD();
     toast(`${project.label} built. Brax nods approvingly.`, 'success');
@@ -6176,7 +6185,14 @@ function buildJenkinsLake() {
     ['fox', [-27, 0.48, -82]], ['frog', [28, 0.42, -86]], ['rabbit', [-30, 0.42, -104]], ['squirrel', [29, 0.42, -111]],
     ['owl', [16, 2.1, -22]], ['owl', [-17, 2.2, -49]], ['owl', [18, 2.3, -127]],
     ['butterfly', [-21, 1.85, -11]], ['butterfly', [20, 2.1, -39]], ['bee', [-29, 2.6, -25]], ['bee', [27, 2.7, -56]],
-    ['dragonfly', [8, 2.2, -124]], ['dragonfly', [-10, 2.35, -135]]
+    ['dragonfly', [8, 2.2, -124]], ['dragonfly', [-10, 2.35, -135]],
+    // Day-shift voices along the drive in. The road-side table above leans
+    // nocturnal (rabbits, foxes, owls), which read fine when a fresh record
+    // started in the small hours; now it wakes at 09:00, and the drive in was
+    // quiet all day. Sparrows work the road-side trees, a turtle browses by
+    // the gate shore, and two squirrels sit closer to the corridor.
+    ['sparrow', [14, 2.3, -6]], ['sparrow', [-13, 2.2, -8]], ['sparrow', [13, 2.4, -55]],
+    ['squirrel', [-12, 0.42, -12]], ['squirrel', [11.5, 0.42, -14]], ['turtle', [10.5, 0.4, -70]]
   ];
   lakeCritters.forEach(([species, position]) => spawnCritter(species, position));
   createDuck(-6.5, -132, 0);
@@ -6448,6 +6464,7 @@ function completeCleaning() {
   updateEnclosureVisual(enclosure);
   save.cleanedEnclosures[enclosure.id] = true;
   checkCommissions();
+  reportSurvey('cleaned');
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -7128,6 +7145,8 @@ function landFish() {
   const isRecord = !previous || record.weight > previous.weight || (record.weight === previous.weight && record.size > previous.size);
   save.caught[species] = (save.caught[species] || 0) + 1;
   checkCommissions();
+  reportSurvey('fish', species);
+  reportSurvey('species', species);
   save.ingredients[species] = (save.ingredients[species] || 0) + 1;
   save.coins += species === 'trout' ? 18 : 22;
   if (isRecord) save.records[species] = record;
@@ -7265,6 +7284,7 @@ function catchDuck(duck) {
   duck.state = 'captured';
   spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught.duck = (save.caught.duck || 0) + 1;
+  reportSurvey('species', 'duck');
   save.coins += 15;
   world.remove(duck.group);
   saveGame();
@@ -7278,6 +7298,7 @@ function catchCritter(critter) {
   spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught[critter.species] = (save.caught[critter.species] || 0) + 1;
   checkCommissions();
+  reportSurvey('species', critter.species);
   save.coins += 15;
   world.remove(critter.group);
   saveGame();
@@ -7309,6 +7330,8 @@ function catchBug(bug) {
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
   checkCommissions();
+  reportSurvey('bug', bug.species);
+  reportSurvey('species', bug.species);
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -7412,6 +7435,8 @@ function completeBugCapture(bug) {
   bug.marker.visible = false;
   save.caught[bug.species] = (save.caught[bug.species] || 0) + 1;
   checkCommissions();
+  reportSurvey('bug', bug.species);
+  reportSurvey('species', bug.species);
   if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
   save.coins += bug.species === 'worm' ? 4 : 8;
   saveGame();
@@ -8603,22 +8628,52 @@ function grantCommissionReward(commission) {
 // it reads a handful of counters and does nothing when nothing has completed.
 function checkCommissions({ announce = true } = {}) {
   const ready = readyToClaim(save);
-  if (!ready.length) {
-    renderCommissionCard();
-    return;
+  if (ready.length) {
+    for (const commission of ready) {
+      save.commissionsDone.push(commission.id);
+      const reward = grantCommissionReward(commission);
+      if (announce) {
+        playCue('objective');
+        const payout = reward.length ? ` Paid: ${reward.join(', ')}.` : '';
+        toast(`${commission.giver} signs off: ${commission.title}.${payout}`, 'success');
+        setStatus(`Commission complete — ${commission.title}. ${describeNextCommission()}`);
+      }
+    }
+    saveGame();
+    updateHUD();
   }
-  for (const commission of ready) {
-    save.commissionsDone.push(commission.id);
-    const reward = grantCommissionReward(commission);
+  // The last commission signs off into the winter survey: a repeatable board
+  // of five goals, so the tracker in the left rail never goes quiet again.
+  // Boot announces nothing (announce: false) so a returning record is not
+  // re-told about a board it already has; the card still renders it.
+  if (!save.survey && commissionOverall(save).done >= COMMISSIONS.length) {
+    startSurvey(save);
     if (announce) {
       playCue('objective');
-      const payout = reward.length ? ` Paid: ${reward.join(', ')}.` : '';
-      toast(`${commission.giver} signs off: ${commission.title}.${payout}`, 'success');
-      setStatus(`Commission complete — ${commission.title}. ${describeNextCommission()}`);
+      toast(`Grayson posts the winter survey: five goals, ${save.survey.reward}¢. The left rail keeps the board.`, 'success');
+      setStatus('The winter survey is up. Five goals drawn from the field; complete them and the next board posts itself.');
     }
+    saveGame();
   }
-  saveGame();
-  updateHUD();
+  renderCommissionCard();
+}
+
+// One field event against the active survey board. Called from the same sites
+// that already report to the commission chain — every catch, gather, dish,
+// clean and build. Pays out and posts the next board the moment one completes,
+// so the survey never stalls waiting for a hand-in.
+function reportSurvey(event, key = null) {
+  if (!save.survey) return;
+  const completed = recordSurveyEvent(save, event, key);
+  if (completed) {
+    const claim = claimSurvey(save);
+    playCue('objective');
+    toast(`Winter survey complete: +${claim.reward}¢. Grayson posts the next one.`, 'success');
+    setStatus('Survey signed off and paid. The next board is up in the left rail.');
+    startSurvey(save);
+    saveGame();
+    updateHUD();
+  }
   renderCommissionCard();
 }
 
@@ -8634,6 +8689,29 @@ function renderCommissionCard() {
   const totals = commissionOverall(save);
   dom.commissionCount.textContent = `${totals.done} / ${totals.total}`;
   if (!tracked) {
+    // The chain is done: the winter survey owns this card from here on.
+    if (save.survey) {
+      const board = surveyProgress(save.survey);
+      dom.commissionCard.classList.remove('is-hidden');
+      dom.commissionCard.classList.toggle('is-ready', board.complete);
+      const rows = board.goals.map((goal) => `
+        <div class="commission-goal ${goal.done ? 'is-done' : ''}">
+          <span class="commission-goal-label">
+            <span class="commission-goal-mark">${goal.done ? '✓' : '·'}</span>
+            <span>${escapeText(goal.label)}</span>
+          </span>
+          <span class="commission-goal-track">
+            <span class="commission-goal-bar"><span style="width:${Math.round((goal.have / goal.need) * 100)}%"></span></span>
+            <span class="commission-goal-count">${goal.have}/${goal.need}</span>
+          </span>
+        </div>`).join('');
+      dom.commissionBody.innerHTML = `
+        <span class="commission-giver">Grayson</span>
+        <strong class="commission-title">Winter survey · board ${save.survey.count + 1}</strong>
+        ${rows}
+        ${board.complete ? `<span class="commission-ready">REWARD ${save.survey.reward}¢</span>` : `<span class="commission-hint">Every goal counts work done on this board. Complete it and the next posts itself.</span>`}`;
+      return;
+    }
     dom.commissionCard.classList.remove('is-hidden', 'is-ready');
     dom.commissionBody.innerHTML = `<strong class="commission-title">Survey complete</strong>
       <span class="commission-hint">Every commission is signed off. Keep the field as you like it.</span>`;
@@ -8677,10 +8755,21 @@ function renderCommissionJournal() {
     </div>`;
   }).join('');
   const totals = commissionOverall(save);
+  const surveySection = save.survey
+    ? `<div class="journal-section">
+        <div class="card-heading"><span class="eyebrow">WINTER SURVEY</span><span class="journal-chip">${save.survey.reward}¢</span></div>
+        ${surveyProgress(save.survey).goals.map((goal) => `
+          <div class="journal-commission ${goal.done ? '' : 'is-locked'}">
+            <span class="journal-commission-mark">${goal.done ? '✓' : '·'}</span>
+            <span><strong>${escapeText(goal.label)}</strong><small>Grayson · ${goal.have}/${goal.need} on this board</small></span>
+            <span class="journal-chip">${goal.done ? 'DONE' : 'OPEN'}</span>
+          </div>`).join('')}
+      </div>`
+    : '';
   return `<div class="journal-section">
     <div class="card-heading"><span class="eyebrow">FIELD COMMISSIONS</span><span class="journal-chip">${totals.done} / ${totals.total}</span></div>
     ${rows}
-  </div>`;
+  </div>${surveySection}`;
 }
 
 
@@ -8989,6 +9078,7 @@ function cookRecipe(recipeKey) {
   for (const output of recipe.outputs) {
     save.cooked[output.key] = (save.cooked[output.key] || 0) + output.amount;
     checkCommissions();
+    reportSurvey('cooked');
   }
   saveGame();
   updateHUD();
@@ -10055,6 +10145,10 @@ if (new URLSearchParams(window.location.search).has('probe')) {
       open: () => openCommissions(save).map((commission) => commission.id),
       check: () => checkCommissions({ announce: false }),
       render: () => renderCommissionCard()
+    },
+    survey: {
+      get: () => save.survey,
+      report: (event, key) => reportSurvey(event, key)
     },
     onboarding: { active: () => onboardingActive(), advance: () => advanceOnboarding(), skip: () => skipOnboarding() },
     gameClock: () => elapsed,
