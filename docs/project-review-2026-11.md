@@ -115,12 +115,19 @@ allocation and O(n²) work that a weaker shared GPU will feel first in the zoo:
 - **Per-frame array churn**: `getInteractionTarget` (7820) maps/filters/sorts the
   whole interactables list every frame; `getAimedHotspot` (7160) re-allocates
   `hotspots.map(...)`; `updatePollinatorGarden` filters per frame (3167).
-- **Collision is a full linear scan per frame** (824–862) against 1,000+ colliders
-  in the lake zone. A bucketed grid already exists in this file for placement
-  (4219–4270) and is thrown away after dressing — keep one alive for runtime.
-- **DOM writes every frame** (`updateActionDock` 9412, `updateFishingTips` 9413) and
-  `updateCameraRotation` called twice per frame (9374 and 9414); `updateCrosshair`
-  runs its raycasts even while a modal is open (7832).
+- **Collision is a full linear scan per frame** (824–862) — *measured after the
+  review wrote this up: 2,356 colliders cost 0.026 ms per frame on the lake
+  zone, about 0.16% of a 16.6 ms budget. A spatial grid was prototyped as a
+  follow-up and rejected on the measurement: the machinery (removal handling
+  for parked cars, giant-collider spanning, dirty flags) is worth more than
+  the win. Recorded here so nobody builds it on spec again.*
+- **DOM writes every frame** (`updateActionDock` 9412, `updateFishingTips` 9413) —
+  fixed with a write-only-when-changed guard. ~~`updateCameraRotation` called
+  twice per frame (9374 and 9414)~~ *correction after verification: the second
+  call is load-bearing — boat steering writes `yaw` inside `updateMovement`
+  between the two calls, so removing it would lag the camera at the helm. Both
+  stay.* `updateCrosshair` now skips its raycasts while a modal or observation
+  is open (7832).
 - **Zone rebuild is a synchronous hitch on every fast-travel** (the lake build is
   ~1.2 s). The loading veil covers the first one, but car travel does not veil the
   rebuild. Not urgent; worth a frame-budget yield during builds if travel feels

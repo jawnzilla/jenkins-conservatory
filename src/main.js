@@ -1028,34 +1028,41 @@ function createLooseNet(root) {
   return { mesh, rows, columns };
 }
 
+// The net cloth re-solves every grid point every frame while the net is held.
+// Writing into two scratch vectors instead of allocating one per point keeps
+// that at zero heap churn per frame.
+const netGridLeft = new THREE.Vector3();
+const netGridRight = new THREE.Vector3();
+
 function updateLooseNet(netCloth, time, swing) {
   if (!netCloth) return;
   const { mesh, rows, columns } = netCloth;
   const positions = mesh.geometry.attributes.position.array;
-  const gridPoint = (row, column) => {
+  const gridPoint = (out, row, column) => {
     const progress = row / (rows - 1);
     const angle = column / columns * Math.PI * 2;
     const radius = 0.34 * (1 - progress * 0.78);
     const sway = swing * progress * 0.075;
-    return new THREE.Vector3(
+    out.set(
       Math.cos(angle) * radius + Math.sin(time * 2.7 + row) * progress * 0.018 + sway,
       1.04 - progress * 0.8 + Math.sin(time * 3.1 + column * 0.7 + row) * (0.008 + progress * 0.016),
       Math.sin(angle) * radius + 0.035 + Math.cos(time * 2.4 + column * 0.9) * progress * 0.018
     );
+    return out;
   };
   let offset = 0;
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
-      const left = gridPoint(row, column);
-      const right = gridPoint(row, (column + 1) % columns);
+      const left = gridPoint(netGridLeft, row, column);
+      const right = gridPoint(netGridRight, row, (column + 1) % columns);
       positions[offset++] = left.x; positions[offset++] = left.y; positions[offset++] = left.z;
       positions[offset++] = right.x; positions[offset++] = right.y; positions[offset++] = right.z;
     }
   }
   for (let row = 0; row < rows - 1; row += 1) {
     for (let column = 0; column < columns; column += 1) {
-      const top = gridPoint(row, column);
-      const bottom = gridPoint(row + 1, column);
+      const top = gridPoint(netGridLeft, row, column);
+      const bottom = gridPoint(netGridRight, row + 1, column);
       positions[offset++] = top.x; positions[offset++] = top.y; positions[offset++] = top.z;
       positions[offset++] = bottom.x; positions[offset++] = bottom.y; positions[offset++] = bottom.z;
     }
@@ -7213,10 +7220,16 @@ function completeBugCapture(bug) {
   setStatus(bug.species === 'worm' ? 'The worm is ready to use as fishing bait.' : 'The tiny field note is safely recorded.');
 }
 
+// One reusable target list for the hotspot raycast: this runs every frame the
+// rod is out, and mapping a fresh array each time is pure churn.
+const hotspotRayTargets = [];
+
 function getAimedHotspot() {
   if (!hotspots.length) return null;
+  hotspotRayTargets.length = 0;
+  for (const hotspot of hotspots) hotspotRayTargets.push(hotspot.target);
   raycaster.setFromCamera(centerScreen, camera);
-  const hits = raycaster.intersectObjects(hotspots.map((hotspot) => hotspot.target), false);
+  const hits = raycaster.intersectObjects(hotspotRayTargets, false);
   return hits.length ? hotspots.find((hotspot) => hotspot.target === hits[0].object) : null;
 }
 
@@ -7534,6 +7547,10 @@ function voiceMovingAnimal(entity, position) {
 }
 
 function updateCritters(delta) {
+  // Resolve the net target once per frame, not once per critter: the old
+  // comparison re-filtered, re-sorted and angle-tested the whole list for
+  // every animal on it — an O(n²) pass whose answer is the same within a frame.
+  const netTarget = getNetCritterTarget();
   for (const critter of critters) {
     if (critter.caught) continue;
     const onSchedule = isSpeciesActive(critter.species);
@@ -7616,7 +7633,7 @@ function updateCritters(delta) {
       }
     }
     animal.rotation.y = critter.species === 'dragonfly' ? critter.direction - Math.PI / 2 : critter.direction + Math.PI;
-    const aimed = getNetCritterTarget() === critter;
+    const aimed = netTarget === critter;
     if (aimed && distance < 5.5 && (currentNoise < 0.56 || distance <= 3.1)) {
       animal.userData.highlight = true;
     } else {
@@ -7889,6 +7906,12 @@ function getInteractionTarget() {
 }
 
 function updateCrosshair() {
+  // Behind a modal or an observation there is no aim to answer, and the
+  // crosshair is covered anyway: skip its raycasts, filters and sorts.
+  if (modalOpen || qteState) {
+    dom.crosshair.classList.remove('is-targeted');
+    return;
+  }
   let targeted = false;
   if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod' && fishing.phase === 'idle') targeted = Boolean(getAimedHotspot());
   if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'net') targeted = Boolean(getAimCritter() || getAimBug(true) || getNearestRevealedBug());
@@ -7986,7 +8009,7 @@ function updateFishingTips() {
   const visible = save.tipsEnabled !== false && FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod';
   dom.fishingTips.classList.toggle('is-hidden', !visible);
   if (!visible) {
-    dom.actionHint.textContent = '';
+    setTextIfChanged(dom.actionHint, '');
     return;
   }
 
@@ -8000,7 +8023,7 @@ function updateFishingTips() {
     reeling: 'reel'
   }[fishing.phase] || 'loadout';
   dom.tipSteps.forEach((step) => step.classList.toggle('is-current', step.dataset.tipStep === currentStep));
-  dom.actionHint.textContent = {
+  setTextIfChanged(dom.actionHint, {
     idle: 'Use B / L to match the kit, then aim at a circular water disturbance.',
     charging: 'Hold to load the cast. Release while the crosshair is over the disturbance.',
     waiting: fishing.castTarget ? (fishing.invalidCast ? `Wrong presentation. Switch to ${formatName(fishing.castTarget.bait)} + ${formatName(fishing.castTarget.lure)}.` : 'Viable spot. Wait for the bite.') : 'No hot spot. Reel the line back in.',
@@ -8008,7 +8031,7 @@ function updateFishingTips() {
     hooking: `Set hook: ${fishing.hookClicks} / ${fishing.hookTarget} clicks.`,
     returning: 'The line is coming back. Change the bait or lure before trying again.',
     reeling: fishing.tensionState === 'stop' ? 'STOP REELING — let the fish run.' : 'Hold REEL LINE / left click until the fish reaches shore.'
-  }[fishing.phase] || '';
+  }[fishing.phase] || '');
 }
 
 function updateFishingCallout() {
@@ -8037,8 +8060,15 @@ function updateFishingCallout() {
     message = fishing.tensionState === 'stop' ? 'STOP REELING · FISH IS SURGING' : 'REEL LINE · KEEP THE FISH MOVING HOME';
     tone = fishing.tensionState === 'stop' ? 'is-warning' : 'is-ready';
   }
-  dom.fishingCallout.textContent = message;
-  dom.fishingCallout.className = `fishing-callout ${tone}`;
+  setTextIfChanged(dom.fishingCallout, message);
+  const calloutClass = `fishing-callout ${tone}`;
+  if (dom.fishingCallout.className !== calloutClass) dom.fishingCallout.className = calloutClass;
+}
+
+// These HUD strings are recomputed every frame; writing them only when the
+// text actually differs keeps the frame loop off the DOM layout path.
+function setTextIfChanged(element, text) {
+  if (element.textContent !== text) element.textContent = text;
 }
 
 function updateActionDock() {
@@ -8051,49 +8081,49 @@ function updateActionDock() {
   if (lakeBoatPilot?.active) {
     dom.reelAction.classList.add('is-hidden');
     dom.primaryAction.classList.remove('is-hidden');
-    dom.primaryAction.textContent = 'EXIT BOAT · E';
+    setTextIfChanged(dom.primaryAction, 'EXIT BOAT · E');
     return;
   }
   if (fishing.phase === 'waiting') {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
-    dom.reelAction.textContent = 'REEL LINE';
+    setTextIfChanged(dom.reelAction, 'REEL LINE');
     return;
   }
   if (fishing.phase === 'bite') {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
-    dom.reelAction.textContent = 'SET HOOK';
+    setTextIfChanged(dom.reelAction, 'SET HOOK');
     return;
   }
   if (fishing.phase === 'hooking') {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
-    dom.reelAction.textContent = `SET HOOK ${fishing.hookClicks}/${fishing.hookTarget}`;
+    setTextIfChanged(dom.reelAction, `SET HOOK ${fishing.hookClicks}/${fishing.hookTarget}`);
     return;
   }
   if (fishing.phase === 'reeling') {
     dom.primaryAction.classList.add('is-hidden');
     dom.reelAction.classList.remove('is-hidden');
-    dom.reelAction.textContent = 'HOLD TO REEL';
+    setTextIfChanged(dom.reelAction, 'HOLD TO REEL');
     return;
   }
   dom.reelAction.classList.add('is-hidden');
   dom.primaryAction.classList.remove('is-hidden');
   if (!pointerLocked) {
-    dom.primaryAction.textContent = 'CLICK TO ENTER FIELD';
+    setTextIfChanged(dom.primaryAction, 'CLICK TO ENTER FIELD');
   } else if (fishing.phase === 'charging') {
-    dom.primaryAction.textContent = `RELEASE CAST ${Math.round(fishing.charge * 100)}%`;
+    setTextIfChanged(dom.primaryAction, `RELEASE CAST ${Math.round(fishing.charge * 100)}%`);
   } else if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'rod') {
-    dom.primaryAction.textContent = 'HOLD TO CAST';
+    setTextIfChanged(dom.primaryAction, 'HOLD TO CAST');
   } else if (FIELD_TOOL_ZONES.includes(currentZone) && activeTool === 'magnifier') {
-    dom.primaryAction.textContent = 'INSPECT TRACE';
+    setTextIfChanged(dom.primaryAction, 'INSPECT TRACE');
   } else if (['forest', 'store', 'zoo', 'lake'].includes(currentZone) && activeTool === 'net') {
-    dom.primaryAction.textContent = 'USE NET';
+    setTextIfChanged(dom.primaryAction, 'USE NET');
   } else {
-    dom.primaryAction.textContent = 'LOOK AROUND';
+    setTextIfChanged(dom.primaryAction, 'LOOK AROUND');
   }
-  if (fishingActive && fishing.phase === 'returning') dom.primaryAction.textContent = 'RETRIEVING LINE';
+  if (fishingActive && fishing.phase === 'returning') setTextIfChanged(dom.primaryAction, 'RETRIEVING LINE');
 }
 
 function setStatus(message) {
