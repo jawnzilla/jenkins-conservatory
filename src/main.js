@@ -1443,8 +1443,13 @@ function carHeading(dx, dz) {
 function isParkingLotPosition(x, z, padding = 0) {
   if (!HUB_ZONES.includes(currentZone)) return false;
   const lot = PARKING_LOT;
-  const onPad = Math.abs(x) <= lot.halfWidth + padding && z >= lot.minZ - padding && z <= lot.wallZ + padding;
-  const onDrive = Math.abs(x - lot.driveX) <= lot.driveHalfWidth + padding && z >= lot.wallZ - padding && z <= lot.streetZ + padding;
+  // Match what is drawn, not a tighter idea of it. The tarmac slab runs to
+  // its skirt (±15.4, z 1.6..23 including the 0.4 pour margin), and the
+  // service drive is drawn from its apron inside the wall gap (z ~20.5) to
+  // the street kerb — the old bounds only excluded from the wall outward,
+  // which left the in-lot apron open to flora.
+  const onPad = Math.abs(x) <= 15.4 + padding && z >= 1.6 - padding && z <= 23 + padding;
+  const onDrive = Math.abs(x - lot.driveX) <= lot.driveHalfWidth + 0.3 + padding && z >= 20.5 - padding && z <= 28.5 + padding;
   const onStreet = z >= lot.streetZ - lot.streetHalfDepth - padding && z <= lot.streetZ + lot.streetHalfDepth + padding;
   return onPad || onDrive || onStreet;
 }
@@ -2449,7 +2454,10 @@ function createTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b4e36) 
   cone(group, 0.9, 1.9, new THREE.Color(foliage).offsetHSL(0, 0, 0.06), [0, 3.8, 0.1], { segments: 8 });
   cone(group, 0.62, 1.6, new THREE.Color(foliage).offsetHSL(0, 0, 0.1), [0, 4.75, 0], { segments: 8 });
   stageStaticProp(group);
-  addCollider(x, z, 0.72 * scale, { zone: currentZone });
+  // The collider tracks the drawn trunk (0.35 at the base, scaled), plus a
+  // body's worth of clearance. The old 0.72 radius put an invisible bulge
+  // almost half a metre past every trunk in the field.
+  addCollider(x, z, 0.42 * scale, { zone: currentZone });
   return group;
 }
 
@@ -2474,7 +2482,8 @@ function createBranchTree(x, z, scale = 1, foliage = 0x376045, trunkColor = 0x6b
   sphere(group, 0.88, foliage, [0, 5.08, 0], { scale: [1.15, 0.46, 1.02], widthSegments: 9, heightSegments: 5 });
   sphere(group, 0.57, leafColor, [0.08, 5.68, 0.03], { scale: [1.12, 0.5, 0.95], widthSegments: 8, heightSegments: 5 });
   stageStaticProp(group);
-  addCollider(x, z, 0.64 * scale, { zone: currentZone });
+  // Trunk drawn at 0.27 base; collider tracks it plus body clearance.
+  addCollider(x, z, 0.34 * scale, { zone: currentZone });
   return group;
 }
 
@@ -2579,7 +2588,7 @@ function createBackgroundForest(spots) {
       place(batch, parts.crownMid, x, 3.8, z, scale, spin + 0.4, [1, 1, 1], leaf.clone().offsetHSL(0, 0, 0.06));
       place(batch, parts.crownTop, x, 4.75, z, scale, spin + 0.8, [1, 1, 1], leaf.clone().offsetHSL(0, 0, 0.1));
     }
-    addCollider(x, z, 0.68 * scale, { zone: currentZone });
+    addCollider(x, z, 0.42 * scale, { zone: currentZone });
     batch.trees += 1;
     if (batch.trees >= BACKGROUND_TREE_BATCH) {
       flushBackgroundForest(batch);
@@ -3565,7 +3574,17 @@ function createShopDisplay(item, x, z, row = 0, rotation = 0) {
   world.add(display);
   const interactable = { type: 'shop-item', label: `Buy ${item.label}`, position: new THREE.Vector3(x, displayY + 1.05, z), radius: 3.0, itemKey: item.key, group: item.group, display };
   interactables.push(interactable);
-  addCollider(x, z, 0.72, { zone: 'store' });
+  // The collider matches what is drawn, in the display's own orientation: the
+  // backboard is 1.9 wide and the base shelf runs 0.72 deep, so a sideways
+  // display swaps the rect's axes. The old circular collider poked past the
+  // unit on the aisle side, which read as an invisible shelf edge.
+  const sideways = Math.abs(Math.abs(rotation) - Math.PI / 2) < 0.01;
+  addCollider(x, z, sideways ? 0.45 : 0.95, {
+    type: 'rect',
+    halfWidth: sideways ? 0.45 : 0.95,
+    halfDepth: sideways ? 0.95 : 0.45,
+    zone: 'store'
+  });
 }
 
 function createStoreRecordBoard() {
