@@ -76,8 +76,11 @@ Now:
 
 - The road mesh and the car's line are the same centripetal Catmull-Rom curve,
   so the tarmac bends the way the car does.
-- Aim is pointed down the road once, at the start, and never touched again. The
-  player is held in place and can look wherever they like for the whole ride.
+- The view starts aimed down the road and follows the hull each frame, eased
+  toward the car's lagged heading rather than the raw road tangent. A corner
+  swings the view the way a passenger's head does — no snapping at segment
+  joints, no swooping — and mouse look still rides on top, easing back to the
+  road when released.
 - The car body heading follows the curve with a lag and banks into that lag, so
   a corner reads as a corner.
 - The interior is a world object riding at the car's position instead of being

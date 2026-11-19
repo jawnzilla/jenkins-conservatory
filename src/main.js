@@ -6239,11 +6239,12 @@ function startJenkinsLakeArrival() {
   lakeArrival = { active: true, progress: 0, duration: 13, heading, roll: 0 };
   lakeCarInterior = createLakeCarInterior();
   player.set(start.x, 1.72, start.z);
-  // Aim is pointed down the road once, here, and then left alone. The drive
-  // used to rewrite yaw every frame, which snatched the view back on every bend.
+  // The view starts aimed down the road and then follows the hull each frame
+  // (see updateJenkinsLakeArrival): a corner swings the view like a
+  // passenger's head, eased so it never snaps, and mouse look rides on top.
   yaw = heading;
   pitch = -0.05;
-  setStatus('The car is following the winding road to Jenkins Lake. You can look around as you ride.');
+  setStatus('The car is following the winding road to Jenkins Lake. Your view rides with the car; look around freely.');
   updateJenkinsLakeArrival(0);
 }
 
@@ -6271,11 +6272,20 @@ function updateJenkinsLakeArrival(delta) {
   lakeArrival.heading += turn * (delta > 0 ? Math.min(1, delta * 3.2) : 1);
   const targetRoll = clamp(turn * 1.1, -0.1, 0.1);
   lakeArrival.roll += (targetRoll - lakeArrival.roll) * (delta > 0 ? Math.min(1, delta * 3) : 1);
+  // The rider's view follows the hull: yaw eases toward the car's lagged
+  // heading — never the raw road tangent, which snapped at every segment
+  // joint — so a corner swings the view the way a passenger's head does,
+  // without swooping. Mouse input still works on top of this: looking around
+  // holds while you hold it, and eases back to the road when you let go.
+  let viewTurn = lakeArrival.heading - yaw;
+  while (viewTurn > Math.PI) viewTurn -= Math.PI * 2;
+  while (viewTurn < -Math.PI) viewTurn += Math.PI * 2;
+  yaw += viewTurn * (delta > 0 ? Math.min(1, delta * 1.8) : 1);
   if (lakeCarInterior) {
     lakeCarInterior.position.set(player.x, player.y, player.z);
     lakeCarInterior.rotation.set(0, lakeArrival.heading, lakeArrival.roll);
   }
-  // A shallow suspension bob. The player's aim is never touched.
+  // A shallow suspension bob.
   camera.position.set(player.x, player.y + Math.sin(elapsed * 2.6) * 0.014, player.z);
   if (lakeArrival.progress >= 1) {
     lakeArrival.active = false;
