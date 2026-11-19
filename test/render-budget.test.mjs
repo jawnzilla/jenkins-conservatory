@@ -6,12 +6,15 @@ import { boot, ZONES } from './harness.mjs';
 // Ceilings sit above the measured values with room for content, but far below
 // the pre-cache numbers (lake was 6,611 calls / 8,287 materials). A zone that
 // blows through one of these has stopped sharing something it should.
-// Measured after batching: 291 / 729 / 1758 / 2759 draw calls and
-// 177 / 374 / 506 / 678 materials. Ceilings carry roughly 15% headroom for new
-// content; the pre-cache figures were 313 / 991 / 2312 / 6611 calls and
-// 843 / 1681 / 1864 / 8287 materials, so a regression past these is obvious.
+// Measured after the storefront dressing pass: 373 / 768 / 1842 / 2803 draw
+// calls and 213 / 367 / 518 / 693 materials. Ceilings carry roughly 15%
+// headroom for new content; the pre-cache figures were 313 / 991 / 2312 / 6611
+// calls and 843 / 1681 / 1864 / 8287 materials, so a regression past these is
+// obvious. The store ceiling was raised from 340 with the dressing pass: the
+// facade, approach and interior pieces are batched and share the store's
+// palette, and the new ceiling still sits under the pre-cache figure.
 const BUDGET = {
-  store:  { drawCalls: 340, materials: 230 },
+  store:  { drawCalls: 400, materials: 230 },
   forest: { drawCalls: 840, materials: 450 },
   zoo:    { drawCalls: 2020, materials: 600 },
   lake:   { drawCalls: 3180, materials: 800 }

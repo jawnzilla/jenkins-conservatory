@@ -584,6 +584,8 @@ let lakeGateOpen = false;
 let lakeGateNotified = false;
 let lakeCabinBoundaryNotified = false;
 let storeRecordBoard = null;
+// The storefront's shared dusk light, owned by buildStore and cleared with the zone.
+let storeSconceLight = null;
 let fishingVisuals = null;
 let toolAction = { name: '', startedAt: 0, duration: 0 };
 let cleaningState = null;
@@ -3574,17 +3576,21 @@ function createShopDisplay(item, x, z, row = 0, rotation = 0) {
   world.add(display);
   const interactable = { type: 'shop-item', label: `Buy ${item.label}`, position: new THREE.Vector3(x, displayY + 1.05, z), radius: 3.0, itemKey: item.key, group: item.group, display };
   interactables.push(interactable);
-  // The collider matches what is drawn, in the display's own orientation: the
-  // backboard is 1.9 wide and the base shelf runs 0.72 deep, so a sideways
-  // display swaps the rect's axes. The old circular collider poked past the
-  // unit on the aisle side, which read as an invisible shelf edge.
-  const sideways = Math.abs(Math.abs(rotation) - Math.PI / 2) < 0.01;
-  addCollider(x, z, sideways ? 0.45 : 0.95, {
-    type: 'rect',
-    halfWidth: sideways ? 0.45 : 0.95,
-    halfDepth: sideways ? 0.95 : 0.45,
-    zone: 'store'
-  });
+  // The collider matches what is drawn at body height, in the display's own
+  // orientation: the backboard is 1.9 wide and the base shelf runs 0.72 deep,
+  // so a sideways display swaps the rect's axes. The old circular collider
+  // poked past the unit on the aisle side. Row-1 displays hang at 1.75m on
+  // the wall: nothing is drawn at body height under them, so a body passes
+  // beneath and they carry no ground collider at all.
+  if (row === 0) {
+    const sideways = Math.abs(Math.abs(rotation) - Math.PI / 2) < 0.01;
+    addCollider(x, z, sideways ? 0.45 : 0.95, {
+      type: 'rect',
+      halfWidth: sideways ? 0.45 : 0.95,
+      halfDepth: sideways ? 0.95 : 0.45,
+      zone: 'store'
+    });
+  }
 }
 
 function createStoreRecordBoard() {
@@ -3642,6 +3648,137 @@ function refreshStoreRecordBoard() {
 }
 
 
+// --- Storefront dressing --------------------------------------------------------
+// The depot read as a blank box with a sign: bare walls, a tilted roof slab,
+// dead tarmac between the lot and the door. This pass gives the building a
+// face (awning, lit windows, a framed doorway, cornice and parapet), gives
+// the approach somewhere to be (planters, benches, a price board, a doormat),
+// and finishes the interior walls (dado rails, hanging tools, a spare-gear
+// barrel). Everything is staged through the static batcher with a palette
+// consolidated onto the store's existing colours, so the face costs a handful
+// of draw calls. Every new walkable solid carries a collider matched to what
+// it draws; anything above a body hangs free, and surfaces stay walk-through.
+function dressStoreFront() {
+  const TRIM_GREEN = 0x3f5c48;
+  const FRAME_GREEN = 0x405d48;
+  const CORNICE = 0x2e4936;
+  const PARAPET = 0x283b31;
+  const WOOD = 0x6d5b42;
+  const DARK_WOOD = 0x5d4630;
+  const CANVAS = 0xd8c9a0;
+  const STRIPE = 0x7a4a3a;
+
+  // Awning: striped canvas over the storefront with a valance edge.
+  const awning = new THREE.Group();
+  box(awning, [8.4, 0.1, 1.95], CANVAS, [0, 0, 0], { material: { roughness: 0.95 } });
+  for (const stripeX of [-3.1, -1.55, 0, 1.55, 3.1]) box(awning, [0.55, 0.11, 1.97], STRIPE, [stripeX, 0.005, 0], { material: { roughness: 0.95 } });
+  for (const valanceX of [-3.6, -1.2, 1.2, 3.6]) box(awning, [0.5, 0.3, 0.06], CANVAS, [valanceX, -0.2, 0.95], { material: { roughness: 0.95 } });
+  awning.position.set(0, 3.1, -9.55);
+  awning.rotation.x = 0.3;
+  stageStaticProp(awning);
+
+  // Windows either side of the door: warm lit interiors, glass, green mullions.
+  const facade = new THREE.Group();
+  const glass = mat(0xbfe3d8, { transparent: true, opacity: 0.32, roughness: 0.18 });
+  for (const side of [-1, 1]) {
+    const lit = box(facade, [3.1, 1.8, 0.08], 0xf3e6c2, [side * 5.9, 1.2, -8.56], { material: { emissive: 0xf0dcae, emissiveIntensity: 0.55, roughness: 0.9 } });
+    lit.castShadow = false;
+    const pane = box(facade, [3.1, 1.9, 0.1], glass, [side * 5.9, 1.2, -8.5]);
+    pane.castShadow = false;
+    pane.receiveShadow = false;
+    for (const mullion of [-1.03, -0.34, 0.34, 1.03]) box(facade, [0.07, 1.9, 0.13], TRIM_GREEN, [side * 5.9 + mullion, 1.2, -8.52]);
+    box(facade, [3.2, 0.09, 0.15], TRIM_GREEN, [side * 5.9, 2.18, -8.52]);
+    box(facade, [3.2, 0.09, 0.15], TRIM_GREEN, [side * 5.9, 0.24, -8.52]);
+    // A framed doorway with the door standing open against its jamb.
+    box(facade, [0.2, 2.6, 0.5], FRAME_GREEN, [side * 1.15, 1.3, -8.5]);
+  }
+  box(facade, [2.5, 0.22, 0.5], FRAME_GREEN, [0, 2.68, -8.5]);
+  const doorLeaf = new THREE.Group();
+  box(doorLeaf, [1.0, 2.35, 0.09], DARK_WOOD, [0.5, 1.2, 0]);
+  sphere(doorLeaf, 0.045, 0xd1b77e, [0.82, 1.2, 0.09]);
+  doorLeaf.position.set(-1.05, 0, -8.42);
+  doorLeaf.rotation.y = -1.15;
+  stageStaticProp(doorLeaf);
+  stageStaticProp(facade);
+
+  // Cornice under the fascia beam, and a parapet rim on the roof's front edge.
+  const trim = new THREE.Group();
+  box(trim, [19, 0.24, 0.7], CORNICE, [0, 3.28, -8.45]);
+  box(trim, [19, 0.5, 0.32], PARAPET, [0, 4.05, -8.75]);
+  box(trim, [19, 0.16, 0.4], CORNICE, [0, 3.82, -8.62]);
+  box(trim, [0.26, 0.12, 8.2], TRIM_GREEN, [-9.05, 2.25, -4.2]);
+  box(trim, [0.26, 0.12, 8.2], TRIM_GREEN, [9.05, 2.25, -4.2]);
+  box(trim, [2.1, 0.05, 1.15], 0x4a4136, [0, 0.03, -7.7], { material: { roughness: 1 } });
+  stageStaticProp(trim);
+
+  // The approach: planter beds either side of the walkway seam, in bloom.
+  for (const side of [-1, 1]) {
+    const planter = new THREE.Group();
+    planter.position.set(side * 3.6, 0, -1.2);
+    box(planter, [1.8, 0.5, 1.0], WOOD, [0, 0.25, 0]);
+    box(planter, [1.66, 0.08, 0.86], 0x3a2f24, [0, 0.5, 0]);
+    for (let bloom = 0; bloom < 4; bloom += 1) {
+      const flowerX = -0.6 + bloom * 0.4;
+      cylinder(planter, 0.022, 0.03, 0.34, 0x4f7a4a, [flowerX, 0.66, (bloom % 2 ? 0.14 : -0.14)], { segments: 5 });
+      sphere(planter, 0.09, bloom % 2 ? 0xe8a2b8 : 0xf0d16b, [flowerX, 0.85, (bloom % 2 ? 0.14 : -0.14)], { scale: [1, 0.7, 1] });
+    }
+    stageStaticProp(planter);
+    addCollider(side * 3.6, -1.2, 0.9, { type: 'rect', halfWidth: 0.9, halfDepth: 0.5, zone: 'store' });
+  }
+
+  // Benches either side of the approach, facing the walk.
+  for (const side of [-1, 1]) {
+    const bench = new THREE.Group();
+    bench.position.set(side * 6.4, 0, 0.4);
+    box(bench, [1.7, 0.1, 0.55], 0x8f6948, [0, 0.52, 0]);
+    box(bench, [1.7, 0.5, 0.08], DARK_WOOD, [0, 0.85, 0.28]);
+    for (const leg of [-0.7, 0.7]) box(bench, [0.12, 0.52, 0.45], DARK_WOOD, [leg, 0.26, 0]);
+    stageStaticProp(bench);
+    addCollider(side * 6.4, 0.4, 0.85, { type: 'rect', halfWidth: 0.85, halfDepth: 0.5, zone: 'store' });
+  }
+
+  // An A-frame price board by the door.
+  const board = new THREE.Group();
+  board.position.set(-2.3, 0, -7.4);
+  box(board, [1.3, 0.95, 0.08], 0x2d4232, [0, 1.15, 0.18], { rotation: [0.12, 0, 0] });
+  box(board, [1.3, 0.95, 0.08], 0x2d4232, [0, 1.15, -0.18], { rotation: [-0.12, 0, 0] });
+  for (const leg of [-0.5, 0.5]) box(board, [0.1, 1.7, 0.1], WOOD, [leg, 0.85, 0]);
+  const boardText = makeLabel('BAIT · LURES · FIELD KIT', '#f2b268', '#2d4232', 0.3);
+  boardText.position.set(0, 1.3, 0.26);
+  board.add(boardText);
+  stageStaticProp(board);
+  addCollider(-2.3, -7.4, 0.45, { type: 'rect', halfWidth: 0.45, halfDepth: 0.4, zone: 'store' });
+
+  // Sconces either side of the door: emissive glass with one shared dusk
+  // light, so the storefront has a face after dark like the zoo lanterns do.
+  for (const side of [-1, 1]) {
+    const sconce = new THREE.Group();
+    sconce.position.set(side * 1.9, 2.5, -8.42);
+    box(sconce, [0.14, 0.4, 0.12], 0x3a3129, [0, 0, 0]);
+    box(sconce, [0.2, 0.26, 0.14], 0xf6efc8, [0, 0.28, 0.02], { material: { emissive: 0xffe6a2, emissiveIntensity: 0.55, roughness: 0.5 } });
+    stageStaticProp(sconce);
+  }
+  const sconceLight = new THREE.PointLight(0xffd9a0, 0, 11, 1.6);
+  sconceLight.position.set(0, 2.6, -8.1);
+  world.add(sconceLight);
+  storeSconceLight = sconceLight;
+
+  // Interior: a hanging net on the west rail and a spare-gear barrel behind.
+  const hangingNet = new THREE.Group();
+  hangingNet.position.set(-9.02, 1.9, -2.6);
+  cylinder(hangingNet, 0.035, 0.035, 1.1, 0x76533f, [0, 0, 0], { segments: 6, rotation: [0, 0, 0.12] });
+  torus(hangingNet, 0.3, 0.03, 0xd1b77e, [0.28, -0.35, 0], [0, 0, 0], 8, 14);
+  stageStaticProp(hangingNet);
+  const gearBarrel = new THREE.Group();
+  gearBarrel.position.set(-7.9, 0, -7.6);
+  cylinder(gearBarrel, 0.42, 0.48, 0.85, WOOD, [0, 0.43, 0], { segments: 10 });
+  torus(gearBarrel, 0.46, 0.035, DARK_WOOD, [0, 0.32, 0], [Math.PI / 2, 0, 0], 8, 14);
+  torus(gearBarrel, 0.46, 0.035, DARK_WOOD, [0, 0.68, 0], [Math.PI / 2, 0, 0], 8, 14);
+  cylinder(gearBarrel, 0.5, 0.5, 0.06, 0x3a2f24, [0, 0.88, 0], { segments: 10 });
+  stageStaticProp(gearBarrel);
+  addCollider(-7.9, -7.6, 0.5, { zone: 'store' });
+}
+
 function buildStore() {
   setZonePalette('store');
   addGround(ZONES.store.ground, 150);
@@ -3657,6 +3794,7 @@ function buildStore() {
   const storefront = makeLabel('SUPPLIES', '#f2b268', '#3a2b25', 1.14);
   storefront.position.set(0, 3.0, -8.96);
   world.add(storefront);
+  dressStoreFront();
   addCollider(-9.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
   addCollider(9.3, -4.3, 0.25, { type: 'rect', halfWidth: 0.25, halfDepth: 4.5, zone: 'store' });
   addCollider(0, -8.5, 0.25, { type: 'rect', halfWidth: 9.5, halfDepth: 0.25, zone: 'store' });
@@ -6894,6 +7032,7 @@ function resetWorld() {
   lakeGateNotified = false;
   lakeCabinBoundaryNotified = false;
   storeRecordBoard = null;
+  storeSconceLight = null;
   showcaseDisplays = { fish: null, bug: null };
   cleaningState = null;
   toolAction = { name: '', startedAt: 0, duration: 0 };
@@ -9879,6 +10018,11 @@ function animate() {
     journalRefreshAt = elapsed + 0.5;
     updateFieldClockLabel();
     updateHudQuietude();
+    // The storefront sconces share the dusk curve the zoo lanterns use.
+    if (storeSconceLight) {
+      const lit = Math.max(0, 1 - currentDaylight - 0.18) / 0.82;
+      storeSconceLight.intensity = lit * (1.5 + Math.sin(elapsed * 7.3) * 0.08 + Math.sin(elapsed * 2.1) * 0.06);
+    }
     if (dom.journalModal && !dom.journalModal.classList.contains('is-hidden')) renderJournal();
   }
   updateQTE(delta);
