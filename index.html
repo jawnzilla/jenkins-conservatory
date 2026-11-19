@@ -11,24 +11,20 @@
     <main id="game-shell" aria-label="Jenkins Conservatory game">
       <canvas id="game-canvas" aria-label="Three.js game canvas"></canvas>
       <div id="hud" class="hud">
-        <header class="topbar panel">
-          <div class="brand-lockup">
-            <span class="brand-mark" aria-hidden="true">✦</span>
-            <div>
-              <p class="eyebrow">FIELD NOTE 001</p>
-              <h1>Jenkins Conservatory</h1>
-            </div>
+        <header class="topbar" aria-label="Field status">
+          <div class="topbar-cluster">
+            <button id="journal-toggle-button" class="help-toggle journal-toggle" type="button" aria-expanded="false" aria-controls="journal-modal">▤ JOURNAL<span class="key-hint"> · J</span></button>
+            <button id="profile-toggle-button" class="help-toggle profile-toggle" type="button" aria-expanded="false" aria-controls="profile-modal">⛁ <span id="profile-label">Field record 1</span></button>
           </div>
-          <button id="journal-toggle-button" class="help-toggle journal-toggle" type="button" aria-expanded="false" aria-controls="journal-modal">▤ JOURNAL<span class="key-hint"> · J</span></button>
-          <button id="profile-toggle-button" class="help-toggle profile-toggle" type="button" aria-expanded="false" aria-controls="profile-modal">⛁ <span id="profile-label">Field record 1</span></button>
           <div class="topbar-meta">
-            <button id="tips-toggle-button" class="help-toggle" type="button" aria-expanded="false" aria-controls="tips-menu">? FIELD GUIDE</button>
             <span id="zone-label">PARKING LOT</span>
             <span class="meta-divider" aria-hidden="true"></span>
             <span id="clock-label" title="Field time. Animals keep their own hours.">05:00 DAWN</span>
             <span class="meta-divider" aria-hidden="true"></span>
             <span id="coin-label">120¢</span>
-            <span class="meta-divider" aria-hidden="true"></span>
+          </div>
+          <div class="topbar-cluster">
+            <button id="tips-toggle-button" class="help-toggle" type="button" aria-expanded="false" aria-controls="tips-menu">? GUIDE</button>
             <div class="sound-control">
               <button id="sound-toggle-button" class="help-toggle sound-toggle" type="button" aria-pressed="false" title="Mute or unmute field audio (M)">🔊<span class="key-hint"> · M</span></button>
               <label class="sound-slider">
@@ -40,7 +36,7 @@
         </header>
 
         <section class="left-rail">
-          <div class="panel status-card">
+          <div id="status-card" class="panel status-card">
             <div class="status-row">
               <span class="status-dot" id="lock-dot"></span>
               <span id="lock-label">CLICK TO ENTER FIELD MODE</span>
@@ -84,7 +80,7 @@
         </aside>
 
         <section class="right-rail">
-          <div class="panel equipment-card">
+          <div id="equipment-card" class="panel equipment-card">
             <div class="card-heading">
               <span class="eyebrow">FIELD INVENTORY</span>
               <span id="save-status" class="save-status">SAVED</span>

@@ -352,6 +352,8 @@ const DEFAULT_SAVE = {
 const dom = {
   canvas: document.querySelector('#game-canvas'),
   zoneLabel: document.querySelector('#zone-label'),
+  statusCard: document.querySelector('#status-card'),
+  equipmentCard: document.querySelector('#equipment-card'),
   coinLabel: document.querySelector('#coin-label'),
   clockLabel: document.querySelector('#clock-label'),
   lockDot: document.querySelector('#lock-dot'),
@@ -368,6 +370,7 @@ const dom = {
   profileLabel: document.querySelector('#profile-label'),
   profileToggleButton: document.querySelector('#profile-toggle-button'),
   noiseValue: document.querySelector('#noise-value'),
+  noiseCard: document.querySelector('#noise-card'),
   noiseMeter: document.querySelector('#noise-meter'),
   crosshair: document.querySelector('#crosshair'),
   fishingCallout: document.querySelector('#fishing-callout'),
@@ -8068,9 +8071,12 @@ function updateMovement(delta) {
   const riskRate = moving ? (sneaking ? 0.8 : 0.18) : 0.42;
   spookRisk = clamp(spookRisk + (riskTarget - spookRisk) * delta * riskRate, 0.02, 1);
   currentNoise = spookRisk;
-  dom.noiseValue.textContent = currentNoise > 0.55 ? 'HIGH' : currentNoise > 0.25 ? 'MEDIUM' : 'LOW';
+  // The meter converges continuously, so guard the DOM: the word only changes
+  // at band edges and the bar only redraws when its share moves by a point.
+  setTextIfChanged(dom.noiseValue, currentNoise > 0.55 ? 'HIGH' : currentNoise > 0.25 ? 'MEDIUM' : 'LOW');
   dom.noiseValue.style.color = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
-  dom.noiseMeter.style.width = `${Math.max(4, currentNoise * 100)}%`;
+  const noiseWidth = `${Math.round(Math.max(4, currentNoise * 100))}%`;
+  if (dom.noiseMeter.style.width !== noiseWidth) dom.noiseMeter.style.width = noiseWidth;
   dom.noiseMeter.style.background = currentNoise > 0.55 ? 'var(--danger)' : currentNoise > 0.25 ? 'var(--orange)' : 'var(--lime)';
   if (moving && fishing.phase === 'waiting') startReelIn();
   camera.position.set(player.x, player.y + jumpOffset + (moving ? Math.sin(elapsed * (sneaking ? 5 : 7)) * 0.025 : 0), player.z);
@@ -8203,6 +8209,54 @@ function updateFieldClockLabel() {
   const period = getDayPeriod();
   dom.clockLabel.textContent = `${getFieldClockLabel()} ${(DAY_PERIOD_LABELS[period] || period).toUpperCase()}`;
   dom.clockLabel.style.color = period === 'night' ? 'var(--aqua)' : period === 'day' ? 'var(--lime)' : 'var(--orange)';
+}
+
+// --- Context-driven HUD quietude ---------------------------------------------
+// A card speaks when it has something to say and goes quiet when it does not:
+// the default frame is the field, the crosshair and one action line. The fade
+// is opacity only, so an aria-live region keeps announcing while invisible,
+// and a quiet card's controls stop taking the pointer.
+const hudSignatures = { commission: '', equipment: '' };
+const hudSpokeAt = { commission: -60, equipment: -60, noise: -60 };
+
+function commissionTrackerSignature() {
+  const tracked = trackedCommission(save);
+  if (tracked) {
+    const { goals } = commissionProgress(tracked, save);
+    return `${tracked.id}|${goals.map((goal) => goal.have).join(',')}`;
+  }
+  if (save.survey) {
+    return `survey-${save.survey.count}|${save.survey.goals.map((goal) => goal.have).join(',')}`;
+  }
+  return 'none';
+}
+
+function equipmentLoadoutSignature() {
+  const supplies = save.supplies || {};
+  return `${activeTool}|${selectedBait}|${selectedLure}|${selectedFood}|${supplies.nets || 0}|${supplies.magnifiers || 0}|${supplies.flowerSeeds || 0}`;
+}
+
+// Runs on the half-second cadence, never per frame.
+function updateHudQuietude() {
+  const commission = commissionTrackerSignature();
+  if (commission !== hudSignatures.commission) {
+    hudSignatures.commission = commission;
+    hudSpokeAt.commission = elapsed;
+  }
+  const equipment = equipmentLoadoutSignature();
+  if (equipment !== hudSignatures.equipment) {
+    hudSignatures.equipment = equipment;
+    hudSpokeAt.equipment = elapsed;
+  }
+  // Spook risk is worth reading exactly while it is live: sneaking, or above
+  // the LOW band. Below that the meter says nothing a player needs.
+  const sneaking = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('shift');
+  if (sneaking || currentNoise > 0.25) hudSpokeAt.noise = elapsed;
+  if (dom.commissionCard) dom.commissionCard.classList.toggle('is-hud-quiet', elapsed > hudSpokeAt.commission + 14);
+  if (dom.equipmentCard) dom.equipmentCard.classList.toggle('is-hud-quiet', elapsed > hudSpokeAt.equipment + 8);
+  if (dom.noiseCard) dom.noiseCard.classList.toggle('is-hud-quiet', elapsed > hudSpokeAt.noise + 4);
+  // The lock hint's only job is the moment the field is not held.
+  if (dom.statusCard) dom.statusCard.classList.toggle('is-hud-quiet', pointerLocked || fallbackFieldMode || modalOpen || Boolean(qteState));
 }
 
 function updateHUD() {
@@ -9795,6 +9849,7 @@ function animate() {
   if (elapsed > journalRefreshAt) {
     journalRefreshAt = elapsed + 0.5;
     updateFieldClockLabel();
+    updateHudQuietude();
     if (dom.journalModal && !dom.journalModal.classList.contains('is-hidden')) renderJournal();
   }
   updateQTE(delta);
