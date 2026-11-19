@@ -2141,6 +2141,24 @@ h2 {
   color: var(--lime);
 }
 
+/* The current goal is its own passive line, never a stretched button: a long
+   sentence in a clickable control crossed the canvas centre at 480x320 and
+   blocked the click that enters field mode. */
+.onboarding-objective {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.onboarding-objective::before {
+  content: 'NOW: ';
+  color: var(--orange);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  font-size: 9px;
+}
+
 .onboarding-actions {
   display: flex;
   align-items: center;

@@ -19,6 +19,10 @@ const SAVE_KEY = 'jenkins-conservatory-save-v1';
 const ACTIVE_SLOT_KEY = 'jenkins-conservatory-active-profile-v1';
 const SAVE_SLOTS = [1, 2, 3];
 const ZONE_ORDER = ['store', 'forest', 'zoo', 'lake'];
+// Length of the forced first-day tour. Declared here, before loadSave runs at
+// module init, so a legacy save can be clamped against it; keep in sync with
+// ONBOARDING_LESSONS below.
+const ONBOARDING_LESSON_COUNT = 9;
 // The three destination zones where the field tools work. The store is a shop,
 // not a field. This list used to be re-typed at ~20 call sites, so adding a
 // zone meant hunting every one of them down.
@@ -291,6 +295,10 @@ const DEFAULT_SAVE = {
   // Commissions handed in, and how far the first-run walkthrough got. Both are
   // per record, so a second field record starts the arc over.
   commissionsDone: [],
+  // The forced-tour version. A legacy record predates the tour (or clicked
+  // through the old five-card version); without this flag any stored step
+  // from that system is treated as complete rather than re-opened mid-tour.
+  onboardingV2: true,
   onboardingStep: 0,
   coins: 120,
   supplies: {
@@ -384,6 +392,7 @@ const dom = {
   onboardingTitle: document.querySelector('#onboarding-title'),
   onboardingCopy: document.querySelector('#onboarding-copy'),
   onboardingKeys: document.querySelector('#onboarding-keys'),
+  onboardingObjective: document.querySelector('#onboarding-objective'),
   onboardingStep: document.querySelector('#onboarding-step'),
   onboardingNext: document.querySelector('#onboarding-next'),
   onboardingSkip: document.querySelector('#onboarding-skip'),
@@ -677,7 +686,13 @@ function loadSave(slot = activeSlot) {
       graysonResearch: Number(parsed.graysonResearch || 0),
       profileName: parsed.profileName || defaultProfileName(slot),
       commissionsDone: Array.isArray(parsed.commissionsDone) ? parsed.commissionsDone.slice() : [],
-      onboardingStep: Number(parsed.onboardingStep || 0),
+      // Legacy records predate the forced tour (or clicked through its
+      // five-card ancestor): any stored progress from that system completes
+      // the new tour rather than reopening it mid-sequence.
+      onboardingStep: (!parsed.onboardingV2 && Number(parsed.onboardingStep || 0) > 0)
+        ? ONBOARDING_LESSON_COUNT
+        : Number(parsed.onboardingStep || 0),
+      onboardingV2: true,
       audioMuted: Boolean(parsed.audioMuted),
       audioVolume: Number.isFinite(Number(parsed.audioVolume)) ? clamp(Number(parsed.audioVolume), 0, 1) : DEFAULT_SAVE.audioVolume,
       dayPhase: Number.isFinite(Number(parsed.dayPhase)) ? Number(parsed.dayPhase) : null
@@ -6435,6 +6450,8 @@ function updateJenkinsLakeArrival(delta) {
     if (lakeParkedCar) lakeParkedCar.visible = true;
     player.set(0, 1.72, -66.7);
     interactables.push({ type: 'car', label: 'Drive back from Jenkins Lake', position: new THREE.Vector3(0, 1.1, -63.5), radius: 3.4 });
+    // The tour's last lesson completes when the drive does.
+    onboardingGate('zone-lake');
     setStatus('The car is parked in the clearing. Captain Mark is ahead by the lake path.');
     toast('You arrived at Jenkins Lake.', 'success');
   }
@@ -6635,6 +6652,7 @@ function completeCleaning() {
   save.cleanedEnclosures[enclosure.id] = true;
   checkCommissions();
   reportSurvey('cleaned');
+  onboardingGate('cleaned');
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -7083,6 +7101,10 @@ function enterZone(zoneKey, announce = false) {
     toast('The field failed to build. The browser console has the detail.', 'warning');
   }
   updateHUD();
+  // The tour's travel lessons complete on arrival — every hub zone here; the
+  // lake completes its lesson when the drive itself finishes, not when it
+  // starts.
+  if (zoneKey !== 'lake') onboardingGate(`zone-${zoneKey}`);
   // A fresh page load cannot request pointer lock without a trusted gesture.
   // Travel buttons are trusted gestures, so only that path restores field mode here.
   if (zoneKey === 'lake' && announce) restoreFieldMode();
@@ -7186,6 +7208,10 @@ function updateFishingVisuals(delta = 0) {
 
 function startCast() {
   if (!FIELD_TOOL_ZONES.includes(currentZone) || activeTool !== 'rod') return;
+  if (!toolUnlocked('rod')) {
+    toast('The rod unlocks with its walkthrough lesson. Buy bait first, then cast.', 'warning');
+    return;
+  }
   if (fishing.phase !== 'idle') return;
   if (['forest', 'lake'].includes(currentZone) && (save.supplies[selectedBait] || 0) <= 0) {
     toast(`No ${selectedBait} left. Visit the field store.`, 'warning');
@@ -7318,6 +7344,7 @@ function landFish() {
   checkCommissions();
   reportSurvey('fish', species);
   reportSurvey('species', species);
+  onboardingGate('caught-fish');
   save.ingredients[species] = (save.ingredients[species] || 0) + 1;
   save.coins += species === 'trout' ? 18 : 22;
   if (isRecord) save.records[species] = record;
@@ -7423,6 +7450,10 @@ function updateFishing(delta) {
 function useNet() {
   playCue('net');
   if (!['forest', 'store', 'zoo', 'lake'].includes(currentZone) || activeTool !== 'net') return;
+  if (!toolUnlocked('net')) {
+    toast('The net unlocks with its walkthrough lesson. Land a fish first.', 'warning');
+    return;
+  }
   triggerToolAction('net-swing', 0.42);
   const critter = getNetCritterTarget();
   if (!critter) {
@@ -7456,6 +7487,7 @@ function catchDuck(duck) {
   spookRisk = clamp(spookRisk + 0.2, 0, 1);
   save.caught.duck = (save.caught.duck || 0) + 1;
   reportSurvey('species', 'duck');
+  onboardingGate('caught-animal');
   save.coins += 15;
   world.remove(duck.group);
   saveGame();
@@ -7470,6 +7502,7 @@ function catchCritter(critter) {
   save.caught[critter.species] = (save.caught[critter.species] || 0) + 1;
   checkCommissions();
   reportSurvey('species', critter.species);
+  onboardingGate('caught-animal');
   save.coins += 15;
   world.remove(critter.group);
   saveGame();
@@ -7503,6 +7536,8 @@ function catchBug(bug) {
   checkCommissions();
   reportSurvey('bug', bug.species);
   reportSurvey('species', bug.species);
+  onboardingGate('caught-animal');
+  onboardingGate('caught-bug');
   save.coins += 12;
   saveGame();
   updateHUD();
@@ -7512,6 +7547,10 @@ function catchBug(bug) {
 
 function startBugObservation() {
   if (!FIELD_TOOL_ZONES.includes(currentZone) || activeTool !== 'magnifier') return;
+  if (!toolUnlocked('magnifier')) {
+    toast('The magnifying glass unlocks with its walkthrough lesson. Sneak and net first.', 'warning');
+    return;
+  }
   const bug = getAimBug(false);
   if (!bug) {
     toast('Aim at the subtle pulse on the plant branch before inspecting.', 'warning');
@@ -7608,6 +7647,8 @@ function completeBugCapture(bug) {
   checkCommissions();
   reportSurvey('bug', bug.species);
   reportSurvey('species', bug.species);
+  onboardingGate('caught-animal');
+  onboardingGate('caught-bug');
   if (bug.species === 'worm') save.supplies.worms = (save.supplies.worms || 0) + 1;
   save.coins += bug.species === 'worm' ? 4 : 8;
   saveGame();
@@ -8199,6 +8240,17 @@ function updateMovement(delta) {
   player.addScaledVector(tempVector, speed * delta);
   resolveWorldCollisions();
 
+  // The tour's first lesson completes on foot: ten metres of walking, in any
+  // direction, measured against where the lesson started so teleports and
+  // zone swaps never count as progress.
+  const lesson = onboardingLesson();
+  if (lesson && lesson.gate === 'moved' && moving) {
+    if (!onboardingWalkFrom) onboardingWalkFrom = player.clone();
+    else if (onboardingWalkFrom.distanceTo(player) >= 10) onboardingGate('moved');
+  } else if (lesson && lesson.gate !== 'moved') {
+    onboardingWalkFrom = null;
+  }
+
   const bounds = ZONES[currentZone].bounds;
   player.x = clamp(player.x, bounds.minX, bounds.maxX);
   player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
@@ -8618,6 +8670,11 @@ function toast(message, tone = 'success') {
 
 function setTool(tool) {
   if (!['rod', 'net', 'magnifier', 'food'].includes(tool)) return;
+  if (!toolUnlocked(tool)) {
+    const lesson = onboardingLesson();
+    toast(`That kit unlocks with its own lesson. ${lesson ? lesson.objective : ''}`, 'warning');
+    return;
+  }
   if (tool === 'net' && (save.supplies.nets || 0) <= 0) {
     toast('You need a field net. Visit the supply store.', 'warning');
     return;
@@ -8759,7 +8816,8 @@ function closeAllModals(restore = true) {
 }
 
 function openTravel() {
-  dom.travelOptions.innerHTML = ZONE_ORDER.map((zoneKey) => {
+  const offered = onboardingTravelZones();
+  dom.travelOptions.innerHTML = ZONE_ORDER.filter((zoneKey) => offered.includes(zoneKey)).map((zoneKey) => {
     const zone = ZONES[zoneKey];
     const disabled = zoneKey === currentZone ? 'disabled' : '';
     return `<button class="travel-option" data-travel-zone="${zoneKey}" type="button" ${disabled}>
@@ -8907,6 +8965,11 @@ function describeNextCommission() {
 
 function renderCommissionCard() {
   if (!dom.commissionCard) return;
+  // The walkthrough owns the first day; the tracker waits for its handover.
+  if (onboardingActive()) {
+    dom.commissionCard.classList.add('is-hidden');
+    return;
+  }
   const tracked = trackedCommission(save);
   const totals = commissionOverall(save);
   dom.commissionCount.textContent = `${totals.done} / ${totals.total}`;
@@ -8996,47 +9059,120 @@ function renderCommissionJournal() {
 
 
 // --- First-run walkthrough -----------------------------------------------------
-// A new arrival used to land in the forest with a rod and no idea that any of
-// the other systems existed; the journal was the only place that said so, and it
-// assumes you already know what you are looking at. This introduces one thing at
-// a time and then gets out of the way — the commission chain takes over from
-// there, which is why it stops at the point the first commission can teach the
-// rest by doing.
-//
-// It deliberately does not lock the field. Reading about controls is worse than
-// using them, so the card sits above the action dock and the player can walk,
-// look and click while it is up.
-const ONBOARDING_STEPS = [
+// The first walkthrough read like a manual: five cards to click past, nothing
+// locked, nothing performed. It taught the keys and hoped. This one forces
+// the sequence: nine lessons, each completed by doing the thing in the world —
+// walking, driving, buying, casting, sneaking, observing, cleaning — and the
+// tour drives through every zone on the way: the depot, Northwater Field, the
+// showcase, and the lake road at the end. Tools and travel destinations stay
+// locked until their lesson, so the mechanics are met in order. Skip remains:
+// a player who knows the field, or wants it unlocked, can always leave the
+// tour, and everything opens at once.
+const ONBOARDING_LESSONS = [
   {
+    gate: 'moved',
     title: 'Welcome to the field',
-    copy: 'You are standing in it. Click once to take the mouse and look around, then walk with the keys below. Everything here runs on your own machine and saves as you go.',
-    keys: ['W A S D — move', 'Mouse — look', 'Esc — release the mouse']
+    copy: 'You are standing in it. Click once to take the mouse, look around, and walk the lot with the keys below. Everything here runs on your own machine and saves as you go.',
+    keys: ['W A S D — move', 'Mouse — look', 'Esc — release the mouse'],
+    objective: 'Walk the lot — about ten metres — and the tour begins.'
   },
   {
-    title: 'The field kit',
-    copy: 'Three tools cover most of the work. The rod fishes, the net takes animals and insects once you are close enough, and the magnifying glass observes the small things properly before you catch them.',
-    keys: ['1 — rod', '2 — net', '3 — magnifying glass', 'Left click — use']
+    gate: 'zone-store',
+    title: 'The car',
+    copy: 'The car in your stall is the way between zones. Your view rides with it around bends; the mouse still looks wherever you like.',
+    keys: ['E — interact with the car', 'Mouse — look around as you ride'],
+    objective: 'Press E at the car and drive to the Supply Depot.'
   },
   {
+    gate: 'purchased',
+    title: 'Mara’s counter',
+    copy: 'Mara keeps the counter and the shelves behind her. Bait and lures are what the rod needs; the walkthrough leaves the rest of the kit for your own purse.',
+    keys: ['E — talk to Mara, buy at the counter', 'E — buy from a shelf display'],
+    objective: 'Buy anything — bait will do.'
+  },
+  {
+    gate: 'caught-fish',
+    title: 'First cast',
+    copy: 'Take the car back to Northwater Field. Press 1 for the rod, B and L to match the bait and lure to the water, aim at a circular ripple, hold left click to cast, click the moment it bites, then hold to reel.',
+    keys: ['1 — rod', 'B / L — bait and lure', 'Left click — cast, set hook, reel'],
+    objective: 'Land any fish at the pond.'
+  },
+  {
+    gate: 'caught-animal',
     title: 'Go quietly',
-    copy: 'Animals hear you coming. Holding Shift halves your pace and your noise, and the meter on the right tells you how much of a racket you are making. Most things worth catching need it.',
-    keys: ['Shift — sneak', 'Noise meter — right rail']
+    copy: 'Animals hear you coming. Hold Shift to halve your pace and your noise, press 2 for the net, and close the last few steps slowly. The spook meter shows how much of a racket you make.',
+    keys: ['2 — net', 'Shift — sneak', 'Left click — swing'],
+    objective: 'Sneak up and net a rabbit, squirrel or sparrow.'
   },
   {
-    title: 'The field keeps its own hours',
-    copy: 'Owls and raccoons come out at dusk, butterflies and squirrels work in daylight, and anything off duty leaves the field until its hours come round. Sleep in the cabin bunk to jump the clock.',
-    keys: ['J — field journal', 'E — interact', 'Clock — top bar']
+    gate: 'caught-bug',
+    title: 'The small things',
+    copy: 'The magnifying glass is how small things are recorded properly. Press 3, find the subtle pulse at a plant or web, hold the lens steady through the focus timer, then seal the jar and swing the net.',
+    keys: ['3 — magnifying glass', 'Left click — hold focus, seal the jar'],
+    objective: 'Observe a bug trace through the lens, then catch it.'
   },
   {
-    title: 'Somewhere to start',
-    copy: 'Grayson wants one fish for the record. Your commission is tracked in the left rail — follow it, and the rest of the field introduces itself as you go.',
-    keys: ['E — talk to people', '⛁ — save records', 'M — mute audio']
+    gate: 'zone-zoo',
+    title: 'The showcase',
+    copy: 'The conservatory keeps its living collection behind glass and fences, and the staff walk their own rounds. Open the journal any time to see what is out right now.',
+    keys: ['E — car', 'J — field journal'],
+    objective: 'Drive to the Conservatory Zoo.'
+  },
+  {
+    gate: 'cleaned',
+    title: 'Habitat care',
+    copy: 'Every enclosure has a caretaker gate on the path side — the public stays out, you get in. A clean habitat is what keeps the collection healthy.',
+    keys: ['E — caretaker gate', 'Left click — sweep the marked spots'],
+    objective: 'Clean one enclosure through its caretaker gate.'
+  },
+  {
+    gate: 'zone-lake',
+    title: 'The lake road',
+    copy: 'One more drive, and the longest: the road to Jenkins Lake bends through the woods, and Captain Mark holds the gate at the far end. Grayson takes the season from here.',
+    keys: ['E — car', 'Mouse — your view rides with the car'],
+    objective: 'Drive to Jenkins Lake and finish the first day.'
   }
 ];
 
+// Tools unlock with their lesson, so the kit is met one piece at a time.
+const ONBOARDING_TOOL_UNLOCK = { rod: 3, net: 4, magnifier: 5, food: 4 };
+
 function onboardingActive() {
-  return Number(save.onboardingStep || 0) < ONBOARDING_STEPS.length;
+  return Number(save.onboardingStep || 0) < ONBOARDING_LESSONS.length;
 }
+
+function onboardingLesson() {
+  if (!onboardingActive()) return null;
+  return ONBOARDING_LESSONS[Number(save.onboardingStep || 0)];
+}
+
+function toolUnlocked(tool) {
+  const unlock = ONBOARDING_TOOL_UNLOCK[tool] ?? 0;
+  return !onboardingActive() || Number(save.onboardingStep || 0) >= unlock;
+}
+
+// One world event against the current lesson. Only the lesson being taught
+// answers, so the gates can be called liberally from every catch, purchase
+// and arrival without order bookkeeping.
+function onboardingGate(name) {
+  const lesson = onboardingLesson();
+  if (!lesson || lesson.gate !== name) return;
+  advanceOnboarding();
+}
+
+// The destinations the tour offers: one new place per lesson, visited places
+// open so the player can restock on the way.
+function onboardingTravelZones() {
+  if (!onboardingActive()) return ZONE_ORDER;
+  const step = Number(save.onboardingStep || 0);
+  const zones = ['forest'];
+  if (step >= 1) zones.push('store');
+  if (step >= 6) zones.push('zoo');
+  if (step >= 8) zones.push('lake');
+  return zones;
+}
+
+let onboardingWalkFrom = null;
 
 function renderOnboarding() {
   if (!dom.onboarding) return;
@@ -9045,36 +9181,57 @@ function renderOnboarding() {
     return;
   }
   const index = Number(save.onboardingStep || 0);
-  const step = ONBOARDING_STEPS[index];
+  const lesson = ONBOARDING_LESSONS[index];
   dom.onboarding.classList.remove('is-hidden');
-  dom.onboardingTitle.textContent = step.title;
-  dom.onboardingCopy.textContent = step.copy;
-  dom.onboardingKeys.replaceChildren(...step.keys.map((key) => {
+  dom.onboardingTitle.textContent = lesson.title;
+  dom.onboardingCopy.textContent = lesson.copy;
+  dom.onboardingKeys.replaceChildren(...lesson.keys.map((key) => {
     const item = document.createElement('li');
     item.textContent = key;
     return item;
   }));
-  dom.onboardingStep.textContent = `STEP ${index + 1} OF ${ONBOARDING_STEPS.length}`;
-  dom.onboardingNext.textContent = index === ONBOARDING_STEPS.length - 1 ? 'INTO THE FIELD' : 'NEXT';
+  dom.onboardingStep.textContent = `STEP ${index + 1} OF ${ONBOARDING_LESSONS.length}`;
+  if (dom.onboardingObjective) dom.onboardingObjective.textContent = lesson.objective;
 }
 
 function advanceOnboarding(step = 1) {
-  save.onboardingStep = Math.min(ONBOARDING_STEPS.length, Number(save.onboardingStep || 0) + step);
-  playCue('ui');
+  const wasActive = onboardingActive();
+  save.onboardingStep = Math.min(ONBOARDING_LESSONS.length, Number(save.onboardingStep || 0) + step);
   saveGame();
   renderOnboarding();
-  if (!onboardingActive()) setStatus(describeNextCommission());
+  if (wasActive && !onboardingActive()) {
+    // The tour is over: hand the field over properly.
+    playCue('success');
+    toast('First day complete. Every zone is open, and the commission chain takes it from here.', 'success');
+    setStatus(describeNextCommission());
+    checkCommissions();
+  } else if (wasActive) {
+    playCue('ui');
+    const lesson = onboardingLesson();
+    setStatus(lesson ? `Next: ${lesson.objective}` : describeNextCommission());
+  }
+  onboardingWalkFrom = null;
 }
 
 function skipOnboarding() {
-  save.onboardingStep = ONBOARDING_STEPS.length;
+  save.onboardingStep = ONBOARDING_LESSONS.length;
   playCue('ui');
   saveGame();
   renderOnboarding();
   setStatus(describeNextCommission());
+  checkCommissions();
 }
 
-if (dom.onboardingNext) dom.onboardingNext.addEventListener('click', () => { resumeAudio(); advanceOnboarding(); });
+if (dom.onboardingNext) dom.onboardingNext.addEventListener('click', () => {
+  // The card answers with the objective rather than skipping past it: the
+  // lesson only completes by doing the thing.
+  resumeAudio();
+  const lesson = onboardingLesson();
+  if (lesson) {
+    toast(lesson.objective, 'info');
+    setStatus(lesson.objective);
+  }
+});
 if (dom.onboardingSkip) dom.onboardingSkip.addEventListener('click', () => { resumeAudio(); skipOnboarding(); });
 
 function renderJournal() {
@@ -9211,6 +9368,7 @@ function applyPurchase(item) {
   save.supplies[item.key] = (save.supplies[item.key] || 0) + item.amount;
   saveGame();
   updateHUD();
+  onboardingGate('purchased');
   toast(`${item.label} added to the field kit. -${item.cost}¢`, 'success');
 }
 
@@ -9768,6 +9926,11 @@ function handleInteract() {
     return;
   }
   if (target?.type === 'car') {
+    const lesson = onboardingLesson();
+    if (lesson && lesson.gate === 'moved') {
+      toast('Walk the lot first — the tour starts on your feet. Then the car will take you anywhere.', 'warning');
+      return;
+    }
     openTravel();
     return;
   }
@@ -10378,7 +10541,14 @@ if (new URLSearchParams(window.location.search).has('probe')) {
       get: () => save.survey,
       report: (event, key) => reportSurvey(event, key)
     },
-    onboarding: { active: () => onboardingActive(), advance: () => advanceOnboarding(), skip: () => skipOnboarding() },
+    onboarding: {
+      active: () => onboardingActive(),
+      step: () => Number(save.onboardingStep || 0),
+      lesson: () => onboardingLesson()?.gate ?? null,
+      gate: (name) => onboardingGate(name),
+      advance: () => advanceOnboarding(),
+      skip: () => skipOnboarding()
+    },
     gameClock: () => elapsed,
     // Steps the wildlife simulation without rendering. Software rendering runs
     // this world at about two frames a second, so anything measured per

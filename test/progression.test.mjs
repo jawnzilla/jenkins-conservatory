@@ -24,13 +24,13 @@ if (start.tracked !== 'first-cast') failures.push(`fresh record tracks ${start.t
 if (start.open.length !== 1) failures.push(`fresh record has ${start.open.length} open commissions, expected 1`);
 if (!start.onboarding) failures.push('walkthrough is not showing on a fresh record');
 
-// The card has to actually render what the tracker reports.
-const cardVisible = await page.evaluate(() => {
+// The walkthrough owns the first day: the commission card waits for its
+// handover and stays hidden until the tour is done.
+const cardDuringTour = await page.evaluate(() => {
   const card = document.querySelector('#commission-card');
   return { hidden: card.classList.contains('is-hidden'), text: card.textContent.replace(/\s+/g, ' ').trim() };
 });
-if (cardVisible.hidden) failures.push('commission card is hidden on a fresh record');
-if (!cardVisible.text.includes('Grayson')) failures.push(`commission card does not name the giver: ${cardVisible.text}`);
+if (!cardDuringTour.hidden) failures.push('commission card is visible during the walkthrough; it should wait for the handover');
 
 // Meeting the goal must pay out and advance the chain.
 const afterFish = await page.evaluate(() => {
@@ -75,14 +75,34 @@ const clickThrough = await page.evaluate(() => {
 if (clickThrough.panel !== 'none') failures.push(`onboarding panel takes pointer events (${clickThrough.panel}); it would block entering field mode`);
 if (clickThrough.next !== 'auto') failures.push(`onboarding next button cannot be clicked (${clickThrough.next})`);
 
-// And the buttons still have to work at a small window size.
+// And the buttons still have to work at a small window size. The walkthrough
+// is forced now: clicking the card answers with the objective and does not
+// advance — only walking the lot does.
 await page.setViewportSize({ width: 480, height: 320 });
 await page.waitForTimeout(200);
 await page.click('#onboarding-next');
-const advanced = await page.evaluate(() => window.__conservatoryProbe.save.onboardingStep);
-if (advanced < 1) failures.push('onboarding did not advance when its button was clicked at 480x320');
+const afterClick = await page.evaluate(() => ({
+  step: window.__conservatoryProbe.save.onboardingStep,
+  objective: document.querySelector('#onboarding-objective').textContent
+}));
+if (afterClick.step !== 0) failures.push(`onboarding advanced on a click (${afterClick.step}); the forced tour only advances by doing`);
+if (!afterClick.objective.toLowerCase().includes('walk')) failures.push(`next button does not state the objective: ${afterClick.objective}`);
 await page.click('canvas');
 await page.waitForTimeout(200);
+
+// The move gate answers real input: hold W until the tour's ten metres are
+// walked, on the game clock, not wall time.
+await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', key: 'w', bubbles: true })));
+await page.waitForFunction(() => window.__conservatoryProbe.save.onboardingStep >= 1, null, { timeout: 30000 });
+await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', key: 'w', bubbles: true })));
+const walked = await page.evaluate(() => ({ step: window.__conservatoryProbe.save.onboardingStep, gate: window.__conservatoryProbe.onboarding.lesson() }));
+if (walked.step !== 1 || walked.gate !== 'zone-store') failures.push(`walking advanced to step ${walked.step} (gate ${walked.gate}); expected step 1, zone-store`);
+
+// The tour can always be left: skip unlocks everything at once, and the save
+// round-trip below proves the completion persists.
+await page.evaluate(() => window.__conservatoryProbe.onboarding.skip());
+const skipped = await page.evaluate(() => window.__conservatoryProbe.onboarding.active());
+if (skipped) failures.push('skip did not end the tour');
 
 // The walkthrough has to finish and stay finished across a save round-trip.
 const walkthrough = await page.evaluate(() => {
